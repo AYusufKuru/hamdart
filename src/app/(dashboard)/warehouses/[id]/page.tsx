@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
@@ -26,11 +26,18 @@ import {
   getWarehouseName,
   warehouseTypeLabels,
   WAREHOUSE_IDS,
+  type WarehouseStockItem,
 } from "@/data/warehouses";
-import { cn, formatDate, formatNumber } from "@/lib/utils";
+import {
+  getStockCategoriesForWarehouse,
+  getStockItemsForWarehouse,
+} from "@/lib/stock-store";
+import { StockFormSheet } from "@/components/stock/stock-form-sheet";
+import { formatDate, formatNumber } from "@/lib/utils";
 import {
   ArrowLeft,
   ArrowRightLeft,
+  Plus,
   Droplets,
   MapPin,
   Thermometer,
@@ -50,13 +57,28 @@ export default function WarehouseDetailPage({
 }) {
   const { id } = use(params);
   const warehouse = getWarehouse(id);
+  const [items, setItems] = useState<WarehouseStockItem[]>(() =>
+    getStockByWarehouse(id)
+  );
+  const [categories, setCategories] = useState<string[]>(() =>
+    getCategoriesForWarehouse(id)
+  );
+  const [formOpen, setFormOpen] = useState(false);
+
+  const refreshStock = useCallback(() => {
+    setItems(getStockItemsForWarehouse(id));
+    setCategories(getStockCategoriesForWarehouse(id));
+  }, [id]);
+
+  useEffect(() => {
+    refreshStock();
+  }, [refreshStock]);
 
   if (!warehouse) notFound();
 
-  const items = getStockByWarehouse(id);
-  const categories = getCategoriesForWarehouse(id);
   const transfers = getTransfersForWarehouse(id);
-  const config = warehouseTypeConfig[warehouse.type];
+  const config =
+    warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
   const Icon = config.icon;
   const utilization = Math.round((warehouse.used / warehouse.capacity) * 100);
 
@@ -96,6 +118,15 @@ export default function WarehouseDetailPage({
         badgeClassName={config.badgeClassName}
         title={warehouse.name}
         description={warehouse.description}
+        actions={
+          <Button
+            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            onClick={() => setFormOpen(true)}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Stok Girişi
+          </Button>
+        }
       />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -284,6 +315,13 @@ export default function WarehouseDetailPage({
       )}
 
       <div className="pb-10" />
+
+      <StockFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        defaultWarehouseId={id}
+        onCreated={refreshStock}
+      />
     </div>
   );
 }

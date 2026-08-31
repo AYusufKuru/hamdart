@@ -1,8 +1,15 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { recentActivities } from "@/data/mock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
+import { getAllOrders } from "@/lib/order-store";
+import { getAllProductionBatches } from "@/lib/production-store";
+import { getAllLabExperiments } from "@/lib/lab-store";
+import { toDisplayStockItems } from "@/lib/stock-store";
+import { getAllRawMaterialOrders } from "@/lib/raw-material-order-store";
 import { AlertTriangle, Factory, FlaskConical, ShoppingCart, Warehouse } from "lucide-react";
 
 const typeConfig = {
@@ -13,19 +20,122 @@ const typeConfig = {
   warehouse: { icon: Warehouse, color: "text-violet-600 bg-violet-500/10" },
 };
 
+type Activity = {
+  id: string;
+  time: string;
+  message: string;
+  type: keyof typeof typeConfig;
+  sort: number;
+  href: string;
+};
+
+const seedHref: Record<Activity["type"], string> = {
+  production: "/factory?tab=batches",
+  order: "/orders",
+  alert: "/stock",
+  lab: "/rd-lab?tab=experiments",
+  warehouse: "/raw-material-orders",
+};
+
+function buildLiveActivities(): Activity[] {
+  const items: Activity[] = [];
+
+  for (const o of getAllOrders().slice(0, 3)) {
+    items.push({
+      id: `ord-${o.id}`,
+      time: formatDate(o.orderDate),
+      message: `${o.orderNo} — ${o.customer}`,
+      type: "order",
+      sort: new Date(o.orderDate).getTime(),
+      href: `/orders/${o.id}`,
+    });
+  }
+
+  const batch = getAllProductionBatches()[0];
+  if (batch) {
+    items.push({
+      id: `bat-${batch.id}`,
+      time: formatDate(batch.startDate),
+      message: `${batch.batchNo} · ${batch.product} (${batch.line})`,
+      type: "production",
+      sort: new Date(batch.startDate).getTime(),
+      href: "/factory?tab=batches",
+    });
+  }
+
+  const exp = getAllLabExperiments()[0];
+  if (exp) {
+    items.push({
+      id: `exp-${exp.id}`,
+      time: formatDate(exp.startDate),
+      message: `${exp.code} — ${exp.title}`,
+      type: "lab",
+      sort: new Date(exp.startDate).getTime(),
+      href: "/rd-lab?tab=experiments",
+    });
+  }
+
+  const alert = toDisplayStockItems().find(
+    (i) => i.status === "critical" || i.status === "low"
+  );
+  if (alert) {
+    items.push({
+      id: `stk-${alert.id}`,
+      time: "Stok",
+      message: `${alert.sku} stok ${alert.status === "critical" ? "kritik" : "düşük"} — ${alert.warehouse}`,
+      type: "alert",
+      sort: Date.now() - 1,
+      href: alert.warehouseId ? `/warehouses/${alert.warehouseId}` : "/stock",
+    });
+  }
+
+  const rmo = getAllRawMaterialOrders().find((o) => o.status === "to_order");
+  if (rmo) {
+    items.push({
+      id: `rmo-${rmo.id}`,
+      time: formatDate(rmo.orderDate),
+      message: `${rmo.orderNo} sipariş verilecek — ${rmo.materialName}`,
+      type: "warehouse",
+      sort: new Date(rmo.orderDate).getTime(),
+      href: `/raw-material-orders/${rmo.id}`,
+    });
+  }
+
+  return items.sort((a, b) => b.sort - a.sort).slice(0, 5);
+}
+
 export function RecentActivity() {
+  const [activities, setActivities] = useState<Activity[]>(() =>
+    recentActivities.map((a) => {
+      const type = a.type as Activity["type"];
+      return {
+        id: String(a.id),
+        time: a.time,
+        message: a.message,
+        type,
+        sort: 0,
+        href: seedHref[type] ?? "/dashboard",
+      };
+    })
+  );
+
+  useEffect(() => {
+    setActivities(buildLiveActivities());
+  }, []);
+
   return (
     <Card className="glass-card border-none">
       <CardHeader>
         <CardTitle>Son Aktiviteler</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {recentActivities.map((activity) => {
-          const config = typeConfig[activity.type as keyof typeof typeConfig];
+        {activities.map((activity) => {
+          const config = typeConfig[activity.type] ?? typeConfig.order;
           const Icon = config.icon;
           return (
-            <div
+            <Link
               key={activity.id}
+              href={activity.href}
               className="flex items-start gap-3 p-3 rounded-xl hover:bg-muted/30 transition-colors"
             >
               <div className={cn("p-2 rounded-lg shrink-0", config.color)}>
@@ -35,7 +145,7 @@ export function RecentActivity() {
                 <p className="text-sm font-medium leading-snug">{activity.message}</p>
                 <p className="text-[10px] text-muted-foreground mt-1 font-mono">{activity.time}</p>
               </div>
-            </div>
+            </Link>
           );
         })}
       </CardContent>

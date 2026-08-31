@@ -135,7 +135,10 @@ export function WarehouseStockTable({
           </TableHeader>
           <TableBody>
             {paginated.map((item) => {
-              const st = statusMap[item.status];
+              const st = statusMap[item.status] ?? {
+                label: item.status,
+                variant: "secondary" as const,
+              };
               return (
                 <TableRow key={item.id}>
                   <TableCell className="font-mono text-xs font-bold">

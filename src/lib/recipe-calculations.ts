@@ -1,5 +1,6 @@
 import type { Order } from "@/data/mock";
-import { getRawMaterial } from "@/data/raw-materials";
+import type { RawMaterial } from "@/data/raw-materials";
+import { getRawMaterialById } from "@/lib/raw-material-store";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
 
 export interface MaterialLineBreakdown {
@@ -58,16 +59,25 @@ export function getOrderRevenue(order: Order): number {
   return order.value;
 }
 
+function resolveMaterial(
+  id: string,
+  materials?: RawMaterial[]
+): RawMaterial | undefined {
+  if (materials) return materials.find((m) => m.id === id);
+  return getRawMaterialById(id);
+}
+
 export function calculateRecipeTotals(
   recipe: Recipe,
   orderQuantity: number,
   order: Order | null,
-  allOrders: Order[]
+  allOrders: Order[],
+  materials?: RawMaterial[]
 ): RecipeTotals {
   const lines = recipe.lines.map((line) =>
-    breakdownLine(line, orderQuantity)
+    breakdownLine(line, orderQuantity, materials)
   );
-  const extras = recipe.extras.map((extra) => breakdownExtra(extra));
+  const extras = recipe.extras.map((extra) => breakdownExtra(extra, materials));
 
   const totalCost =
     lines.reduce((s, l) => s + l.lineCost, 0) +
@@ -99,9 +109,10 @@ export function calculateRecipeTotals(
 
 function breakdownLine(
   line: RecipeLine,
-  orderQuantity: number
+  orderQuantity: number,
+  materials?: RawMaterial[]
 ): MaterialLineBreakdown {
-  const material = getRawMaterial(line.materialId);
+  const material = resolveMaterial(line.materialId, materials);
   const totalQuantity = line.quantityPerUnit * orderQuantity;
   const unitCost = material?.unitCost ?? 0;
   const lineCost = totalQuantity * unitCost;
@@ -117,8 +128,11 @@ function breakdownLine(
   };
 }
 
-function breakdownExtra(extra: RecipeExtra): ExtraLineBreakdown {
-  const material = getRawMaterial(extra.materialId);
+function breakdownExtra(
+  extra: RecipeExtra,
+  materials?: RawMaterial[]
+): ExtraLineBreakdown {
+  const material = resolveMaterial(extra.materialId, materials);
   const unitCost = material?.unitCost ?? 0;
 
   return {

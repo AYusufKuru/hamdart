@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,15 +20,12 @@ import {
 import {
   rawMaterialOrderStatusConfig,
   rawMaterialOrderSourceLabels,
+  seedRawMaterialOrders,
   type RawMaterialOrder,
   type RawMaterialOrderStatus,
 } from "@/data/raw-material-orders";
-import {
-  createManualRawMaterialOrder,
-  getAllRawMaterialOrders,
-  syncReplenishmentOrders,
-} from "@/lib/raw-material-order-store";
-import { getWarehouseName } from "@/data/warehouses";
+import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { RawMaterialOrderFormSheet } from "@/components/raw-material-orders/raw-material-order-form-sheet";
 import { formatNumber } from "@/lib/utils";
 import {
   AlertCircle,
@@ -38,26 +36,17 @@ import {
   Truck,
   Warehouse,
 } from "lucide-react";
-import { toast } from "sonner";
 
 function loadOrders() {
   return syncReplenishmentOrders();
 }
 
 export default function RawMaterialOrdersPage() {
-  const [orders, setOrders] = useState<RawMaterialOrder[]>([]);
+  const router = useRouter();
+  const [orders, setOrders] = useState<RawMaterialOrder[]>(seedRawMaterialOrders);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    materialName: "",
-    sku: "",
-    supplier: "",
-    quantity: "",
-    unit: "kg",
-    unitPrice: "",
-    sourceNote: "",
-  });
+  const [formOpen, setFormOpen] = useState(false);
 
   const refresh = useCallback(() => {
     setOrders(loadOrders());
@@ -81,32 +70,6 @@ export default function RawMaterialOrdersPage() {
 
   const toOrderCount = orders.filter((o) => o.status === "to_order").length;
 
-  function handleCreateManual(e: React.FormEvent) {
-    e.preventDefault();
-    createManualRawMaterialOrder({
-      materialName: form.materialName,
-      sku: form.sku,
-      supplier: form.supplier,
-      quantity: parseFloat(form.quantity) || 0,
-      unit: form.unit,
-      unitPrice: parseFloat(form.unitPrice) || 0,
-      source: "manual",
-      sourceNote: form.sourceNote || undefined,
-    });
-    toast.success("Talep oluşturuldu — Sipariş Verilecek listesine düştü");
-    setForm({
-      materialName: "",
-      sku: "",
-      supplier: "",
-      quantity: "",
-      unit: "kg",
-      unitPrice: "",
-      sourceNote: "",
-    });
-    setShowForm(false);
-    refresh();
-  }
-
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
       <PageHeader
@@ -117,7 +80,7 @@ export default function RawMaterialOrdersPage() {
         actions={
           <Button
             className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => setFormOpen(true)}
           >
             <Plus className="w-4 h-4 mr-2" />
             Manuel Talep
@@ -165,94 +128,6 @@ export default function RawMaterialOrdersPage() {
           </ul>
         </CardContent>
       </Card>
-
-      {showForm && (
-        <Card className="glass-card border-none">
-          <CardContent className="p-6">
-            <form
-              onSubmit={handleCreateManual}
-              className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
-            >
-              <Input
-                placeholder="Malzeme adı *"
-                required
-                value={form.materialName}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, materialName: e.target.value }))
-                }
-                className="rounded-xl"
-              />
-              <Input
-                placeholder="SKU *"
-                required
-                value={form.sku}
-                onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
-                className="rounded-xl"
-              />
-              <Input
-                placeholder="Tedarikçi *"
-                required
-                value={form.supplier}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, supplier: e.target.value }))
-                }
-                className="rounded-xl"
-              />
-              <Input
-                type="number"
-                placeholder="Miktar *"
-                required
-                min={0}
-                value={form.quantity}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, quantity: e.target.value }))
-                }
-                className="rounded-xl"
-              />
-              <Input
-                placeholder="Birim (kg, adet...)"
-                value={form.unit}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, unit: e.target.value }))
-                }
-                className="rounded-xl"
-              />
-              <Input
-                type="number"
-                placeholder="Birim fiyat (₺) *"
-                required
-                min={0}
-                value={form.unitPrice}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, unitPrice: e.target.value }))
-                }
-                className="rounded-xl"
-              />
-              <Input
-                placeholder="Açıklama (isteğe bağlı)"
-                className="rounded-xl md:col-span-2 lg:col-span-3"
-                value={form.sourceNote}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, sourceNote: e.target.value }))
-                }
-              />
-              <div className="md:col-span-2 lg:col-span-3 flex gap-2">
-                <Button type="submit" className="rounded-xl">
-                  Talebi Oluştur
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => setShowForm(false)}
-                >
-                  İptal
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
 
       <div className="grid gap-4 md:grid-cols-4">
         {[
@@ -322,11 +197,14 @@ export default function RawMaterialOrdersPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((order) => {
-                const st = rawMaterialOrderStatusConfig[order.status];
+                const st =
+                  rawMaterialOrderStatusConfig[order.status] ??
+                  rawMaterialOrderStatusConfig.to_order;
                 return (
                   <TableRow
                     key={order.id}
                     className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => router.push(`/raw-material-orders/${order.id}`)}
                   >
                     <TableCell className="font-mono font-bold">
                       <Link
@@ -344,7 +222,7 @@ export default function RawMaterialOrdersPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className="text-[10px]">
-                        {rawMaterialOrderSourceLabels[order.source]}
+                        {rawMaterialOrderSourceLabels[order.source] ?? "—"}
                       </Badge>
                       {order.sourceNote && (
                         <p className="text-[10px] text-muted-foreground mt-1 max-w-[160px] line-clamp-2">
@@ -378,6 +256,15 @@ export default function RawMaterialOrdersPage() {
       </Card>
 
       <div className="pb-10" />
+
+      <RawMaterialOrderFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={(order) => {
+          refresh();
+          router.push(`/raw-material-orders/${order.id}`);
+        }}
+      />
     </div>
   );
 }

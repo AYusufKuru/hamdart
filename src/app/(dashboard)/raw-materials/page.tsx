@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,9 +16,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { rawMaterials } from "@/data/raw-materials";
+import { rawMaterials as seedMaterials, type RawMaterial } from "@/data/raw-materials";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
+import { getAllRawMaterialOrders } from "@/lib/raw-material-order-store";
+import { RawMaterialFormSheet } from "@/components/raw-materials/raw-material-form-sheet";
 import { formatMoney } from "@/lib/recipe-calculations";
-import { Beaker, Search } from "lucide-react";
+import { Beaker, Plus, Search } from "lucide-react";
 
 const categoryVariant = {
   "Ham Madde": "info" as const,
@@ -27,7 +31,16 @@ const categoryVariant = {
 };
 
 export default function RawMaterialsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>(seedMaterials);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const refresh = () => setRawMaterials(getAllRawMaterials());
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const filtered = rawMaterials.filter(
     (m) =>
@@ -43,9 +56,18 @@ export default function RawMaterialsPage() {
         title="Hammadde Tablosu"
         description="Reçete maliyet hesapları bu tablodaki birim maliyetlerden çekilir. Tedarik süreci için Hammadde Siparişleri sayfasına gidin."
         actions={
-          <Button className="rounded-2xl" variant="outline" asChild>
-            <Link href="/raw-material-orders">Hammadde Siparişleri</Link>
-          </Button>
+          <>
+            <Button className="rounded-2xl" variant="outline" asChild>
+              <Link href="/raw-material-orders">Hammadde Siparişleri</Link>
+            </Button>
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setFormOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Hammadde Ekle
+            </Button>
+          </>
         }
       />
 
@@ -73,11 +95,24 @@ export default function RawMaterialsPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((m) => (
-                <TableRow key={m.id}>
+                <TableRow
+                  key={m.id}
+                  className="cursor-pointer hover:bg-muted/40"
+                  onClick={() => {
+                    const rmo = getAllRawMaterialOrders().find(
+                      (o) => o.sku.toLowerCase() === m.sku.toLowerCase()
+                    );
+                    router.push(
+                      rmo
+                        ? `/raw-material-orders/${rmo.id}`
+                        : "/raw-material-orders"
+                    );
+                  }}
+                >
                   <TableCell className="font-mono text-sm">{m.sku}</TableCell>
                   <TableCell className="font-medium">{m.name}</TableCell>
                   <TableCell>
-                    <Badge variant={categoryVariant[m.category]}>
+                    <Badge variant={categoryVariant[m.category] ?? "secondary"}>
                       {m.category}
                     </Badge>
                   </TableCell>
@@ -100,6 +135,12 @@ export default function RawMaterialsPage() {
       </Card>
 
       <div className="pb-10" />
+
+      <RawMaterialFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={refresh}
+      />
     </div>
   );
 }

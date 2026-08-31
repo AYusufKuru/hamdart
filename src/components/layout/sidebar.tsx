@@ -14,9 +14,11 @@ import {
   Beaker,
   Truck,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
+import { dashboardStats } from "@/data/mock";
+import { warehouses } from "@/data/warehouses";
 
-const sidebarSections = [
+export const sidebarSections = [
   {
     title: "Genel",
     items: [
@@ -113,8 +115,17 @@ export function Sidebar() {
           <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
             GMP Uyumluluk
           </p>
-          <p className="text-2xl font-black text-emerald-600 mt-1">98.4%</p>
-          <p className="text-[10px] text-muted-foreground mt-1">Son denetim: 15 May 2026</p>
+          <p className="text-2xl font-black text-emerald-600 mt-1">
+            {dashboardStats.gmpCompliance}%
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Son denetim:{" "}
+            {formatDate(
+              [...warehouses].sort((a, b) =>
+                b.lastAudit.localeCompare(a.lastAudit)
+              )[0]?.lastAudit ?? ""
+            )}
+          </p>
         </div>
       </div>
     </div>

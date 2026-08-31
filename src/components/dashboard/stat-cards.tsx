@@ -1,87 +1,145 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Factory,
   Package,
   ShoppingCart,
   FlaskConical,
-  ArrowUpRight,
   ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn, formatNumber } from "@/lib/utils";
-import { dashboardStats } from "@/data/mock";
+import {
+  dashboardStats,
+  labExperiments as seedExperiments,
+  orders as seedOrders,
+  productionBatches as seedBatches,
+  productionLines as seedLines,
+} from "@/data/mock";
+import { warehouses, warehouseStockItems as seedStock } from "@/data/warehouses";
+import { getAllOrders } from "@/lib/order-store";
+import {
+  getAllProductionBatches,
+  getAllProductionLines,
+} from "@/lib/production-store";
+import { getAllLabExperiments } from "@/lib/lab-store";
+import { toDisplayStockItems } from "@/lib/stock-store";
 
-const statItems = [
-  {
-    label: "Günlük Üretim",
-    value: formatNumber(dashboardStats.dailyProduction),
-    unit: "adet",
-    description: `Hedef: ${formatNumber(dashboardStats.productionTarget)}`,
-    trend: "+%3.2",
-    trendDir: "up" as const,
-    icon: Factory,
-    color: "text-indigo-500",
-    bg: "bg-indigo-500/10",
-  },
-  {
-    label: "Aktif Batch",
-    value: String(dashboardStats.activeBatches),
-    unit: "batch",
-    description: "6 üretim hattında",
-    trend: "Canlı",
-    trendDir: "neutral" as const,
-    icon: Package,
-    color: "text-blue-500",
-    bg: "bg-blue-500/10",
-  },
-  {
-    label: "Bekleyen Sipariş",
-    value: String(dashboardStats.pendingOrders),
-    unit: "sipariş",
-    description: "7 acil öncelikli",
-    trend: "+5 bugün",
-    trendDir: "up" as const,
-    icon: ShoppingCart,
-    color: "text-violet-500",
-    bg: "bg-violet-500/10",
-  },
-  {
-    label: "Ar-Ge Deneyleri",
-    value: String(dashboardStats.labExperiments),
-    unit: "proje",
-    description: "4 aktif test",
-    trend: "2 onay bekliyor",
-    trendDir: "neutral" as const,
-    icon: FlaskConical,
-    color: "text-emerald-500",
-    bg: "bg-emerald-500/10",
-  },
-];
+function lineTotals(lines: typeof seedLines) {
+  return {
+    dailyProduction: lines.reduce((s, l) => s + l.outputToday, 0),
+    productionTarget: lines.reduce((s, l) => s + l.targetToday, 0),
+    lines: lines.length,
+  };
+}
+
+function countsFrom(
+  batches: typeof seedBatches,
+  orderList: typeof seedOrders,
+  experiments: typeof seedExperiments,
+  lines: typeof seedLines
+) {
+  const lt = lineTotals(lines);
+  return {
+    ...lt,
+    activeBatches: batches.filter((b) => b.status === "in_progress").length,
+    pendingOrders: orderList.filter((o) => o.status === "pending").length,
+    labExperiments: experiments.length,
+    urgentOrders: orderList.filter(
+      (o) =>
+        o.priority === "urgent" &&
+        o.status !== "delivered" &&
+        o.status !== "cancelled"
+    ).length,
+    activeLab: experiments.filter(
+      (e) => e.status === "running" || e.status === "analysis"
+    ).length,
+  };
+}
+
+const seedWarehouseUtil = Math.round(
+  (warehouses.reduce((s, w) => s + w.used, 0) /
+    warehouses.reduce((s, w) => s + w.capacity, 0)) *
+    100
+);
 
 export function StatCards() {
+  const [live, setLive] = useState(() =>
+    countsFrom(seedBatches, seedOrders, seedExperiments, seedLines)
+  );
+
+  useEffect(() => {
+    setLive(
+      countsFrom(
+        getAllProductionBatches(),
+        getAllOrders(),
+        getAllLabExperiments(),
+        getAllProductionLines()
+      )
+    );
+  }, []);
+
+  const statItems = [
+    {
+      label: "Günlük Üretim",
+      value: formatNumber(live.dailyProduction),
+      unit: "adet",
+      description: `Hedef: ${formatNumber(live.productionTarget)}`,
+      trend: "Hat kartları",
+      href: "/factory",
+      icon: Factory,
+      color: "text-indigo-500",
+      bg: "bg-indigo-500/10",
+    },
+    {
+      label: "Aktif Batch",
+      value: String(live.activeBatches),
+      unit: "batch",
+      description: `${live.lines} üretim hattında`,
+      trend: "Canlı",
+      href: "/factory?tab=batches",
+      icon: Package,
+      color: "text-blue-500",
+      bg: "bg-blue-500/10",
+    },
+    {
+      label: "Bekleyen Sipariş",
+      value: String(live.pendingOrders),
+      unit: "sipariş",
+      description: `${live.urgentOrders} acil öncelikli`,
+      trend: "Canlı",
+      href: "/orders",
+      icon: ShoppingCart,
+      color: "text-violet-500",
+      bg: "bg-violet-500/10",
+    },
+    {
+      label: "Ar-Ge Deneyleri",
+      value: String(live.labExperiments),
+      unit: "proje",
+      description: `${live.activeLab} aktif test`,
+      trend: "Canlı",
+      href: "/rd-lab?tab=experiments",
+      icon: FlaskConical,
+      color: "text-emerald-500",
+      bg: "bg-emerald-500/10",
+    },
+  ];
+
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
       {statItems.map((stat) => (
-        <Card
-          key={stat.label}
-          className="glass-card border-none hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden relative group"
-        >
+        <Link key={stat.label} href={stat.href} className="block">
+          <Card className="glass-card border-none hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden relative group h-full">
           <CardContent className="p-7">
             <div className="flex items-center justify-between mb-4">
               <div className={cn("p-3 rounded-2xl", stat.bg)}>
                 <stat.icon className={cn("w-6 h-6", stat.color)} />
               </div>
-              <div
-                className={cn(
-                  "flex items-center px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                  stat.trendDir === "up"
-                    ? "bg-emerald-500/10 text-emerald-600"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
+              <div className="flex items-center px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-muted text-muted-foreground">
                 {stat.trend}
-                {stat.trendDir === "up" && <ArrowUpRight className="ml-0.5 w-3 h-3" />}
               </div>
             </div>
             <h3 className="text-xs font-bold text-muted-foreground/80 uppercase tracking-widest mb-2">
@@ -96,14 +154,36 @@ export function StatCards() {
             </p>
           </CardContent>
         </Card>
+        </Link>
       ))}
     </div>
   );
 }
 
 export function ComplianceCard() {
+  const [meta, setMeta] = useState({
+    alerts: seedStock.filter(
+      (i) =>
+        i.status === "low" ||
+        i.status === "critical" ||
+        i.status === "expiring"
+    ).length,
+    utilization: seedWarehouseUtil,
+  });
+
+  useEffect(() => {
+    const alerts = toDisplayStockItems().filter(
+      (i) =>
+        i.status === "low" ||
+        i.status === "critical" ||
+        i.status === "expiring"
+    ).length;
+    setMeta({ alerts, utilization: seedWarehouseUtil });
+  }, []);
+
   return (
-    <Card className="glass-card border-none">
+    <Link href="/stock" className="block h-full">
+    <Card className="glass-card border-none h-full hover:shadow-lg transition-shadow">
       <CardContent className="p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2.5 rounded-xl bg-emerald-500/10">
@@ -122,9 +202,10 @@ export function ComplianceCard() {
           />
         </div>
         <p className="text-xs text-muted-foreground mt-3">
-          Depo kullanım: %{dashboardStats.warehouseUtilization} · Stok uyarı: {dashboardStats.stockAlerts}
+          Depo kullanım: %{meta.utilization} · Stok uyarı: {meta.alerts}
         </p>
       </CardContent>
     </Card>
+    </Link>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Order } from "@/data/mock";
+import type { RawMaterial } from "@/data/raw-materials";
 import type { Recipe } from "@/data/recipes";
 import {
   calculateRecipeTotals,
@@ -17,6 +18,7 @@ interface RecipeDetailPanelProps {
   recipe: Recipe;
   order: Order | undefined;
   allOrders: Order[];
+  materials?: RawMaterial[];
   index: number;
   total: number;
   onPrevious: () => void;
@@ -27,13 +29,20 @@ export function RecipeDetailPanel({
   recipe,
   order,
   allOrders,
+  materials,
   index,
   total,
   onPrevious,
   onNext,
 }: RecipeDetailPanelProps) {
   const totals = order
-    ? calculateRecipeTotals(recipe, order.quantity, order, allOrders)
+    ? calculateRecipeTotals(
+        recipe,
+        order.quantity,
+        order,
+        allOrders,
+        materials
+      )
     : null;
 
   return (
@@ -183,7 +192,7 @@ export function RecipeDetailPanel({
         )}
 
         <p className="text-[10px] text-muted-foreground">
-          Oluşturulma: {formatDate(recipe.createdAt.slice(0, 10))}
+          Oluşturulma: {formatDate(recipe.createdAt)}
         </p>
       </div>
 

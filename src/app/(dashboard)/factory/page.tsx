@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +16,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { productionLines, productionBatches } from "@/data/mock";
+import {
+  productionLines as seedLines,
+  productionBatches as seedBatches,
+  type ProductionBatch,
+  type ProductionLine,
+} from "@/data/mock";
+import {
+  getAllProductionBatches,
+  getAllProductionLines,
+} from "@/lib/production-store";
+import { BatchFormSheet } from "@/components/factory/batch-form-sheet";
+import { LineSettingsSheet } from "@/components/factory/line-settings-sheet";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -42,6 +55,28 @@ const batchStatusMap = {
 };
 
 export default function FactoryPage() {
+  const searchParams = useSearchParams();
+  const [productionLines, setProductionLines] =
+    useState<ProductionLine[]>(seedLines);
+  const [productionBatches, setProductionBatches] =
+    useState<ProductionBatch[]>(seedBatches);
+  const [formOpen, setFormOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsLineId, setSettingsLineId] = useState<string | undefined>();
+  const [tab, setTab] = useState("lines");
+
+  const refresh = () => {
+    setProductionLines(getAllProductionLines());
+    setProductionBatches(getAllProductionBatches());
+  };
+
+  useEffect(() => {
+    refresh();
+    const nextTab = searchParams.get("tab");
+    if (nextTab === "batches") setTab("batches");
+    if (nextTab === "lines") setTab("lines");
+  }, [searchParams]);
+
   const activeLines = productionLines.filter((l) => l.status === "active").length;
   const alertLines = productionLines.filter((l) => l.status === "alert").length;
 
@@ -54,11 +89,21 @@ export default function FactoryPage() {
         description="Üretim hatları, batch takibi, verimlilik ve GMP uyumlu operasyon yönetimi."
         actions={
           <>
-            <Button variant="outline" className="rounded-2xl">
+            <Button
+              variant="outline"
+              className="rounded-2xl"
+              onClick={() => {
+                setSettingsLineId(undefined);
+                setSettingsOpen(true);
+              }}
+            >
               <Settings className="w-4 h-4 mr-2" />
               Hat Ayarları
             </Button>
-            <Button className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setFormOpen(true)}
+            >
               <Factory className="w-4 h-4 mr-2" />
               Yeni Batch Başlat
             </Button>
@@ -89,7 +134,7 @@ export default function FactoryPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="lines">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="lines">Üretim Hatları</TabsTrigger>
           <TabsTrigger value="batches">Batch Takibi</TabsTrigger>
@@ -98,14 +143,21 @@ export default function FactoryPage() {
         <TabsContent value="lines">
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {productionLines.map((line) => {
-              const status = lineStatusMap[line.status];
+              const status = lineStatusMap[line.status] ?? lineStatusMap.idle;
               const StatusIcon = status.icon;
               const progress = line.targetToday
                 ? Math.min(100, Math.round((line.outputToday / line.targetToday) * 100))
                 : 0;
 
               return (
-                <Card key={line.id} className="glass-card border-none hover:shadow-lg transition-shadow">
+                <Card
+                  key={line.id}
+                  className="glass-card border-none hover:shadow-lg transition-shadow cursor-pointer"
+                  onClick={() => {
+                    setSettingsLineId(line.id);
+                    setSettingsOpen(true);
+                  }}
+                >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div>
@@ -183,7 +235,7 @@ export default function FactoryPage() {
                 </TableHeader>
                 <TableBody>
                   {productionBatches.map((batch) => {
-                    const status = batchStatusMap[batch.status];
+                    const status = batchStatusMap[batch.status] ?? batchStatusMap.planned;
                     return (
                       <TableRow key={batch.id}>
                         <TableCell className="font-mono font-bold">{batch.batchNo}</TableCell>
@@ -196,14 +248,22 @@ export default function FactoryPage() {
                           {formatNumber(batch.quantity)} {batch.unit}
                         </TableCell>
                         <TableCell>
-                          <span
-                            className={cn(
-                              "font-bold",
-                              batch.yield >= 95 ? "text-emerald-600" : batch.yield >= 90 ? "text-amber-600" : "text-rose-600"
-                            )}
-                          >
-                            %{batch.yield}
-                          </span>
+                          {batch.yield > 0 ? (
+                            <span
+                              className={cn(
+                                "font-bold",
+                                batch.yield >= 95
+                                  ? "text-emerald-600"
+                                  : batch.yield >= 90
+                                    ? "text-amber-600"
+                                    : "text-rose-600"
+                              )}
+                            >
+                              %{batch.yield}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           {batch.qcScore > 0 ? (
@@ -220,12 +280,35 @@ export default function FactoryPage() {
                   })}
                 </TableBody>
               </Table>
+              {productionBatches.length === 0 && (
+                <div className="py-16 text-center text-muted-foreground">
+                  <p className="font-medium">Kayıtlı batch yok</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
       <div className="pb-10" />
+
+      <BatchFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={() => {
+          refresh();
+          setTab("batches");
+        }}
+      />
+      <LineSettingsSheet
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        initialLineId={settingsLineId}
+        onSaved={() => {
+          refresh();
+          setTab("lines");
+        }}
+      />
     </div>
   );
 }

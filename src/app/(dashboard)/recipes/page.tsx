@@ -20,20 +20,27 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { orders } from "@/data/mock";
-import type { Recipe } from "@/data/recipes";
+import { orders as seedOrders, type Order } from "@/data/mock";
+import { getAllOrders } from "@/lib/order-store";
+import { rawMaterials as seedMaterials, type RawMaterial } from "@/data/raw-materials";
+import { seedRecipes, type Recipe } from "@/data/recipes";
 import { calculateRecipeTotals, formatMoney } from "@/lib/recipe-calculations";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
 import { getAllRecipes } from "@/lib/recipe-store";
-import { cn, formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { ClipboardList } from "lucide-react";
 
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>(seedRecipes);
+  const [orders, setOrders] = useState<Order[]>(seedOrders);
+  const [materials, setMaterials] = useState<RawMaterial[]>(seedMaterials);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     setRecipes(getAllRecipes());
+    setOrders(getAllOrders());
+    setMaterials(getAllRawMaterials());
   }, []);
 
   const selectedIndex = selectedId
@@ -102,7 +109,8 @@ export default function RecipesPage() {
                       recipe,
                       order.quantity,
                       order,
-                      orders
+                      orders,
+                      materials
                     )
                   : null;
                 const isSelected = drawerOpen && selectedId === recipe.id;
@@ -184,6 +192,7 @@ export default function RecipesPage() {
               recipe={selectedRecipe}
               order={selectedOrder}
               allOrders={orders}
+              materials={materials}
               index={selectedIndex}
               total={recipes.length}
               onPrevious={() => goToIndex(selectedIndex - 1)}

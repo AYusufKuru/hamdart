@@ -1,9 +1,8 @@
 import type { RawMaterialOrder } from "@/data/raw-material-orders";
-import {
-  warehouseStockItems,
-  WAREHOUSE_IDS,
-} from "@/data/warehouses";
-import { rawMaterials } from "@/data/raw-materials";
+import { WAREHOUSE_IDS } from "@/data/warehouses";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
+import { getAllWarehouseStockItems } from "@/lib/stock-store";
+import { todayIso } from "@/lib/utils";
 
 const OPEN_STATUSES = new Set([
   "to_order",
@@ -23,15 +22,17 @@ export function buildLowStockOrderDrafts(
   );
 
   const drafts: RawMaterialOrder[] = [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
 
-  for (const item of warehouseStockItems) {
+  for (const item of getAllWarehouseStockItems()) {
     if (item.warehouseId !== WAREHOUSE_IDS.production) continue;
-    if (item.status !== "low" && item.status !== "critical") continue;
+    const belowMin = item.minStock > 0 && item.quantity < item.minStock;
+    const alertStatus = item.status === "low" || item.status === "critical";
+    if (!belowMin && !alertStatus) continue;
     if (openSkus.has(item.sku)) continue;
 
     const unitCost =
-      rawMaterials.find((r) => r.sku === item.sku)?.unitCost ?? 1000;
+      getAllRawMaterials().find((r) => r.sku === item.sku)?.unitCost ?? 1000;
     const orderQty = Math.max(item.minStock - item.quantity, item.minStock * 0.5);
 
     drafts.push({

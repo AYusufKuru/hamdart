@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Order } from "@/data/mock";
-import { orders } from "@/data/mock";
+import { orders as seedOrders } from "@/data/mock";
+import { getAllOrders } from "@/lib/order-store";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
-import { rawMaterials } from "@/data/raw-materials";
+import { rawMaterials as seedMaterials, type RawMaterial } from "@/data/raw-materials";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
 import {
   calculateRecipeTotals,
   formatMoney,
@@ -24,7 +26,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Save, Trash2, FileText } from "lucide-react";
+import { Plus, Save, Trash2, FileText, ClipboardList } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 
 interface RecipeEditorProps {
@@ -39,15 +42,29 @@ export function RecipeEditor({
   onSaved,
 }: RecipeEditorProps) {
   const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
+  const [allOrders, setAllOrders] = useState(seedOrders);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>(seedMaterials);
+
+  useEffect(() => {
+    setAllOrders(getAllOrders());
+    setRawMaterials(getAllRawMaterials());
+  }, []);
 
   const totals = useMemo(
-    () => calculateRecipeTotals(recipe, order.quantity, order, orders),
-    [recipe, order]
+    () =>
+      calculateRecipeTotals(
+        recipe,
+        order.quantity,
+        order,
+        allOrders,
+        rawMaterials
+      ),
+    [recipe, order, allOrders, rawMaterials]
   );
 
   const lastUnitPrice = getLastOrderUnitPrice(
     order.product,
-    orders,
+    allOrders,
     order.id
   );
 
@@ -61,9 +78,14 @@ export function RecipeEditor({
   }
 
   function addLine() {
+    const materialId = rawMaterials[0]?.id;
+    if (!materialId) {
+      toast.error("Önce hammadde tablosuna malzeme ekleyin");
+      return;
+    }
     setRecipe((r) => ({
       ...r,
-      lines: [...r.lines, { materialId: rawMaterials[0].id, quantityPerUnit: 0 }],
+      lines: [...r.lines, { materialId, quantityPerUnit: 0 }],
     }));
   }
 
@@ -84,13 +106,18 @@ export function RecipeEditor({
   }
 
   function addExtra() {
+    const materialId = rawMaterials[0]?.id;
+    if (!materialId) {
+      toast.error("Önce hammadde tablosuna malzeme ekleyin");
+      return;
+    }
     setRecipe((r) => ({
       ...r,
       extras: [
         ...r.extras,
         {
           id: `ext-${Date.now()}`,
-          materialId: rawMaterials[0].id,
+          materialId,
           quantity: 1,
           reason: "",
         },
@@ -106,11 +133,22 @@ export function RecipeEditor({
   }
 
   function handleSave() {
-    const saved: Recipe = { ...recipe, status: "saved" };
-    saveRecipe(saved);
-    setRecipe(saved);
-    onSaved(saved);
-    toast.success("Reçete kaydedildi");
+    if (
+      recipe.lines.length === 0 ||
+      recipe.lines.every((l) => !l.quantityPerUnit)
+    ) {
+      toast.error("En az bir malzeme satırına miktar girin");
+      return;
+    }
+    try {
+      const saved: Recipe = { ...recipe, status: "saved" };
+      saveRecipe(saved);
+      setRecipe(saved);
+      onSaved(saved);
+      toast.success("Reçete kaydedildi");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Reçete kaydedilemedi");
+    }
   }
 
   return (
@@ -146,11 +184,19 @@ export function RecipeEditor({
                   <TableCell>
                     <select
                       className="w-full min-w-[160px] rounded-lg border bg-background px-2 py-1.5 text-sm"
-                      value={recipe.lines[index].materialId}
+                      value={recipe.lines[index]?.materialId ?? ""}
                       onChange={(e) =>
                         updateLine(index, { materialId: e.target.value })
                       }
                     >
+                      {recipe.lines[index]?.materialId &&
+                      !rawMaterials.some(
+                        (m) => m.id === recipe.lines[index].materialId
+                      ) ? (
+                        <option value={recipe.lines[index].materialId}>
+                          Bilinmeyen malzeme
+                        </option>
+                      ) : null}
                       {rawMaterials.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.name}
@@ -246,6 +292,9 @@ export function RecipeEditor({
                           updateExtra(index, { materialId: e.target.value })
                         }
                       >
+                        {!rawMaterials.some((m) => m.id === extra.materialId) ? (
+                          <option value={extra.materialId}>Bilinmeyen malzeme</option>
+                        ) : null}
                         {rawMaterials.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
@@ -349,7 +398,15 @@ export function RecipeEditor({
         </p>
       )}
 
-      <div className="flex justify-end gap-3 pb-6">
+      <div className="flex justify-end gap-3 pb-6 flex-wrap">
+        {recipe.status === "saved" && (
+          <Button variant="outline" className="rounded-2xl" asChild>
+            <Link href="/recipes">
+              <ClipboardList className="w-4 h-4 mr-2" />
+              Reçete listesinde gör
+            </Link>
+          </Button>
+        )}
         <Button
           className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           onClick={handleSave}

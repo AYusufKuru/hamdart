@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { warehouseTypeConfig } from "@/components/warehouses/warehouse-config";
@@ -19,25 +19,23 @@ import {
 } from "@/components/ui/table";
 import {
   warehouses,
+  warehouseStockItems as seedStock,
   stockTransfers,
-  getStockByWarehouse,
-  getLabItemsNeedingReplenishment,
-  getWarehouseName,
   warehouseTypeLabels,
-  type WarehouseType,
+  WAREHOUSE_IDS,
+  type WarehouseStockItem,
 } from "@/data/warehouses";
-import { cn, formatDate, formatNumber } from "@/lib/utils";
+import { getAllWarehouseStockItems } from "@/lib/stock-store";
+import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { cn, formatDate } from "@/lib/utils";
 import {
   ArrowRight,
   ArrowRightLeft,
-  Beaker,
   Box,
   Factory,
   MapPin,
   Package,
-  Thermometer,
   User,
-  Droplets,
 } from "lucide-react";
 
 const transferReasonLabel = {
@@ -48,7 +46,21 @@ const transferReasonLabel = {
 
 export default function WarehousesPage() {
   const [activeTab, setActiveTab] = useState<string>("all");
-  const labLow = getLabItemsNeedingReplenishment();
+  const [stock, setStock] = useState<WarehouseStockItem[]>(seedStock);
+
+  useEffect(() => {
+    syncReplenishmentOrders();
+    setStock(getAllWarehouseStockItems());
+  }, []);
+
+  const labLow = stock.filter(
+    (i) =>
+      i.warehouseId === WAREHOUSE_IDS.laboratory &&
+      !i.labDirectEntry &&
+      i.replenishFromWarehouseId &&
+      i.labTargetQuantity !== undefined &&
+      i.quantity < i.minStock
+  );
   const pendingTransfers = stockTransfers.filter((t) => t.status === "pending");
 
   const filteredWarehouses =
@@ -59,10 +71,11 @@ export default function WarehousesPage() {
   const totalCapacity = warehouses.reduce((s, w) => s + w.capacity, 0);
   const totalUsed = warehouses.reduce((s, w) => s + w.used, 0);
   const avgUtilization = Math.round((totalUsed / totalCapacity) * 100);
-  const totalSkus = warehouses.reduce(
-    (s, w) => s + getStockByWarehouse(w.id).length,
-    0
-  );
+  const totalSkus = stock.length;
+
+  function stockByWarehouse(warehouseId: string) {
+    return stock.filter((i) => i.warehouseId === warehouseId);
+  }
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -124,13 +137,14 @@ export default function WarehousesPage() {
 
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
         {filteredWarehouses.map((warehouse) => {
-          const config = warehouseTypeConfig[warehouse.type];
+          const config =
+            warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
           const Icon = config.icon;
           const utilization = Math.round(
             (warehouse.used / warehouse.capacity) * 100
           );
-          const stockCount = getStockByWarehouse(warehouse.id).length;
-          const alertCount = getStockByWarehouse(warehouse.id).filter(
+          const stockCount = stockByWarehouse(warehouse.id).length;
+          const alertCount = stockByWarehouse(warehouse.id).filter(
             (i) =>
               i.status === "low" ||
               i.status === "critical" ||
@@ -260,7 +274,7 @@ export default function WarehousesPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {formatDate(tr.createdAt.slice(0, 10))}
+                    {formatDate(tr.createdAt)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -268,7 +282,7 @@ export default function WarehousesPage() {
           </Table>
           <div className="mt-4 flex justify-end">
             <Button variant="outline" className="rounded-xl" asChild>
-              <Link href={`/warehouses/${warehouses.find((w) => w.type === "laboratory")!.id}`}>
+              <Link href={`/warehouses/${WAREHOUSE_IDS.laboratory}`}>
                 Laboratuvar detayı
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Link>

@@ -33,12 +33,12 @@ export function OrderFlowStepper({ order }: { order: RawMaterialOrder }) {
         label: rawMaterialOrderStatusConfig[s].label,
       }));
 
-  const currentStep = rawMaterialOrderStatusConfig[order.status].step;
+  const currentStep = rawMaterialOrderStatusConfig[order.status]?.step ?? 1;
 
   return (
     <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:gap-0">
       {steps.map((step, index) => {
-        const stepNum = rawMaterialOrderStatusConfig[step.status].step;
+        const stepNum = rawMaterialOrderStatusConfig[step.status]?.step ?? index + 1;
         const isDone = stepNum < currentStep;
         const isCurrent = order.status === step.status;
         const isFailedStep =

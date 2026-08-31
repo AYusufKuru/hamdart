@@ -3,6 +3,10 @@ import type {
   RawMaterialOrderStatus,
 } from "@/data/raw-material-orders";
 import { rawMaterialOrderStatusConfig } from "@/data/raw-material-orders";
+import { WAREHOUSE_IDS } from "@/data/warehouses";
+import { getRawMaterialBySku } from "@/lib/raw-material-store";
+import { createStockEntry } from "@/lib/stock-store";
+import { plusYearsIso, todayIso } from "@/lib/utils";
 
 export type RawMaterialOrderAction =
   | "place_order"
@@ -73,7 +77,7 @@ export function applyAction(
   const next = transitions[order.status]?.[action];
   if (!next) return order;
 
-  const now = new Date().toISOString();
+  const today = todayIso();
   const updated: RawMaterialOrder = { ...order, status: next };
 
   switch (action) {
@@ -81,28 +85,42 @@ export function applyAction(
       updated.invoiceNo = updated.invoiceNo ?? `FTR-${Date.now().toString().slice(-8)}`;
       break;
     case "mark_received":
-      updated.receivedDate = now.slice(0, 10);
+      updated.receivedDate = today;
       if (!updated.lotNo) {
-        updated.lotNo = `LOT-${order.sku}-${now.slice(0, 10).replace(/-/g, "")}`;
+        updated.lotNo = `LOT-${order.sku}-${today.replace(/-/g, "")}`;
       }
       break;
     case "start_qc":
-      updated.qcStartedAt = now.slice(0, 10);
+      updated.qcStartedAt = today;
       updated.qcAnalyst = updated.qcAnalyst ?? "Uzm. Lab. Atanmadı";
       break;
     case "approve_qc":
-      updated.qcCompletedAt = now.slice(0, 10);
-      updated.warehousedAt = now.slice(0, 10);
+      updated.qcCompletedAt = today;
+      updated.warehousedAt = today;
       updated.qcNotes =
         updated.qcNotes ?? "Kalite kontrol spesifikasyon dahilinde — depo girişi onaylandı";
+      {
+        const material = getRawMaterialBySku(order.sku);
+        createStockEntry({
+          sku: order.sku,
+          name: order.materialName,
+          category: material?.category ?? "Ham Madde",
+          warehouseId: order.targetWarehouseId ?? WAREHOUSE_IDS.production,
+          quantity: order.quantity,
+          unit: order.unit,
+          minStock: Math.max(1, Math.round(order.quantity * 0.2)),
+          lotNo: updated.lotNo ?? `LOT-${order.sku}-${today.replace(/-/g, "")}`,
+          expiryDate: plusYearsIso(2),
+        });
+      }
       break;
     case "reject_qc":
-      updated.qcCompletedAt = now.slice(0, 10);
+      updated.qcCompletedAt = today;
       updated.qcNotes =
         updated.qcNotes ?? "Kalite kontrol spesifikasyon dışı — iade süreci başlatıldı";
       break;
     case "complete_return":
-      updated.returnedAt = now.slice(0, 10);
+      updated.returnedAt = today;
       break;
   }
 
@@ -121,8 +139,8 @@ export function getFlowStepState(
   orderStatus: RawMaterialOrderStatus,
   stepStatus: RawMaterialOrderStatus
 ): "done" | "current" | "upcoming" | "failed" | "skipped" {
-  const orderStep = rawMaterialOrderStatusConfig[orderStatus].step;
-  const step = rawMaterialOrderStatusConfig[stepStatus].step;
+  const orderStep = rawMaterialOrderStatusConfig[orderStatus]?.step ?? 1;
+  const step = rawMaterialOrderStatusConfig[stepStatus]?.step ?? 1;
 
   if (isFailurePath(orderStatus)) {
     if (stepStatus === "qc_failed" || stepStatus === "returned") {

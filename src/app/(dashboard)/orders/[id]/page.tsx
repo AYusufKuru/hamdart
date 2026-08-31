@@ -8,7 +8,8 @@ import { RecipeEditor } from "@/components/recipes/recipe-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { orders } from "@/data/mock";
+import { orders as seedOrders, type Order } from "@/data/mock";
+import { getOrder } from "@/lib/order-store";
 import type { Recipe } from "@/data/recipes";
 import {
   createEmptyRecipe,
@@ -32,29 +33,35 @@ export default function OrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const order = orders.find((o) => o.id === id);
+  const seedMatch = seedOrders.find((o) => o.id === id);
+  const [order, setOrder] = useState<Order | undefined>(seedMatch);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!order) return;
-    const existing = getRecipeByOrderId(order.id);
+    const found = getOrder(id);
+    setOrder(found);
+    if (!found) {
+      setReady(true);
+      return;
+    }
+    const existing = getRecipeByOrderId(found.id);
     setRecipe(
-      existing ?? createEmptyRecipe(order.id, order.product, "Üretim Ekibi")
+      existing ?? createEmptyRecipe(found.id, found.product, "Üretim Ekibi")
     );
     setReady(true);
-  }, [order]);
+  }, [id]);
 
-  if (!order) notFound();
+  if (ready && !order) notFound();
 
-  const status = statusMap[order.status];
-  const unitPrice = order.quantity > 0 ? order.value / order.quantity : 0;
-
-  if (!ready || !recipe) {
+  if (!ready || !order || !recipe) {
     return (
       <div className="p-10 text-muted-foreground">Yükleniyor...</div>
     );
   }
+
+  const status = statusMap[order.status] ?? statusMap.pending;
+  const unitPrice = order.quantity > 0 ? order.value / order.quantity : 0;
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">

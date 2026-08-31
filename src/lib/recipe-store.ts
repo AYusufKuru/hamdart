@@ -1,21 +1,16 @@
 import type { Recipe } from "@/data/recipes";
 import { seedRecipes } from "@/data/recipes";
+import { rawMaterials } from "@/data/raw-materials";
+import { readFromStorage, saveToStorage, todayIso } from "@/lib/utils";
 
 const STORAGE_KEY = "hamdart-recipes";
 
 function readStored(): Recipe[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw) as Recipe[];
-  } catch {
-    return [];
-  }
+  return readFromStorage<Recipe>(STORAGE_KEY);
 }
 
 function writeStored(recipes: Recipe[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(recipes));
+  saveToStorage(STORAGE_KEY, recipes);
 }
 
 export function getAllRecipes(): Recipe[] {
@@ -44,9 +39,14 @@ export function createEmptyRecipe(
     id: `rec-${Date.now()}`,
     orderId,
     productName,
-    createdAt: new Date().toISOString(),
+    createdAt: todayIso(),
     createdBy,
-    lines: [{ materialId: "rm-2", quantityPerUnit: 0 }],
+    lines: [
+      {
+        materialId: rawMaterials[0]?.id ?? "rm-2",
+        quantityPerUnit: 0,
+      },
+    ],
     extras: [],
     status: "draft",
   };

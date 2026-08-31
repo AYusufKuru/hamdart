@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,9 +17,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { orders } from "@/data/mock";
+import { orders as seedOrders, type Order } from "@/data/mock";
+import { seedRecipes } from "@/data/recipes";
 import { formatDate, formatNumber } from "@/lib/utils";
 import { getRecipeByOrderId } from "@/lib/recipe-store";
+import { getAllOrders } from "@/lib/order-store";
+import { OrderFormSheet } from "@/components/orders/order-form-sheet";
 import {
   Clock,
   ClipboardList,
@@ -45,17 +49,33 @@ const priorityMap = {
 };
 
 export default function OrdersPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [recipeOrderIds, setRecipeOrderIds] = useState<Set<string>>(new Set());
+  const [recipeOrderIds, setRecipeOrderIds] = useState<Set<string>>(
+    () => new Set(seedRecipes.map((r) => r.orderId))
+  );
+  const [orders, setOrders] = useState<Order[]>(seedOrders);
+  const [formOpen, setFormOpen] = useState(false);
 
-  useEffect(() => {
+  const refresh = () => {
+    const list = getAllOrders();
+    setOrders(list);
     const ids = new Set<string>();
-    orders.forEach((o) => {
+    list.forEach((o) => {
       if (getRecipeByOrderId(o.id)) ids.add(o.id);
     });
     setRecipeOrderIds(ids);
-  }, []);
+  };
+
+  useEffect(() => {
+    refresh();
+    if (searchParams.get("yeni") === "1") {
+      setFormOpen(true);
+      window.history.replaceState({}, "", "/orders");
+    }
+  }, [searchParams]);
 
   const filtered = orders.filter((order) => {
     const matchesSearch =
@@ -77,7 +97,10 @@ export default function OrdersPage() {
         title="Siparişler"
         description="Müşteri siparişleri, sevkiyat takibi ve depo atama yönetimi."
         actions={
-          <Button className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none">
+          <Button
+            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            onClick={() => setFormOpen(true)}
+          >
             <Plus className="w-4 h-4 mr-2" />
             Yeni Sipariş
           </Button>
@@ -131,6 +154,7 @@ export default function OrdersPage() {
                 <TabsTrigger value="picking">Toplanıyor</TabsTrigger>
                 <TabsTrigger value="shipped">Sevk</TabsTrigger>
                 <TabsTrigger value="delivered">Teslim</TabsTrigger>
+                <TabsTrigger value="cancelled">İptal</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -152,10 +176,14 @@ export default function OrdersPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((order) => {
-                const status = statusMap[order.status];
-                const priority = priorityMap[order.priority];
+                const status = statusMap[order.status] ?? statusMap.pending;
+                const priority = priorityMap[order.priority] ?? priorityMap.normal;
                 return (
-                  <TableRow key={order.id} className="cursor-pointer hover:bg-muted/40">
+                  <TableRow
+                    key={order.id}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => router.push(`/orders/${order.id}`)}
+                  >
                     <TableCell className="font-mono font-bold">
                       <Link
                         href={`/orders/${order.id}`}
@@ -210,6 +238,15 @@ export default function OrdersPage() {
       </Card>
 
       <div className="pb-10" />
+
+      <OrderFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={(order) => {
+          refresh();
+          router.push(`/orders/${order.id}`);
+        }}
+      />
     </div>
   );
 }

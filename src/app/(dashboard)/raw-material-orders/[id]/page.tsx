@@ -50,14 +50,24 @@ export default function RawMaterialOrderDetailPage({
 
   if (order === null) notFound();
 
-  const status = rawMaterialOrderStatusConfig[order.status];
+  const status =
+    rawMaterialOrderStatusConfig[order.status] ??
+    rawMaterialOrderStatusConfig.to_order;
   const actions = getAvailableActions(order.status);
 
   function handleAction(action: RawMaterialOrderAction) {
-    const updated = applyAction(order!, action);
-    saveRawMaterialOrder(updated);
-    setOrder(updated);
-    toast.success(actionLabels[action].label);
+    try {
+      const updated = applyAction(order!, action);
+      saveRawMaterialOrder(updated);
+      setOrder(updated);
+      toast.success(
+        action === "approve_qc"
+          ? "KK onaylandı — lot hedef depoya işlendi"
+          : actionLabels[action].label
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "İşlem uygulanamadı");
+    }
   }
 
   return (
@@ -99,7 +109,7 @@ export default function RawMaterialOrderDetailPage({
             {[
               {
                 label: "Kaynak",
-                value: rawMaterialOrderSourceLabels[order.source],
+                value: rawMaterialOrderSourceLabels[order.source] ?? "—",
               },
               { label: "Sipariş No", value: order.orderNo },
               { label: "SKU", value: order.sku },
@@ -151,17 +161,21 @@ export default function RawMaterialOrderDetailPage({
               </span>
             </div>
             {[
-              { label: "Teslim Alma", value: order.receivedDate },
-              { label: "KK Başlangıç", value: order.qcStartedAt },
-              { label: "KK Bitiş", value: order.qcCompletedAt },
-              { label: "Depo Girişi", value: order.warehousedAt },
-              { label: "İade Tarihi", value: order.returnedAt },
-              { label: "Analist", value: order.qcAnalyst },
+              { label: "Teslim Alma", value: order.receivedDate, date: true },
+              { label: "KK Başlangıç", value: order.qcStartedAt, date: true },
+              { label: "KK Bitiş", value: order.qcCompletedAt, date: true },
+              { label: "Depo Girişi", value: order.warehousedAt, date: true },
+              { label: "İade Tarihi", value: order.returnedAt, date: true },
+              { label: "Analist", value: order.qcAnalyst, date: false },
             ].map((row) => (
               <div key={row.label} className="flex justify-between gap-4">
                 <span className="text-muted-foreground">{row.label}</span>
-                <span className="font-medium">
-                  {row.value ? formatDate(row.value) : "—"}
+                <span className="font-medium text-right">
+                  {row.date
+                    ? row.value
+                      ? formatDate(row.value)
+                      : "—"
+                    : row.value || "—"}
                 </span>
               </div>
             ))}
@@ -191,12 +205,20 @@ export default function RawMaterialOrderDetailPage({
               </div>
             )}
             {order.status === "warehoused" && (
-              <div className="rounded-xl border p-3 bg-emerald-500/5 border-emerald-500/20 text-sm">
-                <p className="font-bold text-emerald-800">Depo kaydı tamam</p>
-                <p className="text-emerald-700/90 mt-1">
-                  Lot {order.lotNo} — {getWarehouseName(order.targetWarehouseId)}{" "}
-                  envanterine işlendi.
-                </p>
+              <div className="rounded-xl border p-3 bg-emerald-500/5 border-emerald-500/20 text-sm space-y-3">
+                <div>
+                  <p className="font-bold text-emerald-800">Depo kaydı tamam</p>
+                  <p className="text-emerald-700/90 mt-1">
+                    Lot {order.lotNo} — {getWarehouseName(order.targetWarehouseId)}{" "}
+                    envanterine işlendi.
+                  </p>
+                </div>
+                <Button variant="outline" className="rounded-xl" asChild>
+                  <Link href={`/warehouses/${order.targetWarehouseId}`}>
+                    <Warehouse className="w-4 h-4 mr-2" />
+                    Depo envanterini aç
+                  </Link>
+                </Button>
               </div>
             )}
           </CardContent>

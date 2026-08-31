@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,12 +15,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { stockItems } from "@/data/mock";
+import { stockItems as seedStockItems, type StockItem } from "@/data/mock";
 import {
   warehouses,
   WAREHOUSE_IDS,
   warehouseTypeLabels,
 } from "@/data/warehouses";
+import { toDisplayStockItems } from "@/lib/stock-store";
+import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { StockFormSheet } from "@/components/stock/stock-form-sheet";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, Filter, Package, Plus, Search, Snowflake } from "lucide-react";
@@ -32,9 +36,21 @@ const statusMap = {
 };
 
 export default function StockPage() {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "alert">("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
+  const [stockItems, setStockItems] = useState<StockItem[]>(seedStockItems);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const refresh = () => {
+    syncReplenishmentOrders();
+    setStockItems(toDisplayStockItems());
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   const filtered = stockItems.filter((item) => {
     const matchesSearch =
@@ -60,7 +76,10 @@ export default function StockPage() {
         title="Stok Durumu"
         description="Paketleme, üretim malzemeleri ve laboratuvar depolarındaki stoklar. Lab ürünleri ana depodan aktarılır; referans standartlar doğrudan lab girişlidir."
         actions={
-          <Button className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none">
+          <Button
+            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            onClick={() => setFormOpen(true)}
+          >
             <Plus className="w-4 h-4 mr-2" />
             Stok Girişi
           </Button>
@@ -146,9 +165,24 @@ export default function StockPage() {
             </TableHeader>
             <TableBody>
               {filtered.map((item) => {
-                const status = statusMap[item.status];
+                const status = statusMap[item.status] ?? {
+                  label: item.status,
+                  variant: "secondary" as const,
+                };
                 return (
-                  <TableRow key={item.id}>
+                  <TableRow
+                    key={item.id}
+                    className={
+                      item.warehouseId
+                        ? "cursor-pointer hover:bg-muted/40"
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (item.warehouseId) {
+                        router.push(`/warehouses/${item.warehouseId}`);
+                      }
+                    }}
+                  >
                     <TableCell className="font-mono text-xs font-bold">{item.sku}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -207,6 +241,12 @@ export default function StockPage() {
       </Card>
 
       <div className="pb-10" />
+
+      <StockFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={refresh}
+      />
     </div>
   );
 }

@@ -22,7 +22,9 @@ function Progress({
     >
       <ProgressPrimitive.Indicator
         className={cn("h-full bg-primary transition-all", indicatorClassName)}
-        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+        style={{
+          transform: `translateX(-${100 - Math.min(100, Math.max(0, value || 0))}%)`,
+        }}
       />
     </ProgressPrimitive.Root>
   );

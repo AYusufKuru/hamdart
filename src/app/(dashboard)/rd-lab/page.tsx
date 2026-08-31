@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +16,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { labExperiments, labSamples } from "@/data/mock";
+import {
+  labExperiments as seedExperiments,
+  labSamples as seedSamples,
+  type LabExperiment,
+  type LabSample,
+} from "@/data/mock";
+import { getAllLabExperiments, getAllLabSamples } from "@/lib/lab-store";
+import { ExperimentFormSheet } from "@/components/rd-lab/experiment-form-sheet";
+import { SampleFormSheet } from "@/components/rd-lab/sample-form-sheet";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Beaker,
@@ -42,9 +52,38 @@ const sampleStatusMap = {
 };
 
 export default function RDLabPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [labExperiments, setLabExperiments] =
+    useState<LabExperiment[]>(seedExperiments);
+  const [labSamples, setLabSamples] = useState<LabSample[]>(seedSamples);
+  const [experimentOpen, setExperimentOpen] = useState(false);
+  const [sampleOpen, setSampleOpen] = useState(false);
+  const [tab, setTab] = useState("experiments");
+
+  const refresh = () => {
+    setLabExperiments(getAllLabExperiments());
+    setLabSamples(getAllLabSamples());
+  };
+
+  useEffect(() => {
+    refresh();
+    const nextTab = searchParams.get("tab");
+    if (nextTab === "samples") setTab("samples");
+    if (nextTab === "experiments") setTab("experiments");
+  }, [searchParams]);
+
   const activeExperiments = labExperiments.filter(
     (e) => e.status === "running" || e.status === "analysis"
   ).length;
+  const approvalRate =
+    labSamples.length === 0
+      ? 0
+      : Math.round(
+          (labSamples.filter((s) => s.status === "approved").length /
+            labSamples.length) *
+            100
+        );
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -55,11 +94,18 @@ export default function RDLabPage() {
         description="Formülasyon geliştirme, stabilite testleri, numune takibi ve kalite kontrol süreçleri."
         actions={
           <>
-            <Button variant="outline" className="rounded-2xl">
+            <Button
+              variant="outline"
+              className="rounded-2xl"
+              onClick={() => setSampleOpen(true)}
+            >
               <TestTube className="w-4 h-4 mr-2" />
               Numune Kaydı
             </Button>
-            <Button className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setExperimentOpen(true)}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Yeni Deney
             </Button>
@@ -74,7 +120,7 @@ export default function RDLabPage() {
           { label: "Numune", value: labSamples.length, icon: TestTube },
           {
             label: "Onay Oranı",
-            value: `%${Math.round((labSamples.filter((s) => s.status === "approved").length / labSamples.length) * 100)}`,
+            value: `%${approvalRate}`,
             icon: CheckCircle2,
           },
         ].map((stat) => (
@@ -94,7 +140,7 @@ export default function RDLabPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="experiments">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="experiments">Deneyler</TabsTrigger>
           <TabsTrigger value="samples">Numuneler</TabsTrigger>
@@ -103,9 +149,9 @@ export default function RDLabPage() {
         <TabsContent value="experiments">
           <div className="grid gap-6 md:grid-cols-2">
             {labExperiments.map((exp) => {
-              const status = experimentStatusMap[exp.status];
+              const status = experimentStatusMap[exp.status] ?? experimentStatusMap.planning;
               return (
-                <Card key={exp.id} className="glass-card border-none hover:shadow-lg transition-shadow">
+                <Card key={exp.id} className="glass-card border-none">
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -153,6 +199,11 @@ export default function RDLabPage() {
               );
             })}
           </div>
+          {labExperiments.length === 0 && (
+            <div className="py-16 text-center text-muted-foreground">
+              <p className="font-medium">Kayıtlı deney yok</p>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="samples">
@@ -173,9 +224,13 @@ export default function RDLabPage() {
                 </TableHeader>
                 <TableBody>
                   {labSamples.map((sample) => {
-                    const status = sampleStatusMap[sample.status];
+                    const status = sampleStatusMap[sample.status] ?? sampleStatusMap.received;
                     return (
-                      <TableRow key={sample.id}>
+                      <TableRow
+                        key={sample.id}
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => router.push("/factory?tab=batches")}
+                      >
                         <TableCell className="font-mono font-bold">{sample.sampleNo}</TableCell>
                         <TableCell>{sample.product}</TableCell>
                         <TableCell className="font-mono text-xs">{sample.batchNo}</TableCell>
@@ -198,12 +253,34 @@ export default function RDLabPage() {
                   })}
                 </TableBody>
               </Table>
+              {labSamples.length === 0 && (
+                <div className="py-16 text-center text-muted-foreground">
+                  <p className="font-medium">Kayıtlı numune yok</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
       <div className="pb-10" />
+
+      <ExperimentFormSheet
+        open={experimentOpen}
+        onOpenChange={setExperimentOpen}
+        onCreated={() => {
+          refresh();
+          setTab("experiments");
+        }}
+      />
+      <SampleFormSheet
+        open={sampleOpen}
+        onOpenChange={setSampleOpen}
+        onCreated={() => {
+          refresh();
+          setTab("samples");
+        }}
+      />
     </div>
   );
 }
