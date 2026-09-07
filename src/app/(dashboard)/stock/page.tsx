@@ -15,15 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { stockItems as seedStockItems, type StockItem } from "@/data/mock";
-import {
-  warehouses,
-  WAREHOUSE_IDS,
-  warehouseTypeLabels,
-} from "@/data/warehouses";
-import { toDisplayStockItems } from "@/lib/stock-store";
+import { type StockItem } from "@/data/mock";
+import { warehouseTypeLabels, type Warehouse } from "@/data/warehouses";
+import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
+import { getWarehouses } from "@/lib/warehouse-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
+import { CanWrite } from "@/components/auth/can-write";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, Filter, Package, Plus, Search, Snowflake } from "lucide-react";
@@ -40,16 +38,22 @@ export default function StockPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "alert">("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
-  const [stockItems, setStockItems] = useState<StockItem[]>(seedStockItems);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [formOpen, setFormOpen] = useState(false);
 
-  const refresh = () => {
-    syncReplenishmentOrders();
-    setStockItems(toDisplayStockItems());
+  const refresh = async () => {
+    await syncReplenishmentOrders();
+    const [items, wh] = await Promise.all([
+      getAllWarehouseStockItems(),
+      getWarehouses(),
+    ]);
+    setStockItems(toDisplayStockItems(items));
+    setWarehouses(wh);
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, []);
 
   const filtered = stockItems.filter((item) => {
@@ -76,13 +80,15 @@ export default function StockPage() {
         title="Stok Durumu"
         description="Paketleme, üretim malzemeleri ve laboratuvar depolarındaki stoklar. Lab ürünleri ana depodan aktarılır; referans standartlar doğrudan lab girişlidir."
         actions={
-          <Button
-            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-            onClick={() => setFormOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Stok Girişi
-          </Button>
+          <CanWrite resource="stock">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setFormOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Stok Girişi
+            </Button>
+          </CanWrite>
         }
       />
 
@@ -154,12 +160,13 @@ export default function StockPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>SKU</TableHead>
-                <TableHead>Ürün</TableHead>
+                <TableHead>Ürün / Malzeme Adı</TableHead>
                 <TableHead>Kategori</TableHead>
+                <TableHead>Depo Kodu</TableHead>
                 <TableHead>Miktar</TableHead>
-                <TableHead>Depo</TableHead>
-                <TableHead>Lot No</TableHead>
-                <TableHead>SKT</TableHead>
+                <TableHead>Birim</TableHead>
+                <TableHead>Lot No-Parti</TableHead>
+                <TableHead>Son Kullanma Tarihi</TableHead>
                 <TableHead>Durum</TableHead>
               </TableRow>
             </TableHeader>
@@ -191,6 +198,7 @@ export default function StockPage() {
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">{item.category}</TableCell>
+                    <TableCell className="text-sm">{item.warehouse}</TableCell>
                     <TableCell>
                       <span
                         className={cn(
@@ -199,25 +207,10 @@ export default function StockPage() {
                           item.status === "low" && "text-amber-600"
                         )}
                       >
-                        {formatNumber(item.quantity)} {item.unit}
+                        {formatNumber(item.quantity)}
                       </span>
-                      <p className="text-[10px] text-muted-foreground">Min: {formatNumber(item.minStock)}</p>
                     </TableCell>
-                    <TableCell>
-                      <span className="text-sm">{item.warehouse}</span>
-                      {item.labDirectEntry && (
-                        <Badge variant="warning" className="mt-1 text-[10px]">
-                          Doğrudan lab
-                        </Badge>
-                      )}
-                      {item.replenishFromWarehouseId &&
-                        item.warehouseId === WAREHOUSE_IDS.laboratory &&
-                        !item.labDirectEntry && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            Ana depodan aktarım
-                          </p>
-                        )}
-                    </TableCell>
+                    <TableCell>{item.unit}</TableCell>
                     <TableCell className="font-mono text-xs">{item.lotNo}</TableCell>
                     <TableCell className={cn(item.status === "expiring" && "text-amber-600 font-semibold")}>
                       {formatDate(item.expiryDate)}

@@ -1,6 +1,5 @@
 import type { Order } from "@/data/mock";
 import type { RawMaterial } from "@/data/raw-materials";
-import { getRawMaterialById } from "@/lib/raw-material-store";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
 
 export interface MaterialLineBreakdown {
@@ -63,8 +62,7 @@ function resolveMaterial(
   id: string,
   materials?: RawMaterial[]
 ): RawMaterial | undefined {
-  if (materials) return materials.find((m) => m.id === id);
-  return getRawMaterialById(id);
+  return materials?.find((m) => m.id === id);
 }
 
 export function calculateRecipeTotals(
@@ -119,8 +117,8 @@ function breakdownLine(
 
   return {
     materialId: line.materialId,
-    materialName: material?.name ?? "Bilinmeyen",
-    unit: material?.unit ?? "—",
+    materialName: material?.name ?? line.materialName ?? "Bilinmeyen",
+    unit: line.unit || material?.unit || "—",
     quantityPerUnit: line.quantityPerUnit,
     totalQuantity,
     unitCost,

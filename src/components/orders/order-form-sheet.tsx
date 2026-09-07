@@ -17,7 +17,10 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import { warehouses } from "@/data/warehouses";
+import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
+import { fetchCustomers } from "@/lib/catalog-store";
+import { getWarehouses } from "@/lib/warehouse-store";
+import { getAllRecipes } from "@/lib/recipe-store";
 import type { Order, OrderStatus } from "@/data/mock";
 import { plusDaysIso, todayIso } from "@/lib/utils";
 import {
@@ -43,15 +46,13 @@ const STATUS_OPTIONS = [
   { value: "cancelled", label: "İptal" },
 ] as const;
 
-function emptyForm() {
-  const production =
-    warehouses.find((w) => w.type === "production") ?? warehouses[0];
+function emptyForm(warehouseName = "Fabrika") {
   return {
     customer: "",
     product: "",
     quantity: "",
     unit: "tablet",
-    warehouse: production?.name ?? "",
+    warehouse: warehouseName,
     priority: "normal" as const,
     status: "pending" as OrderStatus,
     orderDate: todayIso(),
@@ -71,18 +72,42 @@ export function OrderFormSheet({
   onOpenChange,
   onCreated,
 }: OrderFormSheetProps) {
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => emptyForm());
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [customers, setCustomers] = useState<string[]>([]);
   const [products, setProducts] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
-    setForm(emptyForm());
-    setCustomers(getOrderCustomers());
-    setProducts(getOrderProducts());
+    void (async () => {
+      const [customerList, orderCustomers, orderProducts, recipes, whList] =
+        await Promise.all([
+          fetchCustomers(),
+          getOrderCustomers(),
+          getOrderProducts(),
+          getAllRecipes(),
+          getWarehouses(),
+        ]);
+      setWarehouses(whList);
+      const production =
+        whList.find((w) => w.id === WAREHOUSE_IDS.production) ??
+        whList.find((w) => w.type === "production") ??
+        whList[0];
+      setForm(emptyForm(production?.name ?? "Fabrika"));
+      setCustomers(
+        [...new Set([...customerList.map((c) => c.name), ...orderCustomers])]
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, "tr"))
+      );
+      setProducts(
+        [...new Set([...recipes.map((r) => r.productName), ...orderProducts])]
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, "tr"))
+      );
+    })();
   }, [open]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const quantity = parseFloat(form.quantity);
     const value = parseFloat(form.value);
@@ -104,7 +129,7 @@ export function OrderFormSheet({
     }
 
     try {
-      const created = createOrder({
+      const created = await createOrder({
         customer: form.customer.trim(),
         product: form.product.trim(),
         quantity,
@@ -147,7 +172,7 @@ export function OrderFormSheet({
               id="order-customer"
               list="order-customer-list"
               required
-              placeholder="Örn: MediCare Eczane Zinciri"
+              placeholder="Örn: ALLIANCE HEALTHCARE ECZA DEPOSU A.Ş."
               value={form.customer}
               onChange={(e) =>
                 setForm((f) => ({ ...f, customer: e.target.value }))
@@ -169,7 +194,7 @@ export function OrderFormSheet({
               id="order-product"
               list="order-product-list"
               required
-              placeholder="Örn: CardioMax 50mg"
+              placeholder="Örn: Hepanorm 30 Tablet"
               value={form.product}
               onChange={(e) =>
                 setForm((f) => ({ ...f, product: e.target.value }))

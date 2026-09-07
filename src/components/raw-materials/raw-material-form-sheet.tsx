@@ -28,7 +28,7 @@ function emptyForm() {
   return {
     sku: "",
     name: "",
-    category: "Ham Madde" as RawMaterialCategory,
+    category: "Kimyasal" as RawMaterialCategory,
     unit: "kg",
     unitCost: "",
   };
@@ -51,7 +51,7 @@ export function RawMaterialFormSheet({
     if (open) setForm(emptyForm());
   }, [open]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const unitCost = parseFloat(form.unitCost);
     if (!form.sku.trim() || !form.name.trim()) {
@@ -64,7 +64,7 @@ export function RawMaterialFormSheet({
     }
 
     try {
-      const created = createRawMaterial({
+      const created = await createRawMaterial({
         sku: form.sku,
         name: form.name,
         category: form.category,
@@ -97,7 +97,7 @@ export function RawMaterialFormSheet({
               id="rm-sku"
               required
               className="font-mono"
-              placeholder="Örn: RM-API-CM"
+              placeholder="Örn: 150.02.01.00340"
               value={form.sku}
               onChange={(e) =>
                 setForm((f) => ({ ...f, sku: e.target.value }))
@@ -109,7 +109,7 @@ export function RawMaterialFormSheet({
             <Input
               id="rm-name"
               required
-              placeholder="Örn: CardioMax API"
+              placeholder="Örn: Avicel 102"
               value={form.name}
               onChange={(e) =>
                 setForm((f) => ({ ...f, name: e.target.value }))

@@ -23,8 +23,8 @@ import {
   type RawMaterialOrder,
   type RawMaterialOrderSource,
 } from "@/data/raw-material-orders";
-import { rawMaterials as seedMaterials } from "@/data/raw-materials";
-import { warehouses, WAREHOUSE_IDS } from "@/data/warehouses";
+import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
+import { getWarehouses } from "@/lib/warehouse-store";
 import { formatNumber, plusDaysIso, todayIso } from "@/lib/utils";
 import {
   getAllRawMaterials,
@@ -70,18 +70,29 @@ export function RawMaterialOrderFormSheet({
   onCreated,
 }: RawMaterialOrderFormSheetProps) {
   const [form, setForm] = useState(emptyForm);
-  const [materials, setMaterials] = useState(seedMaterials);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [materials, setMaterials] = useState<
+    Awaited<ReturnType<typeof getAllRawMaterials>>
+  >([]);
   const [suppliers, setSuppliers] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm());
-    setMaterials(getAllRawMaterials());
-    setSuppliers(
-      [
-        ...new Set(getAllRawMaterialOrders().map((o) => o.supplier)),
-      ].sort((a, b) => a.localeCompare(b, "tr"))
-    );
+    void (async () => {
+      const [materialList, orders, whList] = await Promise.all([
+        getAllRawMaterials(),
+        getAllRawMaterialOrders(),
+        getWarehouses(),
+      ]);
+      setWarehouses(whList);
+      setMaterials(materialList);
+      setSuppliers(
+        [...new Set(orders.map((o) => o.supplier))].sort((a, b) =>
+          a.localeCompare(b, "tr")
+        )
+      );
+    })();
   }, [open]);
 
   const previewTotal = useMemo(() => {
@@ -115,7 +126,7 @@ export function RawMaterialOrderFormSheet({
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const quantity = parseFloat(form.quantity);
     const unitPrice = parseFloat(form.unitPrice);
@@ -137,7 +148,7 @@ export function RawMaterialOrderFormSheet({
     }
 
     try {
-      const created = createManualRawMaterialOrder({
+      const created = await createManualRawMaterialOrder({
         materialName: form.materialName.trim(),
         sku: form.sku.trim(),
         supplier: form.supplier.trim(),

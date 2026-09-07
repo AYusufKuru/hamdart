@@ -18,7 +18,8 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import { warehouses, WAREHOUSE_IDS } from "@/data/warehouses";
+import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
+import { getWarehouses } from "@/lib/warehouse-store";
 import type { StockStatus } from "@/data/mock";
 import { plusYearsIso } from "@/lib/utils";
 import {
@@ -48,10 +49,7 @@ function defaultLotNo() {
 }
 
 function emptyForm(warehouseId?: string) {
-  const defaultWh =
-    warehouseId && warehouses.some((w) => w.id === warehouseId)
-      ? warehouseId
-      : WAREHOUSE_IDS.production;
+  const defaultWh = warehouseId || WAREHOUSE_IDS.production;
   return {
     sku: "",
     name: "",
@@ -85,6 +83,7 @@ export function StockFormSheet({
 }: StockFormSheetProps) {
   const router = useRouter();
   const [form, setForm] = useState(() => emptyForm(defaultWarehouseId));
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [skus, setSkus] = useState<string[]>([]);
   const [names, setNames] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([...STOCK_CATEGORIES]);
@@ -96,10 +95,20 @@ export function StockFormSheet({
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm(defaultWarehouseId));
-    setSkus(getKnownSkus());
-    setNames(getKnownStockNames());
-    setCategories(getKnownCategories());
-    setUnits(getKnownUnits());
+    void (async () => {
+      const [skuList, nameList, catList, unitList, whList] = await Promise.all([
+        getKnownSkus(),
+        getKnownStockNames(),
+        getKnownCategories(),
+        getKnownUnits(),
+        getWarehouses(),
+      ]);
+      setSkus(skuList);
+      setNames(nameList);
+      setCategories(catList);
+      setUnits(unitList);
+      setWarehouses(whList);
+    })();
   }, [open, defaultWarehouseId]);
 
   function patch<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -127,7 +136,7 @@ export function StockFormSheet({
     });
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const quantity = parseFloat(form.quantity);
     const minStock = parseFloat(form.minStock);
@@ -156,7 +165,7 @@ export function StockFormSheet({
         : undefined;
 
     try {
-      const created = createStockEntry({
+      const created = await createStockEntry({
         sku: form.sku,
         name: form.name,
         category: form.category,
@@ -205,7 +214,7 @@ export function StockFormSheet({
               list="stock-sku-list"
               required
               className="font-mono"
-              placeholder="Örn: RM-API-CM"
+              placeholder="Örn: 152.01.06.00018"
               value={form.sku}
               onChange={(e) => patch("sku", e.target.value)}
             />
@@ -221,7 +230,7 @@ export function StockFormSheet({
               id="stock-name"
               list="stock-name-list"
               required
-              placeholder="Örn: CardioMax API"
+              placeholder="Örn: MAXİLİV MAGNİFUL 5X 60 TABLET"
               value={form.name}
               onChange={(e) => patch("name", e.target.value)}
             />

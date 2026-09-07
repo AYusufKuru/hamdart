@@ -3,20 +3,18 @@
 
 import { useEffect, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { productionChartData, stockChartData } from "@/data/mock";
 import { formatNumber } from "@/lib/utils";
+import { getAllProductionLines } from "@/lib/production-store";
+import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
 
 function useChartMounted() {
   const [mounted, setMounted] = useState(false);
@@ -26,34 +24,28 @@ function useChartMounted() {
 
 export function ProductionChart() {
   const mounted = useChartMounted();
+  const [data, setData] = useState<{ name: string; output: number }[]>([]);
+
+  useEffect(() => {
+    void getAllProductionLines().then((lines) =>
+      setData(lines.map((l) => ({ name: l.name, output: l.outputToday })))
+    );
+  }, []);
 
   return (
     <Card className="glass-card border-none">
       <CardHeader>
-        <CardTitle>Üretim Trendi</CardTitle>
-        <CardDescription>Son 6 ay ürün tipine göre üretim hacmi</CardDescription>
+        <CardTitle>Günlük Üretim</CardTitle>
+        <CardDescription>Makinelerin bugünkü çıktısı</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="h-[320px] w-full min-w-0">
-          {mounted ? (
+          {mounted && data.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={productionChartData}>
-                <defs>
-                  <linearGradient id="tabletGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="capsuleGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+              <BarChart data={data} margin={{ left: 8, right: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.9 0.02 265)" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis
-                  tickFormatter={(v) => `${(v / 1000000).toFixed(1)}M`}
-                  tick={{ fontSize: 12 }}
-                />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+                <YAxis tickFormatter={(v) => formatNumber(v)} tick={{ fontSize: 11 }} />
                 <Tooltip
                   formatter={(value) => formatNumber(Number(value))}
                   contentStyle={{
@@ -62,26 +54,14 @@ export function ProductionChart() {
                     boxShadow: "0 8px 32px rgba(0,0,0,0.08)",
                   }}
                 />
-                <Legend />
-                <Area
-                  type="monotone"
-                  dataKey="tablet"
-                  name="Tablet"
-                  stroke="#4f46e5"
-                  fill="url(#tabletGrad)"
-                  strokeWidth={2}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="capsule"
-                  name="Kapsül"
-                  stroke="#3b82f6"
-                  fill="url(#capsuleGrad)"
-                  strokeWidth={2}
-                />
-              </AreaChart>
+                <Bar dataKey="output" name="Çıktı" fill="#4f46e5" radius={[6, 6, 0, 0]} />
+              </BarChart>
             </ResponsiveContainer>
-          ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground py-16 text-center">
+              Üretim kaydı yok
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -90,6 +70,18 @@ export function ProductionChart() {
 
 export function StockChart() {
   const mounted = useChartMounted();
+  const [data, setData] = useState<{ category: string; value: number }[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      const items = await getAllWarehouseStockItems();
+      const map = new Map<string, number>();
+      for (const i of toDisplayStockItems(items)) {
+        map.set(i.category, (map.get(i.category) ?? 0) + i.quantity);
+      }
+      setData([...map.entries()].map(([category, value]) => ({ category, value })));
+    })();
+  }, []);
 
   return (
     <Card className="glass-card border-none">
@@ -99,9 +91,9 @@ export function StockChart() {
       </CardHeader>
       <CardContent>
         <div className="h-[320px] w-full min-w-0">
-          {mounted ? (
+          {mounted && data.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stockChartData} layout="vertical" margin={{ left: 20 }}>
+              <BarChart data={data} layout="vertical" margin={{ left: 20 }}>
                 <CartesianGrid
                   strokeDasharray="3 3"
                   horizontal={false}
@@ -120,7 +112,11 @@ export function StockChart() {
                 <Bar dataKey="value" name="Stok" fill="#6366f1" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground py-16 text-center">
+              Stok kaydı yok
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

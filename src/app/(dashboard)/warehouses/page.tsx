@@ -18,15 +18,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  warehouses,
-  warehouseStockItems as seedStock,
-  stockTransfers,
+  occupancyPercent,
   warehouseTypeLabels,
   WAREHOUSE_IDS,
+  type StockTransfer,
+  type Warehouse,
   type WarehouseStockItem,
 } from "@/data/warehouses";
 import { getAllWarehouseStockItems } from "@/lib/stock-store";
+import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
+import { CanWrite } from "@/components/auth/can-write";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ArrowRight,
@@ -46,11 +49,25 @@ const transferReasonLabel = {
 
 export default function WarehousesPage() {
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [stock, setStock] = useState<WarehouseStockItem[]>(seedStock);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [stock, setStock] = useState<WarehouseStockItem[]>([]);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
+  const [transferOpen, setTransferOpen] = useState(false);
+
+  async function refresh() {
+    await syncReplenishmentOrders();
+    const [wh, items, tr] = await Promise.all([
+      getWarehouses(),
+      getAllWarehouseStockItems(),
+      getStockTransfers(),
+    ]);
+    setWarehouses(wh);
+    setStock(items);
+    setTransfers(tr);
+  }
 
   useEffect(() => {
-    syncReplenishmentOrders();
-    setStock(getAllWarehouseStockItems());
+    void refresh();
   }, []);
 
   const labLow = stock.filter(
@@ -61,7 +78,7 @@ export default function WarehousesPage() {
       i.labTargetQuantity !== undefined &&
       i.quantity < i.minStock
   );
-  const pendingTransfers = stockTransfers.filter((t) => t.status === "pending");
+  const pendingTransfers = transfers.filter((t) => t.status === "pending");
 
   const filteredWarehouses =
     activeTab === "all"
@@ -84,6 +101,17 @@ export default function WarehousesPage() {
         badgeClassName="bg-violet-500/10 text-violet-600 border-violet-500/20"
         title="Depolar"
         description="Her depo için ayrı detay sayfasında tüm stok kalemlerini arayın ve filtreleyin. Laboratuvar stoğu üretim deposundan aktarılır."
+        actions={
+          <CanWrite resource="stock">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setTransferOpen(true)}
+            >
+              <ArrowRightLeft className="w-4 h-4 mr-2" />
+              Stok Aktar
+            </Button>
+          </CanWrite>
+        }
       />
 
       {(labLow.length > 0 || pendingTransfers.length > 0) && (
@@ -101,7 +129,7 @@ export default function WarehousesPage() {
 
       <div className="grid gap-4 md:grid-cols-4">
         {[
-          { label: "Depo Sayısı", value: "3", icon: Box },
+          { label: "Depo Sayısı", value: warehouses.length, icon: Box },
           { label: "Toplam SKU", value: totalSkus, icon: Package },
           { label: "Ort. Doluluk", value: `%${avgUtilization}`, icon: Factory },
           {
@@ -140,8 +168,9 @@ export default function WarehousesPage() {
           const config =
             warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
           const Icon = config.icon;
-          const utilization = Math.round(
-            (warehouse.used / warehouse.capacity) * 100
+          const utilization = occupancyPercent(
+            warehouse.used,
+            warehouse.capacity
           );
           const stockCount = stockByWarehouse(warehouse.id).length;
           const alertCount = stockByWarehouse(warehouse.id).filter(
@@ -251,7 +280,17 @@ export default function WarehousesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {stockTransfers.slice(0, 5).map((tr) => (
+              {transfers.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className="text-center text-sm text-muted-foreground py-8"
+                  >
+                    Henüz aktarım yok
+                  </TableCell>
+                </TableRow>
+              ) : (
+                transfers.slice(0, 5).map((tr) => (
                 <TableRow key={tr.id}>
                   <TableCell className="font-medium">{tr.materialName}</TableCell>
                   <TableCell>
@@ -277,7 +316,8 @@ export default function WarehousesPage() {
                     {formatDate(tr.createdAt)}
                   </TableCell>
                 </TableRow>
-              ))}
+              ))
+              )}
             </TableBody>
           </Table>
           <div className="mt-4 flex justify-end">
@@ -292,6 +332,14 @@ export default function WarehousesPage() {
       </Card>
 
       <div className="pb-10" />
+
+      <StockTransferFormSheet
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        warehouses={warehouses}
+        items={stock}
+        onCreated={() => void refresh()}
+      />
     </div>
   );
 }

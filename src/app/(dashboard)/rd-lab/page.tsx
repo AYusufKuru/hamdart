@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,15 +16,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  labExperiments as seedExperiments,
-  labSamples as seedSamples,
-  type LabExperiment,
-  type LabSample,
-} from "@/data/mock";
+import { type LabExperiment, type LabSample } from "@/data/mock";
 import { getAllLabExperiments, getAllLabSamples } from "@/lib/lab-store";
 import { ExperimentFormSheet } from "@/components/rd-lab/experiment-form-sheet";
 import { SampleFormSheet } from "@/components/rd-lab/sample-form-sheet";
+import { CanWrite } from "@/components/auth/can-write";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Beaker,
@@ -51,23 +47,26 @@ const sampleStatusMap = {
   rejected: { label: "Red", variant: "danger" as const },
 };
 
-export default function RDLabPage() {
+function RDLabPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [labExperiments, setLabExperiments] =
-    useState<LabExperiment[]>(seedExperiments);
-  const [labSamples, setLabSamples] = useState<LabSample[]>(seedSamples);
+  const [labExperiments, setLabExperiments] = useState<LabExperiment[]>([]);
+  const [labSamples, setLabSamples] = useState<LabSample[]>([]);
   const [experimentOpen, setExperimentOpen] = useState(false);
   const [sampleOpen, setSampleOpen] = useState(false);
   const [tab, setTab] = useState("experiments");
 
-  const refresh = () => {
-    setLabExperiments(getAllLabExperiments());
-    setLabSamples(getAllLabSamples());
+  const refresh = async () => {
+    const [experiments, samples] = await Promise.all([
+      getAllLabExperiments(),
+      getAllLabSamples(),
+    ]);
+    setLabExperiments(experiments);
+    setLabSamples(samples);
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
     const nextTab = searchParams.get("tab");
     if (nextTab === "samples") setTab("samples");
     if (nextTab === "experiments") setTab("experiments");
@@ -93,23 +92,25 @@ export default function RDLabPage() {
         title="Ar-Ge Laboratuvarı"
         description="Formülasyon geliştirme, stabilite testleri, numune takibi ve kalite kontrol süreçleri."
         actions={
-          <>
-            <Button
-              variant="outline"
-              className="rounded-2xl"
-              onClick={() => setSampleOpen(true)}
-            >
-              <TestTube className="w-4 h-4 mr-2" />
-              Numune Kaydı
-            </Button>
-            <Button
-              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-              onClick={() => setExperimentOpen(true)}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Yeni Deney
-            </Button>
-          </>
+          <CanWrite resource="lab">
+            <>
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => setSampleOpen(true)}
+              >
+                <TestTube className="w-4 h-4 mr-2" />
+                Numune Kaydı
+              </Button>
+              <Button
+                className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                onClick={() => setExperimentOpen(true)}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Yeni Deney
+              </Button>
+            </>
+          </CanWrite>
         }
       />
 
@@ -269,7 +270,7 @@ export default function RDLabPage() {
         open={experimentOpen}
         onOpenChange={setExperimentOpen}
         onCreated={() => {
-          refresh();
+          void refresh();
           setTab("experiments");
         }}
       />
@@ -277,10 +278,18 @@ export default function RDLabPage() {
         open={sampleOpen}
         onOpenChange={setSampleOpen}
         onCreated={() => {
-          refresh();
+          void refresh();
           setTab("samples");
         }}
       />
     </div>
+  );
+}
+
+export default function RDLabPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-muted-foreground">Yükleniyor...</div>}>
+      <RDLabPageContent />
+    </Suspense>
   );
 }

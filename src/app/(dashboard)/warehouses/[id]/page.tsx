@@ -19,20 +19,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  getWarehouse,
-  getStockByWarehouse,
-  getCategoriesForWarehouse,
-  getTransfersForWarehouse,
   getWarehouseName,
+  occupancyPercent,
   warehouseTypeLabels,
   WAREHOUSE_IDS,
+  type StockTransfer,
+  type Warehouse,
   type WarehouseStockItem,
 } from "@/data/warehouses";
 import {
   getStockCategoriesForWarehouse,
   getStockItemsForWarehouse,
 } from "@/lib/stock-store";
+import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
+import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
+import { CanWrite } from "@/components/auth/can-write";
 import { formatDate, formatNumber } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -56,31 +58,47 @@ export default function WarehouseDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const warehouse = getWarehouse(id);
-  const [items, setItems] = useState<WarehouseStockItem[]>(() =>
-    getStockByWarehouse(id)
+  const [warehouse, setWarehouse] = useState<Warehouse | null | undefined>(
+    undefined
   );
-  const [categories, setCategories] = useState<string[]>(() =>
-    getCategoriesForWarehouse(id)
-  );
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [items, setItems] = useState<WarehouseStockItem[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [transfers, setTransfers] = useState<StockTransfer[]>([]);
   const [formOpen, setFormOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
 
-  const refreshStock = useCallback(() => {
-    setItems(getStockItemsForWarehouse(id));
-    setCategories(getStockCategoriesForWarehouse(id));
+  const refreshStock = useCallback(async () => {
+    const [whList, stockItems, cats, tr] = await Promise.all([
+      getWarehouses(),
+      getStockItemsForWarehouse(id),
+      getStockCategoriesForWarehouse(id),
+      getStockTransfers(),
+    ]);
+    setWarehouses(whList);
+    setWarehouse(whList.find((w) => w.id === id) ?? null);
+    setItems(stockItems);
+    setCategories(cats);
+    setTransfers(
+      tr.filter((t) => t.fromWarehouseId === id || t.toWarehouseId === id)
+    );
   }, [id]);
 
   useEffect(() => {
-    refreshStock();
+    void refreshStock();
   }, [refreshStock]);
 
+  if (warehouse === undefined) {
+    return (
+      <div className="p-10 text-sm text-muted-foreground">Depo yükleniyor…</div>
+    );
+  }
   if (!warehouse) notFound();
 
-  const transfers = getTransfersForWarehouse(id);
   const config =
     warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
   const Icon = config.icon;
-  const utilization = Math.round((warehouse.used / warehouse.capacity) * 100);
+  const utilization = occupancyPercent(warehouse.used, warehouse.capacity);
 
   const stats = useMemo(() => {
     const alerts = items.filter(
@@ -119,13 +137,25 @@ export default function WarehouseDetailPage({
         title={warehouse.name}
         description={warehouse.description}
         actions={
-          <Button
-            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-            onClick={() => setFormOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Stok Girişi
-          </Button>
+          <CanWrite resource="stock">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => setTransferOpen(true)}
+              >
+                <ArrowRightLeft className="w-4 h-4 mr-2" />
+                Stok Aktar
+              </Button>
+              <Button
+                className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                onClick={() => setFormOpen(true)}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Stok Girişi
+              </Button>
+            </div>
+          </CanWrite>
         }
       />
 
@@ -320,6 +350,14 @@ export default function WarehouseDetailPage({
         open={formOpen}
         onOpenChange={setFormOpen}
         defaultWarehouseId={id}
+        onCreated={refreshStock}
+      />
+      <StockTransferFormSheet
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
+        warehouses={warehouses}
+        items={items}
+        defaultFromWarehouseId={id}
         onCreated={refreshStock}
       />
     </div>

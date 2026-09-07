@@ -1,49 +1,96 @@
 import type { Recipe } from "@/data/recipes";
-import { seedRecipes } from "@/data/recipes";
-import { rawMaterials } from "@/data/raw-materials";
-import { readFromStorage, saveToStorage, todayIso } from "@/lib/utils";
+import { apiGet, apiPost, apiPut } from "@/lib/api-client";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
+import { todayIso } from "@/lib/utils";
 
-const STORAGE_KEY = "hamdart-recipes";
-
-function readStored(): Recipe[] {
-  return readFromStorage<Recipe>(STORAGE_KEY);
+export async function getAllRecipes(): Promise<Recipe[]> {
+  return apiGet<Recipe[]>("/api/recipes");
 }
 
-function writeStored(recipes: Recipe[]): void {
-  saveToStorage(STORAGE_KEY, recipes);
+export async function getRecipeByOrderId(orderId: string): Promise<Recipe | undefined> {
+  const recipe = await apiGet<Recipe | null>(
+    `/api/recipes/lookup?orderId=${encodeURIComponent(orderId)}`
+  );
+  return recipe ?? undefined;
 }
 
-export function getAllRecipes(): Recipe[] {
-  const stored = readStored();
-  const byOrder = new Map<string, Recipe>();
-  for (const r of seedRecipes) byOrder.set(r.orderId, r);
-  for (const r of stored) byOrder.set(r.orderId, r);
-  return Array.from(byOrder.values());
+export async function getRecipeForOrder(order: {
+  id: string;
+  product: string;
+  recipeNo?: string;
+}): Promise<Recipe | undefined> {
+  const params = new URLSearchParams({
+    orderId: order.id,
+    product: order.product,
+  });
+  if (order.recipeNo) params.set("recipeNo", order.recipeNo);
+  const recipe = await apiGet<Recipe | null>(
+    `/api/recipes/lookup?${params.toString()}`
+  );
+  return recipe ?? undefined;
 }
 
-export function getRecipeByOrderId(orderId: string): Recipe | undefined {
-  return getAllRecipes().find((r) => r.orderId === orderId);
+export async function saveRecipe(recipe: Recipe): Promise<Recipe> {
+  return apiPut<Recipe>("/api/recipes", recipe);
 }
 
-export function saveRecipe(recipe: Recipe): void {
-  const stored = readStored().filter((r) => r.orderId !== recipe.orderId);
-  writeStored([...stored, recipe]);
+export async function nextRecipeCode(): Promise<string> {
+  const all = await getAllRecipes();
+  let max = 0;
+  for (const r of all) {
+    const match = (r.code ?? "").match(/^REC-(\d+)$/i);
+    if (match) max = Math.max(max, parseInt(match[1], 10));
+  }
+  return `REC-${String(max + 1).padStart(3, "0")}`;
 }
 
-export function createEmptyRecipe(
+export type CreateRecipeInput = {
+  code?: string;
+  productCode?: string;
+  productName: string;
+  lines: { materialName: string; unit: string; quantityPerUnit: number }[];
+  createdBy?: string;
+};
+
+export async function createRecipe(input: CreateRecipeInput): Promise<Recipe> {
+  return apiPost<Recipe>("/api/recipes", input);
+}
+
+export async function createEmptyRecipe(
   orderId: string,
   productName: string,
   createdBy: string
-): Recipe {
+): Promise<Recipe> {
+  const all = await getAllRecipes();
+  const materials = await getAllRawMaterials();
+  const existing = all.find(
+    (r) =>
+      r.productName.trim().toLocaleLowerCase("tr") ===
+      productName.trim().toLocaleLowerCase("tr")
+  );
+  if (existing) {
+    return {
+      ...existing,
+      id: `rec-${Date.now()}`,
+      orderId,
+      createdAt: todayIso(),
+      createdBy,
+      status: "draft",
+    };
+  }
   return {
     id: `rec-${Date.now()}`,
+    code: "",
+    productCode: "",
     orderId,
     productName,
     createdAt: todayIso(),
     createdBy,
     lines: [
       {
-        materialId: rawMaterials[0]?.id ?? "rm-2",
+        materialId: materials[0]?.id ?? "",
+        materialName: materials[0]?.name ?? "",
+        unit: materials[0]?.unit ?? "mg",
         quantityPerUnit: 0,
       },
     ],

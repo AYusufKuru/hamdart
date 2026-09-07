@@ -1,44 +1,35 @@
-import {
-  rawMaterials as seedMaterials,
-  type RawMaterial,
-  type RawMaterialCategory,
-} from "@/data/raw-materials";
-import { readFromStorage, saveToStorage } from "@/lib/utils";
-
-const STORAGE_KEY = "hamdart-raw-materials";
+import type { RawMaterial, RawMaterialCategory } from "@/data/raw-materials";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 export const RAW_MATERIAL_CATEGORIES: RawMaterialCategory[] = [
-  "Ham Madde",
+  "Paketleme",
+  "Kimyasal",
+  "Bitki",
+  "Ekstrakt",
+  "Kapsül",
+  "Yağ",
   "Eksipiyan",
+  "Etken madde",
+  "Ham Madde",
   "Ambalaj",
   "Diğer",
 ];
 
 export const RAW_MATERIAL_UNITS = ["kg", "g", "adet", "L", "mL"] as const;
 
-function readStored(): RawMaterial[] {
-  return readFromStorage<RawMaterial>(STORAGE_KEY);
+export async function getAllRawMaterials(): Promise<RawMaterial[]> {
+  return apiGet<RawMaterial[]>("/api/raw-materials");
 }
 
-function writeStored(list: RawMaterial[]): void {
-  saveToStorage(STORAGE_KEY, list);
+export async function getRawMaterialById(id: string): Promise<RawMaterial | undefined> {
+  const all = await getAllRawMaterials();
+  return all.find((m) => m.id === id);
 }
 
-export function getAllRawMaterials(): RawMaterial[] {
-  const stored = readStored();
-  const byId = new Map<string, RawMaterial>();
-  for (const m of seedMaterials) byId.set(m.id, m);
-  for (const m of stored) byId.set(m.id, m);
-  return Array.from(byId.values());
-}
-
-export function getRawMaterialById(id: string): RawMaterial | undefined {
-  return getAllRawMaterials().find((m) => m.id === id);
-}
-
-export function getRawMaterialBySku(sku: string): RawMaterial | undefined {
+export async function getRawMaterialBySku(sku: string): Promise<RawMaterial | undefined> {
   const key = sku.trim().toLowerCase();
-  return getAllRawMaterials().find((m) => m.sku.toLowerCase() === key);
+  const all = await getAllRawMaterials();
+  return all.find((m) => m.sku.toLowerCase() === key);
 }
 
 export type CreateRawMaterialInput = {
@@ -49,20 +40,6 @@ export type CreateRawMaterialInput = {
   unitCost: number;
 };
 
-export function createRawMaterial(input: CreateRawMaterialInput): RawMaterial {
-  const sku = input.sku.trim();
-  if (getRawMaterialBySku(sku)) {
-    throw new Error("Bu SKU zaten kayıtlı");
-  }
-  const material: RawMaterial = {
-    id: `rm-${Date.now()}`,
-    sku,
-    name: input.name.trim(),
-    category: input.category,
-    unit: input.unit,
-    unitCost: input.unitCost,
-  };
-  const stored = readStored().filter((m) => m.id !== material.id);
-  writeStored([material, ...stored]);
-  return material;
+export async function createRawMaterial(input: CreateRawMaterialInput): Promise<RawMaterial> {
+  return apiPost<RawMaterial>("/api/raw-materials", input);
 }

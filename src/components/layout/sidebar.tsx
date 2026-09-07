@@ -13,45 +13,91 @@ import {
   ClipboardList,
   Beaker,
   Truck,
+  Users,
+  Building2,
+  Contact,
+  FileSpreadsheet,
+  BookOpen,
+  Wallet,
+  Boxes,
+  Shield,
+  type LucideIcon,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { cn, formatDate } from "@/lib/utils";
-import { dashboardStats } from "@/data/mock";
-import { warehouses } from "@/data/warehouses";
+import type { Warehouse as WarehouseRow } from "@/data/warehouses";
+import { getWarehouses } from "@/lib/warehouse-store";
+import { useAuth } from "@/lib/auth/auth-context";
+import { NAV_ITEMS, type Resource } from "@/lib/auth/permissions";
 
-export const sidebarSections = [
-  {
-    title: "Genel",
-    items: [
-      { icon: LayoutDashboard, label: "Dashboard", href: "/dashboard" },
-    ],
-  },
-  {
-    title: "Üretim",
-    items: [
-      { icon: Factory, label: "Fabrika & Üretim", href: "/factory" },
-      { icon: ClipboardList, label: "Reçeteler", href: "/recipes" },
-      { icon: Beaker, label: "Hammadde", href: "/raw-materials" },
-      { icon: Truck, label: "Hammadde Siparişleri", href: "/raw-material-orders" },
-    ],
-  },
-  {
-    title: "Lojistik",
-    items: [
-      { icon: Package, label: "Stok Durumu", href: "/stock" },
-      { icon: Warehouse, label: "Depolar", href: "/warehouses" },
-      { icon: ShoppingCart, label: "Siparişler", href: "/orders" },
-    ],
-  },
-  {
-    title: "Ar-Ge",
-    items: [
-      { icon: FlaskConical, label: "Laboratuvar", href: "/rd-lab" },
-    ],
-  },
-];
+const ICONS: Record<Resource, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  personnel: Users,
+  factory: Factory,
+  recipes: ClipboardList,
+  raw_materials: Beaker,
+  raw_material_orders: Truck,
+  products: Boxes,
+  stock: Package,
+  warehouses: Warehouse,
+  orders: ShoppingCart,
+  customers: Contact,
+  suppliers: Building2,
+  invoices: FileSpreadsheet,
+  ledger: BookOpen,
+  budget: Wallet,
+  admin: Shield,
+  lab: FlaskConical,
+};
+
+export function useSidebarSections() {
+  const { canRead } = useAuth();
+
+  const sections: {
+    title: string;
+    items: { icon: LucideIcon; label: string; href: string }[];
+  }[] = [];
+
+  const titles = [...new Set(NAV_ITEMS.map((i) => i.title))];
+
+  for (const title of titles) {
+    const items = NAV_ITEMS.filter(
+      (item) => item.title === title && canRead(item.resource)
+    ).map((item) => ({
+      icon: ICONS[item.resource],
+      label: item.label,
+      href: item.href,
+    }));
+    if (items.length > 0) {
+      sections.push({ title, items });
+    }
+  }
+
+  return sections;
+}
+
+/** @deprecated useSidebarSections kullanın */
+export const sidebarSections = NAV_ITEMS.map((item) => ({
+  title: item.title,
+  items: [
+    {
+      icon: ICONS[item.resource],
+      label: item.label,
+      href: item.href,
+    },
+  ],
+}));
 
 export function Sidebar() {
   const pathname = usePathname();
+  const sections = useSidebarSections();
+  const [warehouses, setWarehouses] = useState<WarehouseRow[]>([]);
+
+  useEffect(() => {
+    void getWarehouses()
+      .then(setWarehouses)
+      .catch(() => setWarehouses([]));
+  }, []);
 
   return (
     <div className="flex flex-col h-full bg-card/80 backdrop-blur-xl border-r w-64 pt-8 pb-6">
@@ -70,7 +116,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 px-4 space-y-5 overflow-y-auto">
-        {sidebarSections.map((section) => (
+        {sections.map((section) => (
           <div key={section.title}>
             <p className="px-4 mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/70">
               {section.title}
@@ -95,7 +141,9 @@ export function Sidebar() {
                     <item.icon
                       className={cn(
                         "w-4 h-4 transition-transform group-hover:scale-110 shrink-0",
-                        isActive ? "text-white" : "text-muted-foreground/70 group-hover:text-indigo-500"
+                        isActive
+                          ? "text-white"
+                          : "text-muted-foreground/70 group-hover:text-indigo-500"
                       )}
                     />
                     <span className="truncate">{item.label}</span>
@@ -113,10 +161,10 @@ export function Sidebar() {
       <div className="px-6 pt-6 mt-4 border-t border-border/50">
         <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3">
           <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
-            GMP Uyumluluk
+            Depolar
           </p>
           <p className="text-2xl font-black text-emerald-600 mt-1">
-            {dashboardStats.gmpCompliance}%
+            {warehouses.length}
           </p>
           <p className="text-[10px] text-muted-foreground mt-1">
             Son denetim:{" "}

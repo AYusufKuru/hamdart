@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,18 +16,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  productionLines as seedLines,
-  productionBatches as seedBatches,
-  type ProductionBatch,
-  type ProductionLine,
-} from "@/data/mock";
+import { type ProductionBatch, type ProductionLine } from "@/data/mock";
 import {
   getAllProductionBatches,
   getAllProductionLines,
 } from "@/lib/production-store";
 import { BatchFormSheet } from "@/components/factory/batch-form-sheet";
 import { LineSettingsSheet } from "@/components/factory/line-settings-sheet";
+import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -54,24 +51,30 @@ const batchStatusMap = {
   rejected: { label: "Reddedildi", variant: "danger" as const },
 };
 
-export default function FactoryPage() {
+function FactoryPageContent() {
   const searchParams = useSearchParams();
-  const [productionLines, setProductionLines] =
-    useState<ProductionLine[]>(seedLines);
-  const [productionBatches, setProductionBatches] =
-    useState<ProductionBatch[]>(seedBatches);
+  const { canWrite } = useAuth();
+  const canEditFactory = canWrite("factory");
+  const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
+  const [productionBatches, setProductionBatches] = useState<
+    ProductionBatch[]
+  >([]);
   const [formOpen, setFormOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLineId, setSettingsLineId] = useState<string | undefined>();
   const [tab, setTab] = useState("lines");
 
-  const refresh = () => {
-    setProductionLines(getAllProductionLines());
-    setProductionBatches(getAllProductionBatches());
+  const refresh = async () => {
+    const [lines, batches] = await Promise.all([
+      getAllProductionLines(),
+      getAllProductionBatches(),
+    ]);
+    setProductionLines(lines);
+    setProductionBatches(batches);
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
     const nextTab = searchParams.get("tab");
     if (nextTab === "batches") setTab("batches");
     if (nextTab === "lines") setTab("lines");
@@ -89,24 +92,26 @@ export default function FactoryPage() {
         description="Üretim hatları, batch takibi, verimlilik ve GMP uyumlu operasyon yönetimi."
         actions={
           <>
-            <Button
-              variant="outline"
-              className="rounded-2xl"
-              onClick={() => {
-                setSettingsLineId(undefined);
-                setSettingsOpen(true);
-              }}
-            >
-              <Settings className="w-4 h-4 mr-2" />
-              Hat Ayarları
-            </Button>
-            <Button
-              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-              onClick={() => setFormOpen(true)}
-            >
-              <Factory className="w-4 h-4 mr-2" />
-              Yeni Batch Başlat
-            </Button>
+            <CanWrite resource="factory">
+              <Button
+                variant="outline"
+                className="rounded-2xl"
+                onClick={() => {
+                  setSettingsLineId(undefined);
+                  setSettingsOpen(true);
+                }}
+              >
+                <Settings className="w-4 h-4 mr-2" />
+                Hat Ayarları
+              </Button>
+              <Button
+                className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                onClick={() => setFormOpen(true)}
+              >
+                <Factory className="w-4 h-4 mr-2" />
+                Yeni Batch Başlat
+              </Button>
+            </CanWrite>
           </>
         }
       />
@@ -152,16 +157,26 @@ export default function FactoryPage() {
               return (
                 <Card
                   key={line.id}
-                  className="glass-card border-none hover:shadow-lg transition-shadow cursor-pointer"
-                  onClick={() => {
-                    setSettingsLineId(line.id);
-                    setSettingsOpen(true);
-                  }}
+                  className={cn(
+                    "glass-card border-none transition-shadow",
+                    canEditFactory && "hover:shadow-lg cursor-pointer"
+                  )}
+                  onClick={
+                    canEditFactory
+                      ? () => {
+                          setSettingsLineId(line.id);
+                          setSettingsOpen(true);
+                        }
+                      : undefined
+                  }
                 >
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div>
                         <CardTitle className="text-base">{line.name}</CardTitle>
+                        <p className="text-xs font-mono text-muted-foreground mt-1">
+                          Makine Kodu: {line.code ?? line.id}
+                        </p>
                         <p className="text-sm text-muted-foreground mt-1">{line.product}</p>
                       </div>
                       <Badge variant={status.variant} className="gap-1">
@@ -296,7 +311,7 @@ export default function FactoryPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         onCreated={() => {
-          refresh();
+          void refresh();
           setTab("batches");
         }}
       />
@@ -305,10 +320,18 @@ export default function FactoryPage() {
         onOpenChange={setSettingsOpen}
         initialLineId={settingsLineId}
         onSaved={() => {
-          refresh();
+          void refresh();
           setTab("lines");
         }}
       />
     </div>
+  );
+}
+
+export default function FactoryPage() {
+  return (
+    <Suspense fallback={<div className="p-10 text-muted-foreground">Yükleniyor...</div>}>
+      <FactoryPageContent />
+    </Suspense>
   );
 }

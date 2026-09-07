@@ -76,7 +76,9 @@ export function RecipeDetailPanel({
           <div>
             <h3 className="text-xl font-black">{recipe.productName}</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              {order?.orderNo ?? "Sipariş bağlı değil"} · {recipe.createdBy}
+              {recipe.code || "Reçete kodu yok"}
+              {recipe.productCode ? ` · ${recipe.productCode}` : ""}
+              {order ? ` · ${order.orderNo}` : ""}
             </p>
           </div>
           <Badge variant={recipe.status === "saved" ? "success" : "warning"}>
@@ -133,26 +135,21 @@ export function RecipeDetailPanel({
         <Separator />
 
         <section>
-          <h4 className="text-sm font-black mb-3">Reçete Satırları</h4>
-          {totals && totals.lines.length > 0 ? (
+          <h4 className="text-sm font-black mb-3">
+            Hammadde adı · Birim · Birim Miktar
+          </h4>
+          {recipe.lines.length > 0 ? (
             <ul className="space-y-2">
-              {totals.lines.map((line, i) => (
+              {recipe.lines.map((line, i) => (
                 <li
                   key={i}
                   className="rounded-xl border p-3 text-sm flex justify-between gap-3"
                 >
-                  <div className="min-w-0">
-                    <p className="font-bold truncate">{line.materialName}</p>
-                    <p className="text-muted-foreground text-xs mt-0.5">
-                      {line.quantityPerUnit} {line.unit} / çıktı →{" "}
-                      {line.totalQuantity.toLocaleString("tr-TR", {
-                        maximumFractionDigits: 6,
-                      })}{" "}
-                      {line.unit}
-                    </p>
-                  </div>
-                  <p className="font-bold shrink-0">
-                    {formatMoney(line.lineCost)}
+                  <p className="font-bold min-w-0 truncate">
+                    {line.materialName || "—"}
+                  </p>
+                  <p className="text-muted-foreground shrink-0">
+                    {line.quantityPerUnit} {line.unit || ""}
                   </p>
                 </li>
               ))}

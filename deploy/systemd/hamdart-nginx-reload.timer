@@ -1,0 +1,10 @@
+[Unit]
+Description=Reload nginx daily so renewed Let's Encrypt certs are picked up
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

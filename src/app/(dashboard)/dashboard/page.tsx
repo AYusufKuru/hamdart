@@ -7,22 +7,18 @@ import { StatCards, ComplianceCard } from "@/components/dashboard/stat-cards";
 import { ProductionChart, StockChart } from "@/components/dashboard/charts";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { PageHeader } from "@/components/shared/page-header";
-import {
-  productionLines as seedLines,
-  orders as seedOrders,
-  type Order,
-  type ProductionLine,
-} from "@/data/mock";
+import { type Order, type ProductionLine } from "@/data/mock";
 import { getAllOrders } from "@/lib/order-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { getAllProductionBatches, getAllProductionLines } from "@/lib/production-store";
 import { getAllLabExperiments } from "@/lib/lab-store";
-import { toDisplayStockItems } from "@/lib/stock-store";
+import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { formatNumber, todayIso } from "@/lib/utils";
 import { toast } from "sonner";
+import { CanWrite } from "@/components/auth/can-write";
 import { ArrowRight, Download, Plus } from "lucide-react";
 
 const lineStatusMap = {
@@ -33,14 +29,19 @@ const lineStatusMap = {
 };
 
 export default function DashboardPage() {
-  const [orders, setOrders] = useState<Order[]>(seedOrders);
-  const [productionLines, setProductionLines] =
-    useState<ProductionLine[]>(seedLines);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
 
   useEffect(() => {
-    syncReplenishmentOrders();
-    setOrders(getAllOrders());
-    setProductionLines(getAllProductionLines());
+    void (async () => {
+      await syncReplenishmentOrders();
+      const [orderList, lines] = await Promise.all([
+        getAllOrders(),
+        getAllProductionLines(),
+      ]);
+      setOrders(orderList);
+      setProductionLines(lines);
+    })();
   }, []);
 
   const urgentOrders = orders.filter(
@@ -50,12 +51,17 @@ export default function DashboardPage() {
       o.status !== "cancelled"
   );
 
-  function downloadReport() {
-    const allOrders = getAllOrders();
-    const batches = getAllProductionBatches();
-    const lines = getAllProductionLines();
-    const experiments = getAllLabExperiments();
-    const stock = toDisplayStockItems();
+  async function downloadReport() {
+    await syncReplenishmentOrders();
+    const [allOrders, batches, lines, experiments, warehouseItems] =
+      await Promise.all([
+        getAllOrders(),
+        getAllProductionBatches(),
+        getAllProductionLines(),
+        getAllLabExperiments(),
+        getAllWarehouseStockItems(),
+      ]);
+    const stock = toDisplayStockItems(warehouseItems);
     const alerts = stock.filter(
       (i) =>
         i.status === "low" || i.status === "critical" || i.status === "expiring"
@@ -123,15 +129,17 @@ export default function DashboardPage() {
               <Download className="w-4 h-4 mr-2" />
               Rapor İndir
             </Button>
-            <Button
-              className="rounded-2xl h-11 bg-gradient-to-r from-indigo-600 to-blue-500 border-none shadow-lg shadow-indigo-500/20"
-              asChild
-            >
-              <Link href="/orders?yeni=1">
-                <Plus className="w-4 h-4 mr-2" />
-                Yeni Sipariş
-              </Link>
-            </Button>
+            <CanWrite resource="orders">
+              <Button
+                className="rounded-2xl h-11 bg-gradient-to-r from-indigo-600 to-blue-500 border-none shadow-lg shadow-indigo-500/20"
+                asChild
+              >
+                <Link href="/orders?yeni=1">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Yeni Sipariş
+                </Link>
+              </Button>
+            </CanWrite>
           </>
         }
       />

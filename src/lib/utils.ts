@@ -13,9 +13,22 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-/** Yerel takvim günü (UTC kayması yok) */
+/**
+ * Uygulama takvim kuşağı.
+ * YYYY-MM-DD alanları (sipariş, SKT, fatura) bu günün takvimidir; UTC'ye çevrilmez.
+ * timestamptz anları (denetim, aktarım) UTC saklanır, gösterimde bu kuşağa çevrilir.
+ * Ekranda tarihler Türkiye biçiminde: dd-mm-yyyy.
+ */
+export const APP_TIME_ZONE = "Europe/Istanbul";
+
+/** Europe/Istanbul takvim günü YYYY-MM-DD */
 export function toLocalIsoDate(date: Date = new Date()): string {
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 export function todayIso(): string {
@@ -23,35 +36,56 @@ export function todayIso(): string {
 }
 
 export function plusDaysIso(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return toLocalIsoDate(d);
+  const [y, m, d] = todayIso().split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + days));
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
 }
 
 export function plusYearsIso(years: number): string {
-  const d = new Date();
-  d.setFullYear(d.getFullYear() + years);
-  return toLocalIsoDate(d);
+  const [y, m, d] = todayIso().split("-").map(Number);
+  const next = new Date(Date.UTC(y + years, m - 1, d));
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
 }
 
 export function parseLocalDate(iso: string): Date {
-  const dateOnly = iso.slice(0, 10);
+  const dateOnly = iso.trim().slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
     const [y, m, d] = dateOnly.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+  if (/^\d{2}-\d{2}-\d{4}$/.test(dateOnly)) {
+    const [d, m, y] = dateOnly.split("-").map(Number);
     return new Date(y, m - 1, d);
   }
   return new Date(iso);
 }
 
+/** Ekranda Türkiye biçimi: dd-mm-yyyy */
 export function formatDate(date: string): string {
   if (!date?.trim()) return "—";
+  if (date.includes("T")) {
+    const instant = new Date(date);
+    if (Number.isNaN(instant.getTime())) return "—";
+    const ymd = new Intl.DateTimeFormat("en-CA", {
+      timeZone: APP_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(instant);
+    const [y, m, d] = ymd.split("-");
+    return `${d}-${m}-${y}`;
+  }
+  const dateOnly = date.trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    const [y, m, d] = dateOnly.split("-");
+    return `${d}-${m}-${y}`;
+  }
+  if (/^\d{2}-\d{2}-\d{4}$/.test(dateOnly)) {
+    return dateOnly;
+  }
   const parsed = parseLocalDate(date);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("tr-TR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return `${pad2(parsed.getDate())}-${pad2(parsed.getMonth() + 1)}-${parsed.getFullYear()}`;
 }
 
 export function saveToStorage(key: string, value: unknown): void {

@@ -17,11 +17,7 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import {
-  productionLines as seedLines,
-  type BatchStatus,
-  type ProductionLine,
-} from "@/data/mock";
+import { type BatchStatus, type ProductionLine } from "@/data/mock";
 import { plusDaysIso, todayIso } from "@/lib/utils";
 import {
   BATCH_STATUS_OPTIONS,
@@ -42,7 +38,7 @@ function emptyForm(lines: ProductionLine[]) {
   const product =
     preferred?.product && preferred.product !== "-" ? preferred.product : "";
   return {
-    batchNo: lineName ? nextBatchNo(lineName) : "",
+    batchNo: "",
     product,
     line: lineName,
     status: "in_progress" as BatchStatus,
@@ -66,16 +62,25 @@ export function BatchFormSheet({
   onOpenChange,
   onCreated,
 }: BatchFormSheetProps) {
-  const [lines, setLines] = useState<ProductionLine[]>(seedLines);
+  const [lines, setLines] = useState<ProductionLine[]>([]);
   const [products, setProducts] = useState<string[]>([]);
-  const [form, setForm] = useState(() => emptyForm(seedLines));
+  const [form, setForm] = useState(() => emptyForm([]));
 
   useEffect(() => {
     if (!open) return;
-    const allLines = getAllProductionLines();
-    setLines(allLines);
-    setProducts(getKnownProducts());
-    setForm(emptyForm(allLines));
+    void (async () => {
+      const [allLines, productList] = await Promise.all([
+        getAllProductionLines(),
+        getKnownProducts(),
+      ]);
+      setLines(allLines);
+      setProducts(productList);
+      const formData = emptyForm(allLines);
+      if (formData.line) {
+        formData.batchNo = await nextBatchNo(formData.line);
+      }
+      setForm(formData);
+    })();
   }, [open]);
 
   const selectedLine = lines.find((l) => l.name === form.line);
@@ -84,16 +89,18 @@ export function BatchFormSheet({
     const line = lines.find((l) => l.name === lineName);
     const product =
       line?.product && line.product !== "-" ? line.product : form.product;
-    setForm((f) => ({
-      ...f,
-      line: lineName,
-      product,
-      batchNo: nextBatchNo(lineName),
-      unit: suggestUnit(product, lineName),
-    }));
+    void nextBatchNo(lineName).then((batchNo) =>
+      setForm((f) => ({
+        ...f,
+        line: lineName,
+        product,
+        batchNo,
+        unit: suggestUnit(product, lineName),
+      }))
+    );
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const quantity = parseFloat(form.quantity);
     const yieldValue = parseFloat(form.yield);
@@ -129,7 +136,7 @@ export function BatchFormSheet({
     }
 
     try {
-      const created = createProductionBatch({
+      const created = await createProductionBatch({
         batchNo: form.batchNo,
         product: form.product,
         line: form.line,
@@ -202,7 +209,7 @@ export function BatchFormSheet({
               id="batch-product"
               list="batch-product-list"
               required
-              placeholder="Örn: CardioMax 50mg"
+              placeholder="Örn: Hepanorm 30 Tablet"
               value={form.product}
               onChange={(e) => {
                 const product = e.target.value;

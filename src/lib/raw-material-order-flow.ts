@@ -3,10 +3,6 @@ import type {
   RawMaterialOrderStatus,
 } from "@/data/raw-material-orders";
 import { rawMaterialOrderStatusConfig } from "@/data/raw-material-orders";
-import { WAREHOUSE_IDS } from "@/data/warehouses";
-import { getRawMaterialBySku } from "@/lib/raw-material-store";
-import { createStockEntry } from "@/lib/stock-store";
-import { plusYearsIso, todayIso } from "@/lib/utils";
 
 export type RawMaterialOrderAction =
   | "place_order"
@@ -70,63 +66,6 @@ export function getAvailableActions(
   return Object.keys(transitions[status] ?? {}) as RawMaterialOrderAction[];
 }
 
-export function applyAction(
-  order: RawMaterialOrder,
-  action: RawMaterialOrderAction
-): RawMaterialOrder {
-  const next = transitions[order.status]?.[action];
-  if (!next) return order;
-
-  const today = todayIso();
-  const updated: RawMaterialOrder = { ...order, status: next };
-
-  switch (action) {
-    case "place_order":
-      updated.invoiceNo = updated.invoiceNo ?? `FTR-${Date.now().toString().slice(-8)}`;
-      break;
-    case "mark_received":
-      updated.receivedDate = today;
-      if (!updated.lotNo) {
-        updated.lotNo = `LOT-${order.sku}-${today.replace(/-/g, "")}`;
-      }
-      break;
-    case "start_qc":
-      updated.qcStartedAt = today;
-      updated.qcAnalyst = updated.qcAnalyst ?? "Uzm. Lab. Atanmadı";
-      break;
-    case "approve_qc":
-      updated.qcCompletedAt = today;
-      updated.warehousedAt = today;
-      updated.qcNotes =
-        updated.qcNotes ?? "Kalite kontrol spesifikasyon dahilinde — depo girişi onaylandı";
-      {
-        const material = getRawMaterialBySku(order.sku);
-        createStockEntry({
-          sku: order.sku,
-          name: order.materialName,
-          category: material?.category ?? "Ham Madde",
-          warehouseId: order.targetWarehouseId ?? WAREHOUSE_IDS.production,
-          quantity: order.quantity,
-          unit: order.unit,
-          minStock: Math.max(1, Math.round(order.quantity * 0.2)),
-          lotNo: updated.lotNo ?? `LOT-${order.sku}-${today.replace(/-/g, "")}`,
-          expiryDate: plusYearsIso(2),
-        });
-      }
-      break;
-    case "reject_qc":
-      updated.qcCompletedAt = today;
-      updated.qcNotes =
-        updated.qcNotes ?? "Kalite kontrol spesifikasyon dışı — iade süreci başlatıldı";
-      break;
-    case "complete_return":
-      updated.returnedAt = today;
-      break;
-  }
-
-  return updated;
-}
-
 export function isSuccessPath(status: RawMaterialOrderStatus): boolean {
   return status === "warehoused";
 }
@@ -153,4 +92,14 @@ export function getFlowStepState(
   if (step < orderStep) return "done";
   if (step === orderStep) return "current";
   return "upcoming";
+}
+
+/** @deprecated Sunucu tarafında applyRawMaterialOrderActionApi kullanın */
+export function applyAction(
+  order: RawMaterialOrder,
+  action: RawMaterialOrderAction
+): RawMaterialOrder {
+  const next = transitions[order.status]?.[action];
+  if (!next) return order;
+  return { ...order, status: next };
 }

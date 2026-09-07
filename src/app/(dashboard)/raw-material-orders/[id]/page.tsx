@@ -15,16 +15,17 @@ import {
 } from "@/data/raw-material-orders";
 import {
   actionLabels,
-  applyAction,
   getAvailableActions,
   type RawMaterialOrderAction,
 } from "@/lib/raw-material-order-flow";
 import {
+  applyRawMaterialOrderActionApi,
   getRawMaterialOrder,
-  saveRawMaterialOrder,
   syncReplenishmentOrders,
 } from "@/lib/raw-material-order-store";
 import { getWarehouseName } from "@/data/warehouses";
+import { getWarehouses } from "@/lib/warehouse-store";
+import { CanWrite } from "@/components/auth/can-write";
 import { formatDate, formatNumber } from "@/lib/utils";
 import { ArrowLeft, FileText, FlaskConical, Warehouse } from "lucide-react";
 import { toast } from "sonner";
@@ -40,8 +41,16 @@ export default function RawMaterialOrderDetailPage({
   );
 
   useEffect(() => {
-    syncReplenishmentOrders();
-    setOrder(getRawMaterialOrder(id) ?? null);
+    let cancelled = false;
+    void (async () => {
+      await syncReplenishmentOrders();
+      await getWarehouses().catch(() => []);
+      const found = await getRawMaterialOrder(id);
+      if (!cancelled) setOrder(found ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (order === undefined) {
@@ -55,10 +64,9 @@ export default function RawMaterialOrderDetailPage({
     rawMaterialOrderStatusConfig.to_order;
   const actions = getAvailableActions(order.status);
 
-  function handleAction(action: RawMaterialOrderAction) {
+  async function handleAction(action: RawMaterialOrderAction) {
     try {
-      const updated = applyAction(order!, action);
-      saveRawMaterialOrder(updated);
+      const updated = await applyRawMaterialOrderActionApi(order!.id, action);
       setOrder(updated);
       toast.success(
         action === "approve_qc"
@@ -226,28 +234,30 @@ export default function RawMaterialOrderDetailPage({
       </div>
 
       {actions.length > 0 && (
-        <Card className="glass-card border-none">
-          <CardHeader>
-            <CardTitle className="text-base">Sonraki Adım</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-3">
-            {actions.map((action) => {
-              const meta = actionLabels[action];
-              return (
-                <Button
-                  key={action}
-                  variant={
-                    meta.variant === "destructive" ? "destructive" : "default"
-                  }
-                  className="rounded-xl"
-                  onClick={() => handleAction(action)}
-                >
-                  {meta.label}
-                </Button>
-              );
-            })}
-          </CardContent>
-        </Card>
+        <CanWrite resource="raw_material_orders">
+          <Card className="glass-card border-none">
+            <CardHeader>
+              <CardTitle className="text-base">Sonraki Adım</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              {actions.map((action) => {
+                const meta = actionLabels[action];
+                return (
+                  <Button
+                    key={action}
+                    variant={
+                      meta.variant === "destructive" ? "destructive" : "default"
+                    }
+                    className="rounded-xl"
+                    onClick={() => void handleAction(action)}
+                  >
+                    {meta.label}
+                  </Button>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </CanWrite>
       )}
 
       <div className="pb-10" />

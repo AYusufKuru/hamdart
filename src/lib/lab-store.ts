@@ -1,14 +1,5 @@
-import {
-  labExperiments as seedExperiments,
-  labSamples as seedSamples,
-  type ExperimentStatus,
-  type LabExperiment,
-  type LabSample,
-} from "@/data/mock";
-import { readFromStorage, saveToStorage } from "@/lib/utils";
-
-const EXP_KEY = "hamdart-lab-experiments";
-const SMP_KEY = "hamdart-lab-samples";
+import type { ExperimentStatus, LabExperiment, LabSample } from "@/data/mock";
+import { apiGet, apiPost } from "@/lib/api-client";
 
 export const EXPERIMENT_STATUSES: { value: ExperimentStatus; label: string }[] =
   [
@@ -45,75 +36,59 @@ export const SAMPLE_TYPES = [
   "Sterilite",
 ] as const;
 
-function readStored<T>(key: string): T[] {
-  return readFromStorage<T>(key);
+export async function getAllLabExperiments(): Promise<LabExperiment[]> {
+  return apiGet<LabExperiment[]>("/api/lab/experiments");
 }
 
-function writeStored<T>(key: string, list: T[]): void {
-  saveToStorage(key, list);
+export async function getAllLabSamples(): Promise<LabSample[]> {
+  return apiGet<LabSample[]>("/api/lab/samples");
 }
 
-function mergeById<T extends { id: string }>(seed: T[], stored: T[]): T[] {
-  const byId = new Map<string, T>();
-  for (const item of seed) byId.set(item.id, item);
-  for (const item of stored) byId.set(item.id, item);
-  return Array.from(byId.values());
-}
-
-export function getAllLabExperiments(): LabExperiment[] {
-  return mergeById(seedExperiments, readStored<LabExperiment>(EXP_KEY)).sort(
-    (a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
-  );
-}
-
-export function getAllLabSamples(): LabSample[] {
-  return mergeById(seedSamples, readStored<LabSample>(SMP_KEY)).sort(
-    (a, b) =>
-      new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime()
-  );
-}
-
-export function nextExperimentCode(): string {
+export async function nextExperimentCode(): Promise<string> {
   const year = new Date().getFullYear();
   let max = 0;
-  for (const e of getAllLabExperiments()) {
+  for (const e of await getAllLabExperiments()) {
     const match = e.code.match(new RegExp(`^EXP-${year}-(\\d+)$`));
     if (match) max = Math.max(max, parseInt(match[1], 10));
   }
   return `EXP-${year}-${String(max + 1).padStart(3, "0")}`;
 }
 
-export function nextSampleNo(): string {
+export async function nextSampleNo(): Promise<string> {
   const year = new Date().getFullYear();
   let max = 0;
-  for (const s of getAllLabSamples()) {
+  for (const s of await getAllLabSamples()) {
     const match = s.sampleNo.match(new RegExp(`^SMP-${year}-(\\d+)$`));
     if (match) max = Math.max(max, parseInt(match[1], 10));
   }
   return `SMP-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
-export function getLabResearchers(): string[] {
-  return [
-    ...new Set(getAllLabExperiments().map((e) => e.researcher)),
-  ].sort((a, b) => a.localeCompare(b, "tr"));
-}
-
-export function getLabAnalysts(): string[] {
-  return [...new Set(getAllLabSamples().map((s) => s.analyst))].sort((a, b) =>
+export async function getLabResearchers(): Promise<string[]> {
+  const experiments = await getAllLabExperiments();
+  return [...new Set(experiments.map((e) => e.researcher))].sort((a, b) =>
     a.localeCompare(b, "tr")
   );
 }
 
-export function getLabDepartments(): string[] {
-  const fromData = getAllLabExperiments().map((e) => e.department);
+export async function getLabAnalysts(): Promise<string[]> {
+  const samples = await getAllLabSamples();
+  return [...new Set(samples.map((s) => s.analyst))].sort((a, b) =>
+    a.localeCompare(b, "tr")
+  );
+}
+
+export async function getLabDepartments(): Promise<string[]> {
+  const experiments = await getAllLabExperiments();
+  const fromData = experiments.map((e) => e.department);
   return [...new Set([...LAB_DEPARTMENTS, ...fromData])].sort((a, b) =>
     a.localeCompare(b, "tr")
   );
 }
 
-export function getSampleTypes(): string[] {
-  const fromData = getAllLabSamples().map((s) => s.type);
+export async function getSampleTypes(): Promise<string[]> {
+  const samples = await getAllLabSamples();
+  const fromData = samples.map((s) => s.type);
   return [...new Set([...SAMPLE_TYPES, ...fromData])];
 }
 
@@ -130,33 +105,10 @@ export type CreateExperimentInput = {
   priority: LabExperiment["priority"];
 };
 
-export function createLabExperiment(input: CreateExperimentInput): LabExperiment {
-  const code = input.code?.trim() || nextExperimentCode();
-  if (
-    getAllLabExperiments().some(
-      (e) => e.code.toLowerCase() === code.toLowerCase()
-    )
-  ) {
-    throw new Error("Bu deney kodu zaten kayıtlı");
-  }
-  const experiment: LabExperiment = {
-    id: `e-${Date.now()}`,
-    code,
-    title: input.title.trim(),
-    researcher: input.researcher.trim(),
-    department: input.department,
-    status: input.status,
-    startDate: input.startDate,
-    dueDate: input.dueDate,
-    progress: input.progress,
-    samples: input.samples,
-    priority: input.priority,
-  };
-  const stored = readStored<LabExperiment>(EXP_KEY).filter(
-    (e) => e.id !== experiment.id
-  );
-  writeStored(EXP_KEY, [experiment, ...stored]);
-  return experiment;
+export async function createLabExperiment(
+  input: CreateExperimentInput
+): Promise<LabExperiment> {
+  return apiPost<LabExperiment>("/api/lab/experiments", input);
 }
 
 export type CreateSampleInput = {
@@ -170,27 +122,8 @@ export type CreateSampleInput = {
   result?: string;
 };
 
-export function createLabSample(input: CreateSampleInput): LabSample {
-  const sampleNo = input.sampleNo?.trim() || nextSampleNo();
-  if (
-    getAllLabSamples().some(
-      (s) => s.sampleNo.toLowerCase() === sampleNo.toLowerCase()
-    )
-  ) {
-    throw new Error("Bu numune numarası zaten kayıtlı");
-  }
-  const sample: LabSample = {
-    id: `ls-${Date.now()}`,
-    sampleNo,
-    product: input.product.trim(),
-    batchNo: input.batchNo.trim(),
-    type: input.type,
-    status: input.status,
-    receivedDate: input.receivedDate,
-    analyst: input.analyst.trim(),
-    result: input.result?.trim() || undefined,
-  };
-  const stored = readStored<LabSample>(SMP_KEY).filter((s) => s.id !== sample.id);
-  writeStored(SMP_KEY, [sample, ...stored]);
-  return sample;
+export async function createLabSample(
+  input: CreateSampleInput
+): Promise<LabSample> {
+  return apiPost<LabSample>("/api/lab/samples", input);
 }

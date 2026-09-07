@@ -33,7 +33,7 @@ import { todayIso } from "@/lib/utils";
 
 function emptyForm() {
   return {
-    sampleNo: nextSampleNo(),
+    sampleNo: "",
     product: "",
     batchNo: "",
     type: "Üretim Numunesi",
@@ -64,30 +64,43 @@ export function SampleFormSheet({
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm());
-    const batchList = getAllProductionBatches();
-    setBatches(batchList.map((b) => b.batchNo));
-    setProducts(
-      [
-        ...new Set([
-          ...getOrderProducts(),
-          ...batchList.map((b) => b.product),
-        ]),
-      ].sort((a, b) => a.localeCompare(b, "tr"))
-    );
-    setTypes(getSampleTypes());
-    setAnalysts(getLabAnalysts());
+    void (async () => {
+      const [batchList, orderProducts, sampleNo] = await Promise.all([
+        getAllProductionBatches(),
+        getOrderProducts(),
+        nextSampleNo(),
+      ]);
+      setBatches(batchList.map((b) => b.batchNo));
+      setProducts(
+        [
+          ...new Set([
+            ...orderProducts,
+            ...batchList.map((b) => b.product),
+          ]),
+        ].sort((a, b) => a.localeCompare(b, "tr"))
+      );
+      const [typeList, analystList] = await Promise.all([
+        getSampleTypes(),
+        getLabAnalysts(),
+      ]);
+      setTypes(typeList);
+      setAnalysts(analystList);
+      setForm((f) => ({ ...f, sampleNo }));
+    })();
   }, [open]);
 
   function applyBatch(batchNo: string) {
-    const match = getAllProductionBatches().find((b) => b.batchNo === batchNo);
-    setForm((f) => ({
-      ...f,
-      batchNo,
-      product: match?.product ?? f.product,
-    }));
+    void getAllProductionBatches().then((batchList) => {
+      const match = batchList.find((b) => b.batchNo === batchNo);
+      setForm((f) => ({
+        ...f,
+        batchNo,
+        product: match?.product ?? f.product,
+      }));
+    });
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.product.trim() || !form.batchNo.trim() || !form.analyst.trim()) {
       toast.error("Ürün, batch ve analist zorunludur");
@@ -95,7 +108,7 @@ export function SampleFormSheet({
     }
 
     try {
-      const created = createLabSample({
+      const created = await createLabSample({
         sampleNo: form.sampleNo,
         product: form.product,
         batchNo: form.batchNo,
@@ -159,7 +172,7 @@ export function SampleFormSheet({
               id="smp-product"
               list="smp-product-list"
               required
-              placeholder="Örn: CardioMax 50mg"
+              placeholder="Örn: Hepanorm 30 Tablet"
               value={form.product}
               onChange={(e) =>
                 setForm((f) => ({ ...f, product: e.target.value }))
@@ -219,7 +232,7 @@ export function SampleFormSheet({
               id="smp-analyst"
               list="smp-analyst-list"
               required
-              placeholder="Örn: Uzm. Lab. Aylin Korkmaz"
+              placeholder="Örn: BEYZANUR EKEN"
               value={form.analyst}
               onChange={(e) =>
                 setForm((f) => ({ ...f, analyst: e.target.value }))

@@ -1,0 +1,334 @@
+generator client {
+  provider      = "prisma-client-js"
+  // native: geliştirme makinesi; debian-openssl-3.0.x: node:20-bookworm-slim
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id           String  @id
+  orderNo      String
+  customer     String
+  product      String
+  quantity     Float
+  unit         String
+  status       String
+  orderDate    String
+  deliveryDate String
+  priority     String
+  warehouse    String
+  value        Decimal @db.Decimal(18, 4)
+  recipeNo     String?
+
+  @@index([status])
+  @@index([orderDate])
+}
+
+model Recipe {
+  id          String  @id
+  code        String?
+  productCode String?
+  orderId     String
+  productName String
+  createdAt   String
+  createdBy   String
+  lines       String
+  extras      String
+  status      String
+}
+
+model RawMaterial {
+  id       String  @id
+  sku      String  @unique
+  name     String
+  category String
+  unit     String
+  unitCost Decimal @db.Decimal(18, 4)
+}
+
+model RawMaterialOrder {
+  id                String    @id
+  orderNo           String
+  materialName      String
+  sku               String
+  supplier          String
+  quantity          Float
+  unit              String
+  unitPrice         Decimal   @db.Decimal(18, 4)
+  totalPrice        Decimal   @db.Decimal(18, 4)
+  status            String
+  source            String
+  sourceNote        String?
+  targetWarehouseId String
+  orderDate         String
+  expectedDelivery  String?
+  receivedDate      String?
+  qcStartedAt       String?
+  qcCompletedAt     String?
+  warehousedAt      String?
+  returnedAt        String?
+  lotNo             String?
+  invoiceNo         String?
+  qcNotes           String?
+  qcAnalyst         String?
+  targetWarehouse   Warehouse @relation(fields: [targetWarehouseId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([sku])
+  @@index([targetWarehouseId])
+}
+
+model Warehouse {
+  id               String               @id
+  name             String
+  type             String
+  description      String
+  location         String
+  capacity         Float
+  used             Float
+  temperature      String
+  humidity         String
+  manager          String
+  items            Int
+  lastAudit        String
+  stockItems       WarehouseStockItem[] @relation("StockWarehouse")
+  replenishTargets WarehouseStockItem[] @relation("ReplenishFrom")
+  incomingOrders   RawMaterialOrder[]
+  transfersFrom    StockTransfer[]      @relation("TransferFrom")
+  transfersTo      StockTransfer[]      @relation("TransferTo")
+}
+
+model WarehouseStockItem {
+  id                       String     @id
+  sku                      String
+  name                     String
+  category                 String
+  warehouseId              String
+  quantity                 Float
+  unit                     String
+  minStock                 Float
+  maxStock                 Float?
+  lotNo                    String
+  expiryDate               String
+  status                   String
+  temperature              String?
+  replenishFromWarehouseId String?
+  labTargetQuantity        Float?
+  labDirectEntry           Boolean    @default(false)
+  warehouse                Warehouse  @relation("StockWarehouse", fields: [warehouseId], references: [id], onDelete: Restrict)
+  replenishFrom            Warehouse? @relation("ReplenishFrom", fields: [replenishFromWarehouseId], references: [id], onDelete: SetNull)
+
+  @@index([warehouseId])
+  @@index([status])
+  @@index([sku, warehouseId])
+}
+
+model StockTransfer {
+  id              String    @id @default(cuid())
+  fromWarehouseId String
+  toWarehouseId   String
+  sourceItemId    String
+  materialName    String
+  sku             String
+  quantity        Float
+  unit            String
+  reason          String
+  status          String
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+  note            String?
+  fromWarehouse   Warehouse @relation("TransferFrom", fields: [fromWarehouseId], references: [id], onDelete: Restrict)
+  toWarehouse     Warehouse @relation("TransferTo", fields: [toWarehouseId], references: [id], onDelete: Restrict)
+
+  @@index([fromWarehouseId])
+  @@index([toWarehouseId])
+  @@index([status])
+}
+
+model ProductionLine {
+  id              String @id
+  code            String?
+  name            String
+  product         String
+  status          String
+  efficiency      Float
+  currentBatch    String
+  outputToday     Float
+  targetToday     Float
+  operator        String
+  lastMaintenance String
+}
+
+model ProductionBatch {
+  id        String @id
+  batchNo   String @unique
+  product   String
+  line      String
+  status    String
+  quantity  Float
+  unit      String
+  startDate String
+  endDate   String
+  yield     Float
+  qcScore   Float
+}
+
+model LabExperiment {
+  id         String @id
+  code       String @unique
+  title      String
+  researcher String
+  department String
+  status     String
+  startDate  String
+  dueDate    String
+  progress   Float
+  samples    Int
+  priority   String
+}
+
+model LabSample {
+  id           String  @id
+  sampleNo     String  @unique
+  product      String
+  batchNo      String
+  type         String
+  status       String
+  receivedDate String
+  analyst      String
+  result       String?
+}
+
+model Customer {
+  id      String  @id
+  name    String
+  contact String
+  address String
+  taxNo   String
+  email   String
+  active  Boolean @default(true)
+}
+
+model Supplier {
+  id      String  @id
+  name    String
+  contact String
+  address String
+  active  Boolean @default(true)
+}
+
+model Personnel {
+  id         String  @id
+  firstName  String
+  lastName   String
+  department String
+  title      String
+  email      String
+  phone      String
+  hireDate   String
+  salary     Decimal @db.Decimal(18, 4)
+  iban       String
+}
+
+model FinishedProduct {
+  id         String @id
+  sku        String
+  name       String
+  unit       String
+  minStock   Float
+  maxStock   Float
+  lotNo      String
+  expiryDate String
+}
+
+model Invoice {
+  id        String        @id
+  invoiceNo String        @unique
+  party     String
+  kind      String
+  issueDate String
+  dueDate   String
+  amount    Decimal       @db.Decimal(18, 4)
+  status    String
+  lines     InvoiceLine[]
+}
+
+model InvoiceLine {
+  id            String  @id
+  invoiceNo     String
+  description   String
+  quantityLabel String
+  unitPrice     Decimal @db.Decimal(18, 4)
+  lineTotal     Decimal @db.Decimal(18, 4)
+  invoice       Invoice @relation(fields: [invoiceNo], references: [invoiceNo], onDelete: Cascade)
+
+  @@index([invoiceNo])
+}
+
+model LedgerEntry {
+  id          String  @id
+  date        String
+  documentNo  String
+  description String
+  category    String
+  direction   String
+  amount      Decimal @db.Decimal(18, 4)
+  status      String
+}
+
+model BudgetRow {
+  id         String  @id
+  department String
+  annual     Decimal @db.Decimal(18, 4)
+  spent      Decimal @db.Decimal(18, 4)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  createdAt  DateTime @default(now())
+  actor      String
+  action     String
+  entityType String
+  entityId   String?
+  summary    String
+  before     String?
+  after      String?
+  ipAddress  String?
+
+  @@index([entityType])
+  @@index([createdAt])
+}
+
+model BackupRecord {
+  id        String   @id @default(cuid())
+  filename  String
+  filepath  String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  createdBy String
+  note      String?
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  username           String    @unique
+  name               String
+  passwordHash       String
+  role               String
+  active             Boolean   @default(true)
+  /// true ise kullanıcı giriş yaptığında şifre değiştirme ekranına zorlanır
+  mustChangePassword Boolean   @default(false)
+  passwordChangedAt  DateTime?
+  /// Ardışık başarısız giriş sayısı; başarılı girişte sıfırlanır
+  failedAttempts     Int       @default(0)
+  /// Doluysa bu zamana kadar giriş reddedilir
+  lockedUntil        DateTime?
+  /// Artınca eski JWT oturumları geçersiz olur (şifre/rol/aktiflik değişimi)
+  tokenVersion       Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+}

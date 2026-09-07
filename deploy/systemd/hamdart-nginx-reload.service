@@ -1,0 +1,11 @@
+[Unit]
+Description=Reload HamdPharma nginx after certificate renew
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec hamdart-nginx nginx -s reload
+
+[Install]
+WantedBy=multi-user.target

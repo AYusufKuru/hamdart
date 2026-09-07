@@ -1,13 +1,8 @@
 import type { StockItem, StockStatus } from "@/data/mock";
-import { parseLocalDate, readFromStorage, saveToStorage } from "@/lib/utils";
-import {
-  getWarehouseName,
-  warehouseStockItems as seedStock,
-  WAREHOUSE_IDS,
-  type WarehouseStockItem,
-} from "@/data/warehouses";
-
-const STORAGE_KEY = "hamdart-warehouse-stock";
+import { getWarehouseName, type WarehouseStockItem } from "@/data/warehouses";
+import { apiGet, apiPost } from "@/lib/api-client";
+import { getWarehouses } from "@/lib/warehouse-store";
+import { parseLocalDate } from "@/lib/utils";
 
 export const STOCK_CATEGORIES = [
   "Ham Madde",
@@ -32,38 +27,36 @@ export const STOCK_UNITS = [
   "rulo",
 ] as const;
 
-function readStored(): WarehouseStockItem[] {
-  return readFromStorage<WarehouseStockItem>(STORAGE_KEY);
+export async function getAllWarehouseStockItems(): Promise<WarehouseStockItem[]> {
+  const [items] = await Promise.all([
+    apiGet<WarehouseStockItem[]>("/api/stock"),
+    getWarehouses().catch(() => []),
+  ]);
+  return items;
 }
 
-function writeStored(list: WarehouseStockItem[]): void {
-  saveToStorage(STORAGE_KEY, list);
-}
-
-export function getAllWarehouseStockItems(): WarehouseStockItem[] {
-  const stored = readStored();
-  const byId = new Map<string, WarehouseStockItem>();
-  for (const item of seedStock) byId.set(item.id, item);
-  for (const item of stored) byId.set(item.id, item);
-  return Array.from(byId.values());
-}
-
-export function getStockItemsForWarehouse(
+export async function getStockItemsForWarehouse(
   warehouseId: string
-): WarehouseStockItem[] {
-  return getAllWarehouseStockItems().filter(
-    (i) => i.warehouseId === warehouseId
+): Promise<WarehouseStockItem[]> {
+  const all = await getAllWarehouseStockItems();
+  return all.filter((i) => i.warehouseId === warehouseId);
+}
+
+export async function getStockCategoriesForWarehouse(
+  warehouseId: string
+): Promise<string[]> {
+  const items = await getStockItemsForWarehouse(warehouseId);
+  return [...new Set(items.map((i) => i.category))].sort((a, b) =>
+    a.localeCompare(b, "tr")
   );
 }
 
-export function getStockCategoriesForWarehouse(warehouseId: string): string[] {
-  return [
-    ...new Set(getStockItemsForWarehouse(warehouseId).map((i) => i.category)),
-  ].sort((a, b) => a.localeCompare(b, "tr"));
-}
-
-export function getLabItemsNeedingReplenishmentFromStore(): WarehouseStockItem[] {
-  return getAllWarehouseStockItems().filter(
+export async function getLabItemsNeedingReplenishmentFromStore(): Promise<
+  WarehouseStockItem[]
+> {
+  const { WAREHOUSE_IDS } = await import("@/data/warehouses");
+  const all = await getAllWarehouseStockItems();
+  return all.filter(
     (i) =>
       i.warehouseId === WAREHOUSE_IDS.laboratory &&
       !i.labDirectEntry &&
@@ -73,9 +66,7 @@ export function getLabItemsNeedingReplenishmentFromStore(): WarehouseStockItem[]
   );
 }
 
-export function toDisplayStockItems(
-  items: WarehouseStockItem[] = getAllWarehouseStockItems()
-): StockItem[] {
+export function toDisplayStockItems(items: WarehouseStockItem[]): StockItem[] {
   return items.map((item) => ({
     id: item.id,
     sku: item.sku,
@@ -131,49 +122,34 @@ export type CreateStockInput = {
   labTargetQuantity?: number;
 };
 
-export function createStockEntry(input: CreateStockInput): WarehouseStockItem {
-  const item: WarehouseStockItem = {
-    id: `ws-manual-${Date.now()}`,
-    sku: input.sku.trim(),
-    name: input.name.trim(),
-    category: input.category,
-    warehouseId: input.warehouseId,
-    quantity: input.quantity,
-    unit: input.unit,
-    minStock: input.minStock,
-    lotNo: input.lotNo.trim(),
-    expiryDate: input.expiryDate,
-    status:
-      input.status ??
-      deriveStockStatus(input.quantity, input.minStock, input.expiryDate),
-    temperature: input.temperature?.trim() || undefined,
-    labDirectEntry: input.labDirectEntry || undefined,
-    replenishFromWarehouseId: input.replenishFromWarehouseId,
-    labTargetQuantity: input.labTargetQuantity,
-  };
-  const stored = readStored().filter((i) => i.id !== item.id);
-  writeStored([item, ...stored]);
-  return item;
+export async function createStockEntry(
+  input: CreateStockInput
+): Promise<WarehouseStockItem> {
+  return apiPost<WarehouseStockItem>("/api/stock", input);
 }
 
-export function getKnownSkus(): string[] {
-  return [...new Set(getAllWarehouseStockItems().map((i) => i.sku))].sort();
+export async function getKnownSkus(): Promise<string[]> {
+  const all = await getAllWarehouseStockItems();
+  return [...new Set(all.map((i) => i.sku))].sort();
 }
 
-export function getKnownStockNames(): string[] {
-  return [...new Set(getAllWarehouseStockItems().map((i) => i.name))].sort(
-    (a, b) => a.localeCompare(b, "tr")
+export async function getKnownStockNames(): Promise<string[]> {
+  const all = await getAllWarehouseStockItems();
+  return [...new Set(all.map((i) => i.name))].sort((a, b) =>
+    a.localeCompare(b, "tr")
   );
 }
 
-export function getKnownCategories(): string[] {
-  const fromData = getAllWarehouseStockItems().map((i) => i.category);
+export async function getKnownCategories(): Promise<string[]> {
+  const all = await getAllWarehouseStockItems();
+  const fromData = all.map((i) => i.category);
   return [...new Set([...STOCK_CATEGORIES, ...fromData])].sort((a, b) =>
     a.localeCompare(b, "tr")
   );
 }
 
-export function getKnownUnits(): string[] {
-  const fromData = getAllWarehouseStockItems().map((i) => i.unit);
+export async function getKnownUnits(): Promise<string[]> {
+  const all = await getAllWarehouseStockItems();
+  const fromData = all.map((i) => i.unit);
   return [...new Set([...STOCK_UNITS, ...fromData])];
 }

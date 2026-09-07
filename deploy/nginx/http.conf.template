@@ -1,0 +1,26 @@
+# Sertifika yokken: ACME + uygulama (geçici HTTP)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location = /nginx-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location /api/auth/login {
+        limit_req zone=login burst=8 nodelay;
+        limit_req_status 429;
+        include /etc/nginx/proxy_params.conf;
+    }
+
+    location / {
+        include /etc/nginx/proxy_params.conf;
+    }
+}

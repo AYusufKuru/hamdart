@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Order } from "@/data/mock";
-import { orders as seedOrders } from "@/data/mock";
 import { getAllOrders } from "@/lib/order-store";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
-import { rawMaterials as seedMaterials, type RawMaterial } from "@/data/raw-materials";
+import type { RawMaterial } from "@/data/raw-materials";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
 import {
   calculateRecipeTotals,
@@ -29,6 +28,7 @@ import {
 import { Plus, Save, Trash2, FileText, ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth/auth-context";
 
 interface RecipeEditorProps {
   order: Order;
@@ -41,13 +41,21 @@ export function RecipeEditor({
   initialRecipe,
   onSaved,
 }: RecipeEditorProps) {
+  const { canWrite } = useAuth();
+  const canEditRecipes = canWrite("recipes");
   const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
-  const [allOrders, setAllOrders] = useState(seedOrders);
-  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>(seedMaterials);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
 
   useEffect(() => {
-    setAllOrders(getAllOrders());
-    setRawMaterials(getAllRawMaterials());
+    void (async () => {
+      const [orders, materials] = await Promise.all([
+        getAllOrders(),
+        getAllRawMaterials(),
+      ]);
+      setAllOrders(orders);
+      setRawMaterials(materials);
+    })();
   }, []);
 
   const totals = useMemo(
@@ -85,7 +93,15 @@ export function RecipeEditor({
     }
     setRecipe((r) => ({
       ...r,
-      lines: [...r.lines, { materialId, quantityPerUnit: 0 }],
+      lines: [
+        ...r.lines,
+        {
+          materialId,
+          materialName: rawMaterials[0]?.name ?? "",
+          unit: rawMaterials[0]?.unit ?? "mg",
+          quantityPerUnit: 0,
+        },
+      ],
     }));
   }
 
@@ -132,7 +148,7 @@ export function RecipeEditor({
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (
       recipe.lines.length === 0 ||
       recipe.lines.every((l) => !l.quantityPerUnit)
@@ -142,7 +158,7 @@ export function RecipeEditor({
     }
     try {
       const saved: Recipe = { ...recipe, status: "saved" };
-      saveRecipe(saved);
+      await saveRecipe(saved);
       setRecipe(saved);
       onSaved(saved);
       toast.success("Reçete kaydedildi");
@@ -170,8 +186,9 @@ export function RecipeEditor({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Malzeme</TableHead>
-                <TableHead>Birim / Miktar (1 çıktı)</TableHead>
+                <TableHead>Hammadde adı</TableHead>
+                <TableHead>Birim</TableHead>
+                <TableHead>Birim Miktar</TableHead>
                 <TableHead>Toplam İhtiyaç</TableHead>
                 <TableHead className="text-right">Birim Maliyet</TableHead>
                 <TableHead className="text-right">Satır Maliyeti</TableHead>
@@ -182,6 +199,15 @@ export function RecipeEditor({
               {totals.lines.map((line, index) => (
                 <TableRow key={index}>
                   <TableCell>
+                    {rawMaterials.length > 80 ? (
+                      <Input
+                        className="min-w-[160px] rounded-lg"
+                        value={recipe.lines[index]?.materialName ?? ""}
+                        onChange={(e) =>
+                          updateLine(index, { materialName: e.target.value })
+                        }
+                      />
+                    ) : (
                     <select
                       className="w-full min-w-[160px] rounded-lg border bg-background px-2 py-1.5 text-sm"
                       value={recipe.lines[index]?.materialId ?? ""}
@@ -189,39 +215,39 @@ export function RecipeEditor({
                         updateLine(index, { materialId: e.target.value })
                       }
                     >
-                      {recipe.lines[index]?.materialId &&
-                      !rawMaterials.some(
-                        (m) => m.id === recipe.lines[index].materialId
-                      ) ? (
-                        <option value={recipe.lines[index].materialId}>
-                          Bilinmeyen malzeme
-                        </option>
-                      ) : null}
+                      <option value="">
+                        {recipe.lines[index]?.materialName || "Seçin"}
+                      </option>
                       {rawMaterials.map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.name}
                         </option>
                       ))}
                     </select>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        step="any"
-                        min={0}
-                        className="w-28 rounded-lg"
-                        value={recipe.lines[index].quantityPerUnit}
-                        onChange={(e) =>
-                          updateLine(index, {
-                            quantityPerUnit: parseFloat(e.target.value) || 0,
-                          })
-                        }
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {line.unit}
-                      </span>
-                    </div>
+                    <Input
+                      className="w-20 rounded-lg"
+                      value={recipe.lines[index]?.unit ?? line.unit}
+                      onChange={(e) =>
+                        updateLine(index, { unit: e.target.value })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      type="number"
+                      step="any"
+                      min={0}
+                      className="w-28 rounded-lg"
+                      value={recipe.lines[index].quantityPerUnit}
+                      onChange={(e) =>
+                        updateLine(index, {
+                          quantityPerUnit: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
                   </TableCell>
                   <TableCell className="text-sm">
                     {line.totalQuantity.toLocaleString("tr-TR", {
@@ -236,24 +262,28 @@ export function RecipeEditor({
                     {formatMoney(line.lineCost)}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => removeLine(index)}
-                      disabled={recipe.lines.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
+                    {canEditRecipes && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => removeLine(index)}
+                        disabled={recipe.lines.length <= 1}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          <Button variant="outline" className="rounded-xl" onClick={addLine}>
-            <Plus className="w-4 h-4 mr-2" />
-            Malzeme Ekle
-          </Button>
+          {canEditRecipes && (
+            <Button variant="outline" className="rounded-xl" onClick={addLine}>
+              <Plus className="w-4 h-4 mr-2" />
+              Malzeme Ekle
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -323,14 +353,16 @@ export function RecipeEditor({
                       Maliyet:{" "}
                       {formatMoney(totals.extras[index]?.lineCost ?? 0)}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 ml-auto"
-                      onClick={() => removeExtra(index)}
-                    >
-                      <Trash2 className="w-4 h-4 text-destructive" />
-                    </Button>
+                    {canEditRecipes && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 ml-auto"
+                        onClick={() => removeExtra(index)}
+                      >
+                        <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                    )}
                   </div>
                   <div>
                     <label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -349,10 +381,12 @@ export function RecipeEditor({
               ))}
             </div>
           )}
-          <Button variant="outline" className="rounded-xl" onClick={addExtra}>
-            <Plus className="w-4 h-4 mr-2" />
-            Ek Ürün Notu Ekle
-          </Button>
+          {canEditRecipes && (
+            <Button variant="outline" className="rounded-xl" onClick={addExtra}>
+              <Plus className="w-4 h-4 mr-2" />
+              Ek Ürün Notu Ekle
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -407,13 +441,15 @@ export function RecipeEditor({
             </Link>
           </Button>
         )}
-        <Button
-          className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-          onClick={handleSave}
-        >
-          <Save className="w-4 h-4 mr-2" />
-          Reçeteyi Kaydet
-        </Button>
+        {canEditRecipes && (
+          <Button
+            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            onClick={handleSave}
+          >
+            <Save className="w-4 h-4 mr-2" />
+            Reçeteyi Kaydet
+          </Button>
+        )}
       </div>
     </div>
   );

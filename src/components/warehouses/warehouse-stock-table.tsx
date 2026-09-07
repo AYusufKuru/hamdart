@@ -124,11 +124,11 @@ export function WarehouseStockTable({
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead>
-              <TableHead>Ürün</TableHead>
+              <TableHead>Ürün / Malzeme Adı</TableHead>
               <TableHead>Kategori</TableHead>
               <TableHead>Miktar</TableHead>
-              <TableHead>Lot</TableHead>
-              <TableHead>SKT</TableHead>
+              <TableHead>Lot No-Parti</TableHead>
+              <TableHead>Son Kullanma Tarihi</TableHead>
               {isLab && <TableHead>Kaynak</TableHead>}
               <TableHead>Durum</TableHead>
             </TableRow>

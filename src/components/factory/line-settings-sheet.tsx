@@ -18,7 +18,6 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import {
-  productionLines as seedLines,
   type ProductionLine,
   type ProductionLineStatus,
 } from "@/data/mock";
@@ -47,30 +46,28 @@ export function LineSettingsSheet({
   onSaved,
   initialLineId,
 }: LineSettingsSheetProps) {
-  const [lines, setLines] = useState<ProductionLine[]>(seedLines);
-  const [lineId, setLineId] = useState(seedLines[0]?.id ?? "");
-  const [form, setForm] = useState(() => {
-    const first = seedLines[0];
-    return {
-      product: first?.product ?? "",
-      status: (first?.status ?? "active") as ProductionLineStatus,
-      operator: first?.operator === "-" ? "" : (first?.operator ?? ""),
-      currentBatch:
-        first?.currentBatch === "-" ? "" : (first?.currentBatch ?? ""),
-      outputToday: first ? String(first.outputToday) : "",
-      targetToday: first ? String(first.targetToday) : "",
-      efficiency: first ? String(first.efficiency) : "",
-      lastMaintenance: first?.lastMaintenance ?? "",
-    };
+  const [lines, setLines] = useState<ProductionLine[]>([]);
+  const [lineId, setLineId] = useState("");
+  const [form, setForm] = useState({
+    product: "",
+    status: "active" as ProductionLineStatus,
+    operator: "",
+    currentBatch: "",
+    outputToday: "",
+    targetToday: "",
+    efficiency: "",
+    lastMaintenance: "",
   });
 
   useEffect(() => {
     if (!open) return;
-    const all = getAllProductionLines();
-    setLines(all);
-    const preferred =
-      (initialLineId && all.find((l) => l.id === initialLineId)) || all[0];
-    if (preferred) applyLine(preferred);
+    void (async () => {
+      const all = await getAllProductionLines();
+      setLines(all);
+      const preferred =
+        (initialLineId && all.find((l) => l.id === initialLineId)) || all[0];
+      if (preferred) applyLine(preferred);
+    })();
   }, [open, initialLineId]);
 
   function applyLine(line: ProductionLine) {
@@ -92,7 +89,7 @@ export function LineSettingsSheet({
     if (line) applyLine(line);
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const outputToday = parseFloat(form.outputToday);
     const targetToday = parseFloat(form.targetToday);
@@ -116,7 +113,7 @@ export function LineSettingsSheet({
     }
 
     try {
-      const updated = updateProductionLine(lineId, {
+      const updated = await updateProductionLine(lineId, {
         product: form.product.trim() || "-",
         status: form.status,
         operator: form.operator.trim() || "-",
@@ -168,7 +165,7 @@ export function LineSettingsSheet({
           <FormField label="Ürün" htmlFor="line-product">
             <Input
               id="line-product"
-              placeholder="Örn: CardioMax 50mg"
+              placeholder="Örn: Hepanorm 30 Tablet"
               value={form.product}
               onChange={(e) =>
                 setForm((f) => ({ ...f, product: e.target.value }))
@@ -219,7 +216,7 @@ export function LineSettingsSheet({
           <FormField label="Operatör" htmlFor="line-operator">
             <Input
               id="line-operator"
-              placeholder="Örn: Ahmet Yılmaz"
+              placeholder="Örn: MELEK PARLAK"
               value={form.operator}
               onChange={(e) =>
                 setForm((f) => ({ ...f, operator: e.target.value }))

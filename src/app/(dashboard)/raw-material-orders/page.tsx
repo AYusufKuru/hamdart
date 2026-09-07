@@ -20,12 +20,12 @@ import {
 import {
   rawMaterialOrderStatusConfig,
   rawMaterialOrderSourceLabels,
-  seedRawMaterialOrders,
   type RawMaterialOrder,
   type RawMaterialOrderStatus,
 } from "@/data/raw-material-orders";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { RawMaterialOrderFormSheet } from "@/components/raw-material-orders/raw-material-order-form-sheet";
+import { CanWrite } from "@/components/auth/can-write";
 import { formatNumber } from "@/lib/utils";
 import {
   AlertCircle,
@@ -43,17 +43,17 @@ function loadOrders() {
 
 export default function RawMaterialOrdersPage() {
   const router = useRouter();
-  const [orders, setOrders] = useState<RawMaterialOrder[]>(seedRawMaterialOrders);
+  const [orders, setOrders] = useState<RawMaterialOrder[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [formOpen, setFormOpen] = useState(false);
 
-  const refresh = useCallback(() => {
-    setOrders(loadOrders());
+  const refresh = useCallback(async () => {
+    setOrders(await loadOrders());
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   const filtered = orders.filter((o) => {
@@ -78,13 +78,15 @@ export default function RawMaterialOrdersPage() {
         title="Hammadde Siparişleri"
         description="Sipariş Verilecek kayıtları üç kaynaktan listeye düşer: stok uyarısı, üretim ihtiyacı veya manuel talep."
         actions={
-          <Button
-            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-            onClick={() => setFormOpen(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Manuel Talep
-          </Button>
+          <CanWrite resource="raw_material_orders">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setFormOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Manuel Talep
+            </Button>
+          </CanWrite>
         }
       />
 
@@ -261,7 +263,7 @@ export default function RawMaterialOrdersPage() {
         open={formOpen}
         onOpenChange={setFormOpen}
         onCreated={(order) => {
-          refresh();
+          void refresh();
           router.push(`/raw-material-orders/${order.id}`);
         }}
       />

@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Bell, Menu, Search, User } from "lucide-react";
-import { sidebarSections } from "@/components/layout/sidebar";
+import { Bell, KeyRound, LogOut, Menu, Search, User } from "lucide-react";
+import { useSidebarSections } from "@/components/layout/sidebar";
+import { useAuth } from "@/lib/auth/auth-context";
 import {
   Sheet,
   SheetContent,
@@ -32,22 +33,34 @@ import {
 import { getAllOrders } from "@/lib/order-store";
 import { getAllProductionBatches, getAllProductionLines } from "@/lib/production-store";
 import { getAllLabExperiments, getAllLabSamples } from "@/lib/lab-store";
-import { toDisplayStockItems } from "@/lib/stock-store";
+import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
 import {
   getAllRawMaterialOrders,
   syncReplenishmentOrders,
 } from "@/lib/raw-material-order-store";
 import { getAllRecipes } from "@/lib/recipe-store";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
-import { warehouses } from "@/data/warehouses";
+import { getWarehouses } from "@/lib/warehouse-store";
 
 type Notice = { id: string; title: string; detail: string; href: string };
 
-function collectNotifications(): Notice[] {
-  syncReplenishmentOrders();
+async function collectNotifications(): Promise<Notice[]> {
+  await syncReplenishmentOrders();
+  const [
+    orders,
+    lines,
+    warehouseItems,
+    rawMaterialOrders,
+  ] = await Promise.all([
+    getAllOrders(),
+    getAllProductionLines(),
+    getAllWarehouseStockItems(),
+    getAllRawMaterialOrders(),
+  ]);
+  const stockItems = toDisplayStockItems(warehouseItems);
   const notices: Notice[] = [];
 
-  for (const o of getAllOrders()) {
+  for (const o of orders) {
     if (o.priority === "urgent" && o.status !== "delivered" && o.status !== "cancelled") {
       notices.push({
         id: `ord-${o.id}`,
@@ -58,7 +71,7 @@ function collectNotifications(): Notice[] {
     }
   }
 
-  for (const line of getAllProductionLines()) {
+  for (const line of lines) {
     if (line.status === "alert") {
       notices.push({
         id: `line-${line.id}`,
@@ -69,7 +82,7 @@ function collectNotifications(): Notice[] {
     }
   }
 
-  for (const item of toDisplayStockItems()) {
+  for (const item of stockItems) {
     if (item.status === "critical" || item.status === "low") {
       notices.push({
         id: `stk-${item.id}`,
@@ -80,7 +93,7 @@ function collectNotifications(): Notice[] {
     }
   }
 
-  for (const o of getAllRawMaterialOrders()) {
+  for (const o of rawMaterialOrders) {
     if (o.status === "to_order") {
       notices.push({
         id: `rmo-${o.id}`,
@@ -94,11 +107,36 @@ function collectNotifications(): Notice[] {
   return notices.slice(0, 12);
 }
 
-function findSearchTarget(query: string): string | null {
+async function findSearchTarget(query: string): Promise<string | null> {
   const q = query.trim().toLowerCase();
   if (!q) return null;
 
-  const order = getAllOrders().find(
+  const [
+    orders,
+    rawMaterialOrders,
+    warehouseItems,
+    batches,
+    samples,
+    experiments,
+    recipes,
+    materials,
+    lines,
+    warehouses,
+  ] = await Promise.all([
+    getAllOrders(),
+    getAllRawMaterialOrders(),
+    getAllWarehouseStockItems(),
+    getAllProductionBatches(),
+    getAllLabSamples(),
+    getAllLabExperiments(),
+    getAllRecipes(),
+    getAllRawMaterials(),
+    getAllProductionLines(),
+    getWarehouses(),
+  ]);
+  const stock = toDisplayStockItems(warehouseItems);
+
+  const order = orders.find(
     (o) =>
       o.orderNo.toLowerCase().includes(q) ||
       o.customer.toLowerCase().includes(q) ||
@@ -106,7 +144,7 @@ function findSearchTarget(query: string): string | null {
   );
   if (order) return `/orders/${order.id}`;
 
-  const rmo = getAllRawMaterialOrders().find(
+  const rmo = rawMaterialOrders.find(
     (o) =>
       o.orderNo.toLowerCase().includes(q) ||
       o.materialName.toLowerCase().includes(q) ||
@@ -114,23 +152,23 @@ function findSearchTarget(query: string): string | null {
   );
   if (rmo) return `/raw-material-orders/${rmo.id}`;
 
-  const stock = toDisplayStockItems().find(
+  const stockHit = stock.find(
     (i) =>
       i.sku.toLowerCase().includes(q) ||
       i.name.toLowerCase().includes(q) ||
       i.lotNo.toLowerCase().includes(q)
   );
-  if (stock?.warehouseId) return `/warehouses/${stock.warehouseId}`;
-  if (stock) return "/stock";
+  if (stockHit?.warehouseId) return `/warehouses/${stockHit.warehouseId}`;
+  if (stockHit) return "/stock";
 
-  const batch = getAllProductionBatches().find(
+  const batch = batches.find(
     (b) =>
       b.batchNo.toLowerCase().includes(q) ||
       b.product.toLowerCase().includes(q)
   );
   if (batch) return "/factory?tab=batches";
 
-  const sample = getAllLabSamples().find(
+  const sample = samples.find(
     (s) =>
       s.sampleNo.toLowerCase().includes(q) ||
       s.product.toLowerCase().includes(q) ||
@@ -138,19 +176,21 @@ function findSearchTarget(query: string): string | null {
   );
   if (sample) return "/rd-lab?tab=samples";
 
-  const experiment = getAllLabExperiments().find(
+  const experiment = experiments.find(
     (e) =>
       e.code.toLowerCase().includes(q) ||
       e.title.toLowerCase().includes(q)
   );
   if (experiment) return "/rd-lab?tab=experiments";
 
-  const recipe = getAllRecipes().find((r) =>
-    r.productName.toLowerCase().includes(q)
+  const recipe = recipes.find(
+    (r) =>
+      r.productName.toLowerCase().includes(q) ||
+      (r.code ?? "").toLowerCase().includes(q)
   );
-  if (recipe) return `/orders/${recipe.orderId}`;
+  if (recipe) return "/recipes";
 
-  const material = getAllRawMaterials().find(
+  const material = materials.find(
     (m) =>
       m.sku.toLowerCase().includes(q) ||
       m.name.toLowerCase().includes(q)
@@ -164,7 +204,7 @@ function findSearchTarget(query: string): string | null {
   );
   if (warehouse) return `/warehouses/${warehouse.id}`;
 
-  const line = getAllProductionLines().find(
+  const line = lines.find(
     (l) =>
       l.name.toLowerCase().includes(q) ||
       l.product.toLowerCase().includes(q)
@@ -177,23 +217,34 @@ function findSearchTarget(query: string): string | null {
 export function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+  const mobileSections = useSidebarSections();
   const [search, setSearch] = useState("");
   const [notices, setNotices] = useState<Notice[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
 
+  const initials = user?.name
+    ? user.name
+        .split(/\s+/)
+        .map((p) => p[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "??";
+
   useEffect(() => {
-    setNotices(collectNotifications());
+    void collectNotifications().then(setNotices);
   }, [pathname]);
 
   useEffect(() => {
-    if (notifOpen) setNotices(collectNotifications());
+    if (notifOpen) void collectNotifications().then(setNotices);
   }, [notifOpen]);
 
-  function submitSearch(e: React.FormEvent) {
+  async function submitSearch(e: React.FormEvent) {
     e.preventDefault();
-    const href = findSearchTarget(search);
+    const href = await findSearchTarget(search);
     if (!href) {
       toast.error("Eşleşen kayıt bulunamadı");
       return;
@@ -249,12 +300,14 @@ export function Navbar() {
           <DropdownMenuTrigger className="outline-none">
             <div className="flex items-center gap-3.5 hover:bg-muted/80 p-1.5 pr-3 rounded-2xl transition-all cursor-pointer border border-transparent hover:border-border/40 hover:shadow-sm">
               <Avatar className="h-9 w-9 border-2 border-primary/10">
-                <AvatarFallback>AY</AvatarFallback>
+                <AvatarFallback>{initials}</AvatarFallback>
               </Avatar>
               <div className="text-left hidden sm:block">
-                <p className="text-sm font-bold leading-none">Ayşe Yılmaz</p>
+                <p className="text-sm font-bold leading-none">
+                  {user?.name ?? "—"}
+                </p>
                 <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-widest font-bold opacity-70">
-                  Üretim Müdürü
+                  {user?.roleLabel ?? ""}
                 </p>
               </div>
             </div>
@@ -278,6 +331,24 @@ export function Navbar() {
               <Bell className="w-4 h-4 mr-2" />
               Bildirimler
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                router.push("/change-password");
+              }}
+            >
+              <KeyRound className="w-4 h-4 mr-2" />
+              Şifre Değiştir
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                void logout();
+              }}
+              className="text-destructive focus:text-destructive"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Çıkış Yap
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -288,7 +359,7 @@ export function Navbar() {
             <SheetTitle>HamdPharma</SheetTitle>
           </SheetHeader>
           <nav className="p-4 space-y-5 overflow-y-auto">
-            {sidebarSections.map((section) => (
+            {mobileSections.map((section) => (
               <div key={section.title}>
                 <p className="px-3 mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/70">
                   {section.title}
@@ -375,13 +446,19 @@ export function Navbar() {
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Ad Soyad
               </p>
-              <p className="font-bold mt-1">Ayşe Yılmaz</p>
+              <p className="font-bold mt-1">{user?.name ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                Kullanıcı adı
+              </p>
+              <p className="font-bold mt-1">{user?.username ?? "—"}</p>
             </div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
                 Rol
               </p>
-              <p className="font-bold mt-1">Üretim Müdürü</p>
+              <p className="font-bold mt-1">{user?.roleLabel ?? "—"}</p>
             </div>
             <div>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -389,9 +466,6 @@ export function Navbar() {
               </p>
               <p className="font-bold mt-1">HamdPharma GMP</p>
             </div>
-            <p className="text-xs text-muted-foreground rounded-xl bg-muted/40 p-3">
-              Demo oturumu — profil alanları salt okunur.
-            </p>
           </div>
         </FormSheetBody>
         <FormSheetFooter>

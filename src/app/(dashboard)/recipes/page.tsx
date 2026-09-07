@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/shared/page-header";
 import { RecipeDetailPanel } from "@/components/recipes/recipe-detail-panel";
+import { RecipeFormSheet } from "@/components/recipes/recipe-form-sheet";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -20,28 +22,38 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { orders as seedOrders, type Order } from "@/data/mock";
+import { type Order } from "@/data/mock";
 import { getAllOrders } from "@/lib/order-store";
-import { rawMaterials as seedMaterials, type RawMaterial } from "@/data/raw-materials";
-import { seedRecipes, type Recipe } from "@/data/recipes";
-import { calculateRecipeTotals, formatMoney } from "@/lib/recipe-calculations";
+import { type RawMaterial } from "@/data/raw-materials";
+import { type Recipe } from "@/data/recipes";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
 import { getAllRecipes } from "@/lib/recipe-store";
+import { CanWrite } from "@/components/auth/can-write";
 import { cn } from "@/lib/utils";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Plus } from "lucide-react";
 
 export default function RecipesPage() {
-  const [recipes, setRecipes] = useState<Recipe[]>(seedRecipes);
-  const [orders, setOrders] = useState<Order[]>(seedOrders);
-  const [materials, setMaterials] = useState<RawMaterial[]>(seedMaterials);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [materials, setMaterials] = useState<RawMaterial[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [recipeList, orderList, materialList] = await Promise.all([
+      getAllRecipes(),
+      getAllOrders(),
+      getAllRawMaterials(),
+    ]);
+    setRecipes(recipeList);
+    setOrders(orderList);
+    setMaterials(materialList);
+  }, []);
 
   useEffect(() => {
-    setRecipes(getAllRecipes());
-    setOrders(getAllOrders());
-    setMaterials(getAllRawMaterials());
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   const selectedIndex = selectedId
     ? recipes.findIndex((r) => r.id === selectedId)
@@ -84,6 +96,17 @@ export default function RecipesPage() {
         badgeClassName="bg-violet-500/10 text-violet-600 border-violet-500/20"
         title="Kayıtlı Reçeteler"
         description="Satıra tıklayarak reçeteyi sağ panelde önizleyin. Ok tuşları veya paneldeki geçiş ile reçeteler arasında hızlıca dolaşın."
+        actions={
+          <CanWrite resource="recipes">
+            <Button
+              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+              onClick={() => setFormOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Reçete Ekle
+            </Button>
+          </CanWrite>
+        }
       />
 
       <Card className="glass-card border-none">
@@ -91,28 +114,15 @@ export default function RecipesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ürün</TableHead>
-                <TableHead>Sipariş</TableHead>
-                <TableHead>Oluşturan</TableHead>
+                <TableHead>Reçete Kodu</TableHead>
+                <TableHead>Ürün Kodu</TableHead>
+                <TableHead>Ürün adı</TableHead>
                 <TableHead>Satır</TableHead>
-                <TableHead>Ek Not</TableHead>
                 <TableHead>Durum</TableHead>
-                <TableHead className="text-right">Toplam Maliyet</TableHead>
-                <TableHead className="text-right">Gelir</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {recipes.map((recipe) => {
-                const order = orders.find((o) => o.id === recipe.orderId);
-                const totals = order
-                  ? calculateRecipeTotals(
-                      recipe,
-                      order.quantity,
-                      order,
-                      orders,
-                      materials
-                    )
-                  : null;
                 const isSelected = drawerOpen && selectedId === recipe.id;
 
                 return (
@@ -126,17 +136,16 @@ export default function RecipesPage() {
                     )}
                     onClick={() => openRecipe(recipe.id)}
                   >
+                    <TableCell className="font-mono text-sm">
+                      {recipe.code || "—"}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {recipe.productCode || "—"}
+                    </TableCell>
                     <TableCell className="font-medium">
                       {recipe.productName}
                     </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {order?.orderNo ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {recipe.createdBy}
-                    </TableCell>
                     <TableCell>{recipe.lines.length}</TableCell>
-                    <TableCell>{recipe.extras.length}</TableCell>
                     <TableCell>
                       <Badge
                         variant={
@@ -145,12 +154,6 @@ export default function RecipesPage() {
                       >
                         {recipe.status === "saved" ? "Kayıtlı" : "Taslak"}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-bold">
-                      {totals ? formatMoney(totals.totalCost) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {totals ? formatMoney(totals.totalRevenue) : "—"}
                     </TableCell>
                   </TableRow>
                 );
@@ -163,7 +166,7 @@ export default function RecipesPage() {
               <ClipboardList className="w-16 h-16 mx-auto mb-4 opacity-40" />
               <p className="font-medium">Henüz kayıtlı reçete yok</p>
               <p className="text-sm mt-2">
-                Bir sipariş detayından reçete oluşturup kaydedin.
+                Reçete Ekle ile yeni reçete oluşturun.
               </p>
             </div>
           )}
@@ -201,6 +204,12 @@ export default function RecipesPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      <RecipeFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={refresh}
+      />
     </div>
   );
 }

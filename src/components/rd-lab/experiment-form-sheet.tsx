@@ -30,7 +30,7 @@ import { plusDaysIso, todayIso } from "@/lib/utils";
 
 function emptyForm() {
   return {
-    code: nextExperimentCode(),
+    code: "",
     title: "",
     researcher: "",
     department: "Formülasyon",
@@ -63,11 +63,19 @@ export function ExperimentFormSheet({
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm());
-    setResearchers(getLabResearchers());
-    setDepartments(getLabDepartments());
+    void (async () => {
+      const [researcherList, departmentList, code] = await Promise.all([
+        getLabResearchers(),
+        getLabDepartments(),
+        nextExperimentCode(),
+      ]);
+      setResearchers(researcherList);
+      setDepartments(departmentList);
+      setForm((f) => ({ ...f, code }));
+    })();
   }, [open]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const progress = parseFloat(form.progress);
     const samples = parseInt(form.samples, 10);
@@ -89,7 +97,7 @@ export function ExperimentFormSheet({
     }
 
     try {
-      const created = createLabExperiment({
+      const created = await createLabExperiment({
         code: form.code,
         title: form.title,
         researcher: form.researcher,
@@ -133,7 +141,7 @@ export function ExperimentFormSheet({
             <Input
               id="exp-title"
               required
-              placeholder="Örn: CardioMax Bioequivalence Study Phase III"
+              placeholder="Örn: Hepanorm çözünme testi"
               value={form.title}
               onChange={(e) =>
                 setForm((f) => ({ ...f, title: e.target.value }))
@@ -146,7 +154,7 @@ export function ExperimentFormSheet({
               id="exp-researcher"
               list="exp-researcher-list"
               required
-              placeholder="Örn: Dr. Selin Aktaş"
+              placeholder="Örn: HİLAL ÇELİK"
               value={form.researcher}
               onChange={(e) =>
                 setForm((f) => ({ ...f, researcher: e.target.value }))

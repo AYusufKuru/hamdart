@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hamdart-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hamdart
+      POSTGRES_PASSWORD: hamdart
+      POSTGRES_DB: hamdart
+      TZ: Europe/Istanbul
+      PGTZ: Europe/Istanbul
+    ports:
+      - "5432:5432"
+    volumes:
+      - hamdart_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hamdart -d hamdart"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  hamdart_pgdata:
