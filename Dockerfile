@@ -34,6 +34,7 @@ const deps={\
   '@prisma/client': p.dependencies['@prisma/client'],\
   tsx: p.devDependencies.tsx,\
   bcryptjs: p.dependencies.bcryptjs,\
+  xlsx: p.dependencies.xlsx,\
 };\
 fs.writeFileSync('package.json', JSON.stringify({name:'hamdart-tools',private:true,dependencies:deps},null,2));\
 " \
@@ -56,11 +57,11 @@ RUN apt-get update \
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src/data/import ./src/data/import
-COPY --from=builder /app/src/lib/auth/password-rules.ts ./src/lib/auth/password-rules.ts
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# standalone'dan sonra: Excel seed ve migration dosyaları ezilmesin
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/src/lib/auth/password-rules.ts ./src/lib/auth/password-rules.ts
 
 COPY --from=tools /tools/node_modules /opt/hamdart-tools/node_modules
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
@@ -74,6 +75,7 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV PATH="/opt/hamdart-tools/node_modules/.bin:${PATH}"
+ENV NODE_PATH=/opt/hamdart-tools/node_modules
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server.js"]

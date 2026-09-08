@@ -1,5 +1,3 @@
-import importedRmo from "@/data/import/raw-material-orders.json";
-
 /** Hammadde tedarik siparişi yaşam döngüsü */
 export type RawMaterialOrderStatus =
   | "to_order"
@@ -114,19 +112,3 @@ export const successFlowSteps: RawMaterialOrderStatus[] = [
   "warehoused",
 ];
 
-export const seedRawMaterialOrders: RawMaterialOrder[] = importedRmo.map((o) => ({
-  ...o,
-  status: o.status as RawMaterialOrderStatus,
-  source: o.source as RawMaterialOrderSource,
-  sourceNote: o.sourceNote ?? undefined,
-  expectedDelivery: o.expectedDelivery ?? undefined,
-  receivedDate: o.receivedDate ?? undefined,
-  qcStartedAt: o.qcStartedAt ?? undefined,
-  qcCompletedAt: o.qcCompletedAt ?? undefined,
-  warehousedAt: o.warehousedAt ?? undefined,
-  returnedAt: o.returnedAt ?? undefined,
-  lotNo: o.lotNo ?? undefined,
-  invoiceNo: o.invoiceNo ?? undefined,
-  qcAnalyst: o.qcAnalyst ?? undefined,
-  qcNotes: o.qcNotes ?? undefined,
-}));

@@ -67,9 +67,7 @@ function withSecurityHeaders(
     "Content-Security-Policy",
     buildContentSecurityPolicy(nonce)
   );
-  if (request.nextUrl.pathname.startsWith("/api/")) {
-    response.headers.set("Cache-Control", "no-store, private");
-  }
+  response.headers.set("Cache-Control", "no-store, private");
   return response;
 }
 

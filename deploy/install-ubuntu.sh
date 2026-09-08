@@ -69,6 +69,13 @@ if [ -z "${CERTBOT_EMAIL:-}" ] || [ "${CERTBOT_EMAIL}" = "BURAYA_EPOSTA" ]; then
   exit 1
 fi
 
+if [ ! -f prisma/data/hamdart-veri.xlsx ]; then
+  echo "HATA: prisma/data/hamdart-veri.xlsx bulunamadı."
+  echo "  Kurulum yalnızca bu Excel dosyasındaki verileri yükler."
+  echo "  Dosyayı proje ile birlikte sunucuya kopyalayıp betiği tekrar çalıştırın."
+  exit 1
+fi
+
 echo "==> PostgreSQL başlatılıyor..."
 docker compose -f docker-compose.prod.yml up -d postgres
 
@@ -99,7 +106,7 @@ elif [ -n "$EXISTING_ROWS" ] && [ "$EXISTING_ROWS" != "0" ]; then
   echo "    Eksik kayıtları yüklemek isterseniz (mevcutlara dokunmaz):"
   echo "    docker compose -f docker-compose.prod.yml run --rm --no-deps app tsx prisma/seed.ts"
 else
-  echo "==> Başlangıç verileri yükleniyor..."
+  echo "==> Başlangıç verileri Excel'den yükleniyor (prisma/data/hamdart-veri.xlsx)..."
   docker compose -f docker-compose.prod.yml run --rm --no-deps app tsx prisma/seed.ts
 fi
 

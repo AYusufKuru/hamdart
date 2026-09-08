@@ -10,16 +10,15 @@ import { PageHeader } from "@/components/shared/page-header";
 import { type Order, type ProductionLine } from "@/data/mock";
 import { getAllOrders } from "@/lib/order-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
-import { getAllProductionBatches, getAllProductionLines } from "@/lib/production-store";
-import { getAllLabExperiments } from "@/lib/lab-store";
-import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
+import { getAllProductionLines } from "@/lib/production-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { formatNumber, todayIso } from "@/lib/utils";
+import { formatNumber } from "@/lib/utils";
 import { toast } from "sonner";
-import { CanWrite } from "@/components/auth/can-write";
-import { ArrowRight, Download, Plus } from "lucide-react";
+import { useAuth } from "@/lib/auth/auth-context";
+import { generateDashboardPdf } from "@/lib/dashboard-report";
+import { ArrowRight, Download, Loader2 } from "lucide-react";
 
 const lineStatusMap = {
   active: { label: "Aktif", variant: "success" as const },
@@ -29,8 +28,10 @@ const lineStatusMap = {
 };
 
 export default function DashboardPage() {
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -52,58 +53,18 @@ export default function DashboardPage() {
   );
 
   async function downloadReport() {
-    await syncReplenishmentOrders();
-    const [allOrders, batches, lines, experiments, warehouseItems] =
-      await Promise.all([
-        getAllOrders(),
-        getAllProductionBatches(),
-        getAllProductionLines(),
-        getAllLabExperiments(),
-        getAllWarehouseStockItems(),
-      ]);
-    const stock = toDisplayStockItems(warehouseItems);
-    const alerts = stock.filter(
-      (i) =>
-        i.status === "low" || i.status === "critical" || i.status === "expiring"
-    );
-
-    const csv = [
-      "HamdPharma Genel Rapor",
-      `Tarih;${todayIso()}`,
-      "",
-      "Özet",
-      `Sipariş;${allOrders.length}`,
-      `Bekleyen sipariş;${allOrders.filter((o) => o.status === "pending").length}`,
-      `Aktif batch;${batches.filter((b) => b.status === "in_progress").length}`,
-      `Üretim hattı;${lines.length}`,
-      `Deney;${experiments.length}`,
-      `Stok uyarı;${alerts.length}`,
-      "",
-      "Sipariş No;Müşteri;Ürün;Durum;Öncelik;Fatura",
-      ...allOrders.map(
-        (o) =>
-          `${o.orderNo};${o.customer};${o.product};${o.status};${o.priority};${o.value}`
-      ),
-      "",
-      "Batch No;Ürün;Hat;Durum;Miktar",
-      ...batches.map(
-        (b) => `${b.batchNo};${b.product};${b.line};${b.status};${b.quantity}`
-      ),
-      "",
-      "SKU;Ürün;Depo;Miktar;Durum",
-      ...alerts.map(
-        (i) => `${i.sku};${i.name};${i.warehouse};${i.quantity} ${i.unit};${i.status}`
-      ),
-    ].join("\n");
-
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `hamdpharma-rapor-${todayIso()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Rapor indirildi");
+    if (exporting) return;
+    setExporting(true);
+    const toastId = toast.loading("PDF raporu hazırlanıyor...");
+    try {
+      await generateDashboardPdf({ generatedBy: user?.name });
+      toast.success("PDF indirildi", { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Rapor oluşturulamadı", { id: toastId });
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -120,27 +81,19 @@ export default function DashboardPage() {
         }
         description="Fabrika üretimi, stok durumu, depolar, siparişler ve Ar-Ge laboratuvarı tek panelden yönetiliyor."
         actions={
-          <>
-            <Button
-              variant="outline"
-              className="rounded-2xl h-11"
-              onClick={downloadReport}
-            >
+          <Button
+            variant="outline"
+            className="rounded-2xl h-11"
+            onClick={downloadReport}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
               <Download className="w-4 h-4 mr-2" />
-              Rapor İndir
-            </Button>
-            <CanWrite resource="orders">
-              <Button
-                className="rounded-2xl h-11 bg-gradient-to-r from-indigo-600 to-blue-500 border-none shadow-lg shadow-indigo-500/20"
-                asChild
-              >
-                <Link href="/orders?yeni=1">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Yeni Sipariş
-                </Link>
-              </Button>
-            </CanWrite>
-          </>
+            )}
+            {exporting ? "Hazırlanıyor" : "Rapor İndir"}
+          </Button>
         }
       />
 
