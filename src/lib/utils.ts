@@ -5,8 +5,39 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Radix Select: SelectItem value cannot be an empty string. Dedupes trimmed values. */
+export function selectItemValues(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
 export function formatNumber(value: number): string {
   return value.toLocaleString("tr-TR");
+}
+
+/** Her kelimenin (ve tireli parçanın) ilk harfini tr-TR büyük harfe çevirir. */
+export function capitalizeWordsTr(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .map((word) =>
+      word
+        .split("-")
+        .map((part) => {
+          if (!part) return part;
+          return part.charAt(0).toLocaleUpperCase("tr-TR") + part.slice(1);
+        })
+        .join("-")
+    )
+    .join(" ");
 }
 
 function pad2(n: number) {

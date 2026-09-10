@@ -16,6 +16,7 @@ export const BATCH_UNITS = [
 export const BATCH_STATUS_OPTIONS: { value: BatchStatus; label: string }[] = [
   { value: "planned", label: "Planlandı" },
   { value: "in_progress", label: "Üretimde" },
+  { value: "queued", label: "Sırada" },
   { value: "qc_pending", label: "KK Bekliyor" },
   { value: "completed", label: "Tamamlandı" },
   { value: "rejected", label: "Reddedildi" },
@@ -34,7 +35,7 @@ export async function getKnownProducts(): Promise<string[]> {
   const batches = await getAllProductionBatches();
   const fromLines = lines.map((l) => l.product);
   const fromBatches = batches.map((b) => b.product);
-  return [...new Set([...fromLines, ...fromBatches].filter((p) => p && p !== "-"))].sort(
+  return [...new Set([...fromLines, ...fromBatches].filter((p) => p.trim() && p !== "-"))].sort(
     (a, b) => a.localeCompare(b, "tr")
   );
 }
@@ -95,4 +96,30 @@ export async function createProductionBatch(
   input: CreateBatchInput
 ): Promise<ProductionBatch> {
   return apiPost<ProductionBatch>("/api/production/batches", input);
+}
+
+export async function updateProductionBatch(
+  id: string,
+  body: {
+    action?: "complete_and_next" | "start_next";
+    patch?: { status?: BatchStatus };
+  }
+): Promise<ProductionBatch> {
+  return apiPatch<ProductionBatch>("/api/production/batches", { id, ...body });
+}
+
+export function queuedBatchesForLine(
+  batches: ProductionBatch[],
+  lineName: string
+): ProductionBatch[] {
+  return batches
+    .filter((b) => b.line === lineName && b.status === "queued")
+    .sort((a, b) => (a.queuePosition ?? 999) - (b.queuePosition ?? 999));
+}
+
+export function lineHasActiveBatch(
+  batches: ProductionBatch[],
+  lineName: string
+): boolean {
+  return batches.some((b) => b.line === lineName && b.status === "in_progress");
 }

@@ -160,3 +160,31 @@ export async function deleteUser(id: string): Promise<void> {
   const { apiDelete } = await import("@/lib/api-client");
   await apiDelete(`/api/users/${id}`);
 }
+
+export type DepartmentRow = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
+export async function fetchDepartments(): Promise<DepartmentRow[]> {
+  return apiGet<DepartmentRow[]>("/api/departments");
+}
+
+export async function createDepartment(name: string): Promise<DepartmentRow> {
+  const { apiPost } = await import("@/lib/api-client");
+  return apiPost<DepartmentRow>("/api/departments", { name });
+}
+
+export async function updateDepartment(
+  id: string,
+  name: string
+): Promise<DepartmentRow> {
+  const { apiPatch } = await import("@/lib/api-client");
+  return apiPatch<DepartmentRow>(`/api/departments/${id}`, { name });
+}
+
+export async function deleteDepartment(id: string): Promise<void> {
+  const { apiDelete } = await import("@/lib/api-client");
+  await apiDelete(`/api/departments/${id}`);
+}

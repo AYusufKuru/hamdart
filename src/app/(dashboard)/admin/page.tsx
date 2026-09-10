@@ -26,14 +26,16 @@ import {
 } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
 import { UsersPanel } from "@/components/admin/users-panel";
+import { DepartmentsPanel } from "@/components/admin/departments-panel";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { formatDate, formatNumber } from "@/lib/utils";
-import { Database, History, RotateCcw, Shield, Trash2, Users } from "lucide-react";
+import { Database, History, RotateCcw, Shield, Trash2, Users, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
 function actionVariant(action: string) {
@@ -53,6 +55,7 @@ function AdminContent() {
   const [confirmFilename, setConfirmFilename] = useState("");
   const [restoring, setRestoring] = useState(false);
   const canManage = canWrite("admin");
+  const isAdmin = user?.role === "ADMIN";
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -158,6 +161,12 @@ function AdminContent() {
             <Users className="w-4 h-4" />
             Kullanıcılar
           </TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="departments" className="rounded-lg gap-2">
+              <Building2 className="w-4 h-4" />
+              Departmanlar
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="audit" className="mt-6">
@@ -300,9 +309,15 @@ function AdminContent() {
         <TabsContent value="users" className="mt-6">
           <UsersPanel />
         </TabsContent>
+
+        {isAdmin && (
+          <TabsContent value="departments" className="mt-6">
+            <DepartmentsPanel />
+          </TabsContent>
+        )}
       </Tabs>
 
-      <FormSheet
+      <FormDialog
         open={restoreTarget !== null}
         onOpenChange={(open) => {
           if (!open && !restoring) {
@@ -310,32 +325,34 @@ function AdminContent() {
             setConfirmFilename("");
           }
         }}
+        icon={RotateCcw}
         title="Veritabanını geri yükle"
         description="Bu işlem mevcut verinin üzerine yazar. İptal edilemez."
       >
-        <FormSheetBody>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Geri yüklemeden hemen önce otomatik bir güvenlik yedeği alınır.
-            Onaylamak için aşağıdaki dosya adını <strong>aynı şekilde</strong> yazın.
-          </p>
-          <p className="font-mono text-xs break-all rounded-lg bg-muted px-3 py-2">
-            {restoreTarget?.filename}
-          </p>
-          <FormField
-            label="Dosya adı"
-            htmlFor="confirm-backup-filename"
-            hint="Adı tam olarak eşleşmeden onay düğmesi açılmaz."
-          >
-            <Input
-              id="confirm-backup-filename"
-              value={confirmFilename}
-              onChange={(e) => setConfirmFilename(e.target.value)}
-              autoComplete="off"
-              spellCheck={false}
-              className="rounded-xl font-mono text-xs"
-              placeholder="hamdart-….dump"
-            />
-          </FormField>
+        <FormSheetBody className="space-y-4">
+          <FormSection title="Onay" description="Geri yüklemeden önce otomatik güvenlik yedeği alınır.">
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Onaylamak için aşağıdaki dosya adını <strong>aynı şekilde</strong> yazın.
+            </p>
+            <p className="font-mono text-xs break-all rounded-lg bg-muted px-3 py-2">
+              {restoreTarget?.filename}
+            </p>
+            <FormField
+              label="Dosya adı"
+              htmlFor="confirm-backup-filename"
+              hint="Adı tam eşleşmeden onay düğmesi açılmaz."
+            >
+              <Input
+                id="confirm-backup-filename"
+                value={confirmFilename}
+                onChange={(e) => setConfirmFilename(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                className="rounded-xl bg-white font-mono text-xs"
+                placeholder="hamdart-….dump"
+              />
+            </FormField>
+          </FormSection>
         </FormSheetBody>
         <FormSheetFooter>
           <Button
@@ -364,7 +381,7 @@ function AdminContent() {
             {restoring ? "Yükleniyor…" : "Geri yükle"}
           </Button>
         </FormSheetFooter>
-      </FormSheet>
+      </FormDialog>
     </div>
   );
 }

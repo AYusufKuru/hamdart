@@ -29,6 +29,7 @@ import { Plus, Save, Trash2, FileText, ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth/auth-context";
+import { ifAllowed } from "@/lib/api-client";
 
 interface RecipeEditorProps {
   order: Order;
@@ -41,7 +42,7 @@ export function RecipeEditor({
   initialRecipe,
   onSaved,
 }: RecipeEditorProps) {
-  const { canWrite } = useAuth();
+  const { canWrite, canRead } = useAuth();
   const canEditRecipes = canWrite("recipes");
   const [recipe, setRecipe] = useState<Recipe>(initialRecipe);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -50,13 +51,13 @@ export function RecipeEditor({
   useEffect(() => {
     void (async () => {
       const [orders, materials] = await Promise.all([
-        getAllOrders(),
+        ifAllowed(canRead("orders"), () => getAllOrders(), []),
         getAllRawMaterials(),
       ]);
       setAllOrders(orders);
       setRawMaterials(materials);
     })();
-  }, []);
+  }, [canRead]);
 
   const totals = useMemo(
     () =>
@@ -183,7 +184,7 @@ export function RecipeEditor({
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Table>
+          <Table sortable={false}>
             <TableHeader>
               <TableRow>
                 <TableHead>Hammadde adı</TableHead>

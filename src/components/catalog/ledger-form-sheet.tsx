@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { BookOpen, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -85,113 +87,139 @@ export function LedgerFormSheet({
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={editing ? "Yevmiye düzenle" : "Yeni yevmiye"}
+      icon={editing ? BookOpen : Receipt}
+      title={editing ? "Yevmiyeyi düzenle" : "Yeni yevmiye"}
+      description="Kasa hareketini belge numarası, tutar ve yönüyle kaydedin."
     >
-      <form className="flex h-full min-h-0 flex-col" onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Tarih" htmlFor="led-date">
-            <Input
-              id="led-date"
-              type="date"
-              required
-              value={form.date}
-              onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Belge no" htmlFor="led-doc">
-            <Input
-              id="led-doc"
-              required
-              value={form.documentNo}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, documentNo: e.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Açıklama" htmlFor="led-desc">
-            <Input
-              id="led-desc"
-              required
-              value={form.description}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, description: e.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Kategori" htmlFor="led-cat">
-            <Input
-              id="led-cat"
-              required
-              value={form.category}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, category: e.target.value }))
-              }
-            />
-          </FormField>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Yön">
-              <Select
-                value={form.direction}
-                onValueChange={(direction) =>
-                  setForm((f) => ({ ...f, direction }))
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection title="Belge">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Tarih" htmlFor="led-date" required>
+                <Input
+                  id="led-date"
+                  type="date"
+                  required
+                  value={form.date}
+                  onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                />
+              </FormField>
+              <FormField label="Belge no" htmlFor="led-doc" required>
+                <Input
+                  id="led-doc"
+                  required
+                  placeholder="FT-2026-001"
+                  value={form.documentNo}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, documentNo: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+            <FormField label="Açıklama" htmlFor="led-desc" required>
+              <Input
+                id="led-desc"
+                required
+                placeholder="Hareketin kısa özeti"
+                value={form.description}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, description: e.target.value }))
                 }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIRECTIONS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </FormField>
-            <FormField label="Durum">
-              <Select
-                value={form.status}
-                onValueChange={(status) => setForm((f) => ({ ...f, status }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <FormField label="Kategori" htmlFor="led-cat" required>
+              <Input
+                id="led-cat"
+                required
+                placeholder="Satış, hammadde, maaş…"
+                value={form.category}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, category: e.target.value }))
+                }
+              />
             </FormField>
-          </div>
-          <FormField label="Tutar (₺)" htmlFor="led-amt">
-            <Input
-              id="led-amt"
-              type="number"
-              min={0}
-              step="0.01"
-              required
-              value={form.amount}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, amount: e.target.value }))
-              }
-            />
-          </FormField>
+          </FormSection>
+          <FormSection title="Tutar ve durum">
+            <FormField label="Tutar" htmlFor="led-amt" required>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                  ₺
+                </span>
+                <Input
+                  id="led-amt"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  required
+                  placeholder="0"
+                  className="pl-8"
+                  value={form.amount}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, amount: e.target.value }))
+                  }
+                />
+              </div>
+            </FormField>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Yön" required>
+                <Select
+                  value={form.direction}
+                  onValueChange={(direction) =>
+                    setForm((f) => ({ ...f, direction }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DIRECTIONS.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Durum" required>
+                <Select
+                  value={form.status}
+                  onValueChange={(status) => setForm((f) => ({ ...f, status }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+          </FormSection>
         </FormSheetBody>
         <FormSheetFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
             Vazgeç
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Kaydediliyor…" : "Kaydet"}
+            {saving
+              ? "Kaydediliyor…"
+              : editing
+                ? "Değişiklikleri kaydet"
+                : "Yevmiyeyi kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

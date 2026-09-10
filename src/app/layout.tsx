@@ -3,6 +3,8 @@ import { connection } from "next/server";
 import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { toAuthUser } from "@/lib/auth/user";
+import { getLiveSessionFromCookies } from "@/lib/auth/live-session";
 import "./globals.css";
 
 /** Nonce'lı CSP için her istekte sunucu tarafında render */
@@ -30,13 +32,25 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   await connection();
-  // headers() okunmazsa Next 16 login'i önceden üretir (x-nextjs-prerender: 1);
-  // CSP nonce her istekte değişir, script'ler bloklanır, sayfa Yükleniyor'da kalır.
-  await headers();
+  // Sonucu kullanmak zorunlu: React Compiler kullanılmayan `await headers()`
+  // çağrısını silebilir; sayfa önceden üretilir, CSP nonce binmez, script
+  // bloklanır ve ekran "Yükleniyor"da kalır.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  let initialUser = null;
+  try {
+    const session = await getLiveSessionFromCookies();
+    if (session) initialUser = toAuthUser(session);
+  } catch {
+    initialUser = null;
+  }
   return (
-    <html lang="tr" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col font-sans">
-        <Providers>{children}</Providers>
+    <html
+      lang="tr"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-nonce={nonce}
+    >
+      <body className="min-h-full min-w-0 w-full overflow-x-hidden flex flex-col font-sans">
+        <Providers initialUser={initialUser}>{children}</Providers>
       </body>
     </html>
   );

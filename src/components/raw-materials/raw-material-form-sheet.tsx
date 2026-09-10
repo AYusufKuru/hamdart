@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -46,9 +48,13 @@ export function RawMaterialFormSheet({
   onCreated,
 }: RawMaterialFormSheetProps) {
   const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setForm(emptyForm());
+    if (open) {
+      setSaving(false);
+      setForm(emptyForm());
+    }
   }, [open]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -63,6 +69,7 @@ export function RawMaterialFormSheet({
       return;
     }
 
+    setSaving(true);
     try {
       const created = await createRawMaterial({
         sku: form.sku,
@@ -76,107 +83,118 @@ export function RawMaterialFormSheet({
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Kayıt eklenemedi");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Hammadde Ekle"
+      icon={FlaskConical}
+      title="Yeni hammadde"
       description="Reçete maliyetleri bu tablodaki birim maliyetlerden hesaplanır. SKU benzersiz olmalıdır."
     >
-      <form className="flex flex-1 flex-col min-h-0" noValidate onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField
-            label="SKU"
-            htmlFor="rm-sku"
-            hint="Tablodaki SKU sütunu — reçete ve tedarik siparişinde aynı kod kullanılır."
+      <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Kimlik"
+            description="SKU reçete ve tedarik siparişinde aynı kodla kullanılır."
           >
-            <Input
-              id="rm-sku"
-              required
-              className="font-mono"
-              placeholder="Örn: 150.02.01.00340"
-              value={form.sku}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, sku: e.target.value }))
-              }
-            />
-          </FormField>
-
-          <FormField label="Malzeme" htmlFor="rm-name">
-            <Input
-              id="rm-name"
-              required
-              placeholder="Örn: Avicel 102"
-              value={form.name}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, name: e.target.value }))
-              }
-            />
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Kategori">
-              <Select
-                value={form.category}
-                onValueChange={(category) =>
-                  setForm((f) => ({
-                    ...f,
-                    category: category as RawMaterialCategory,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {RAW_MATERIAL_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <FormField label="SKU" htmlFor="rm-sku" required>
+              <Input
+                id="rm-sku"
+                required
+                className="bg-white font-mono"
+                placeholder="Örn: 150.02.01.00340"
+                value={form.sku}
+                onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
+              />
             </FormField>
-            <FormField label="Birim">
-              <Select
-                value={form.unit}
-                onValueChange={(unit) => setForm((f) => ({ ...f, unit }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {RAW_MATERIAL_UNITS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <FormField label="Malzeme adı" htmlFor="rm-name" required>
+              <Input
+                id="rm-name"
+                required
+                className="bg-white"
+                placeholder="Örn: Avicel 102"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
             </FormField>
-          </div>
+          </FormSection>
 
-          <FormField
-            label="Birim Maliyet (₺)"
-            htmlFor="rm-cost"
-            hint="Reçete satır maliyeti = birim maliyet × ihtiyaç miktarı."
-          >
-            <Input
-              id="rm-cost"
-              type="number"
+          <FormSection title="Sınıflandırma">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Kategori" required>
+                <Select
+                  value={form.category}
+                  onValueChange={(category) =>
+                    setForm((f) => ({
+                      ...f,
+                      category: category as RawMaterialCategory,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RAW_MATERIAL_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Birim" required>
+                <Select
+                  value={form.unit}
+                  onValueChange={(unit) => setForm((f) => ({ ...f, unit }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RAW_MATERIAL_UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+          </FormSection>
+
+          <FormSection title="Maliyet">
+            <FormField
+              label="Birim maliyet"
+              htmlFor="rm-cost"
               required
-              min={0}
-              step="0.01"
-              placeholder="12500"
-              value={form.unitCost}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, unitCost: e.target.value }))
-              }
-            />
-          </FormField>
+              hint="Reçete satır maliyeti = birim maliyet × ihtiyaç miktarı."
+            >
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                  ₺
+                </span>
+                <Input
+                  id="rm-cost"
+                  type="number"
+                  required
+                  min={0}
+                  step="0.01"
+                  className="bg-white pl-8"
+                  placeholder="12500"
+                  value={form.unitCost}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, unitCost: e.target.value }))
+                  }
+                />
+              </div>
+            </FormField>
+          </FormSection>
         </FormSheetBody>
 
         <FormSheetFooter>
@@ -186,16 +204,17 @@ export function RawMaterialFormSheet({
             className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
-            İptal
+            Vazgeç
           </Button>
           <Button
             type="submit"
+            disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            Malzemeyi Ekle
+            {saving ? "Kaydediliyor…" : "Malzemeyi kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

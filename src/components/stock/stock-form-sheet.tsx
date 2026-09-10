@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { PackagePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,15 +14,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
 import { getWarehouses } from "@/lib/warehouse-store";
 import type { StockStatus } from "@/data/mock";
-import { plusYearsIso } from "@/lib/utils";
+import { plusYearsIso, selectItemValues } from "@/lib/utils";
 import {
   createStockEntry,
   deriveStockStatus,
@@ -88,12 +90,28 @@ export function StockFormSheet({
   const [names, setNames] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([...STOCK_CATEGORIES]);
   const [units, setUnits] = useState<string[]>([...STOCK_UNITS]);
+  const [saving, setSaving] = useState(false);
+
+  const skuOptions = useMemo(() => {
+    const base = selectItemValues(skus);
+    const current = form.sku.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.sku, skus]);
+
+  const nameOptions = useMemo(() => {
+    const base = selectItemValues(names);
+    const current = form.name.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.name, names]);
 
   const selectedWarehouse = warehouses.find((w) => w.id === form.warehouseId);
   const isLab = selectedWarehouse?.type === "laboratory";
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     setForm(emptyForm(defaultWarehouseId));
     void (async () => {
       const [skuList, nameList, catList, unitList, whList] = await Promise.all([
@@ -103,10 +121,10 @@ export function StockFormSheet({
         getKnownUnits(),
         getWarehouses(),
       ]);
-      setSkus(skuList);
-      setNames(nameList);
-      setCategories(catList);
-      setUnits(unitList);
+      setSkus(selectItemValues(skuList));
+      setNames(selectItemValues(nameList));
+      setCategories(selectItemValues(catList));
+      setUnits(selectItemValues(unitList));
       setWarehouses(whList);
     })();
   }, [open, defaultWarehouseId]);
@@ -164,6 +182,7 @@ export function StockFormSheet({
         ? labTargetRaw
         : undefined;
 
+    setSaving(true);
     try {
       const created = await createStockEntry({
         sku: form.sku,
@@ -192,219 +211,251 @@ export function StockFormSheet({
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Stok kaydedilemedi");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Stok Girişi"
-      description="Kalem, stok tablosu ve depo detayındaki sütunlarla kaydedilir. Durum miktar, min stok ve SKT’ye göre önerilir."
+      icon={PackagePlus}
+      title="Stok girişi"
+      description="Kalem depo tablosuna kaydedilir. Durum miktar, min stok ve SKT'ye göre önerilir."
+      className="max-w-2xl"
     >
-      <form className="flex flex-1 flex-col min-h-0" noValidate onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField
-            label="SKU"
-            htmlFor="stock-sku"
-            hint="Aynı SKU farklı depolarda olabilir (ör. üretim + lab numune)."
+      <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Ürün kimliği"
+            description="Aynı SKU farklı depolarda olabilir."
           >
-            <Input
-              id="stock-sku"
-              list="stock-sku-list"
-              required
-              className="font-mono"
-              placeholder="Örn: 152.01.06.00018"
-              value={form.sku}
-              onChange={(e) => patch("sku", e.target.value)}
-            />
-            <datalist id="stock-sku-list">
-              {skus.map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <FormField label="Ürün" htmlFor="stock-name">
-            <Input
-              id="stock-name"
-              list="stock-name-list"
-              required
-              placeholder="Örn: MAXİLİV MAGNİFUL 5X 60 TABLET"
-              value={form.name}
-              onChange={(e) => patch("name", e.target.value)}
-            />
-            <datalist id="stock-name-list">
-              {names.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Kategori">
-              <Select
-                value={form.category}
-                onValueChange={(category) => patch("category", category)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {categories.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <FormField label="SKU" htmlFor="stock-sku" required>
+              {skuOptions.length > 0 ? (
+                <Select
+                  value={form.sku || undefined}
+                  onValueChange={(sku) => patch("sku", sku)}
+                >
+                  <SelectTrigger id="stock-sku" className="bg-white font-mono">
+                    <SelectValue placeholder="SKU seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {skuOptions.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="stock-sku"
+                  required
+                  className="bg-white font-mono"
+                  placeholder="Örn: 152.01.06.00018"
+                  value={form.sku}
+                  onChange={(e) => patch("sku", e.target.value)}
+                />
+              )}
             </FormField>
+            <FormField label="Ürün adı" htmlFor="stock-name" required>
+              {nameOptions.length > 0 ? (
+                <Select
+                  value={form.name || undefined}
+                  onValueChange={(name) => patch("name", name)}
+                >
+                  <SelectTrigger id="stock-name" className="bg-white">
+                    <SelectValue placeholder="Ürün seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nameOptions.map((n) => (
+                      <SelectItem key={n} value={n}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="stock-name"
+                  required
+                  className="bg-white"
+                  placeholder="Örn: MAXİLİV MAGNİFUL 5X 60 TABLET"
+                  value={form.name}
+                  onChange={(e) => patch("name", e.target.value)}
+                />
+              )}
+            </FormField>
+          </FormSection>
+
+          <FormSection title="Depo ve miktar">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Kategori" required>
+                <Select
+                  value={form.category}
+                  onValueChange={(category) => patch("category", category)}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Depo" required hint="Sevkiyatın çıkacağı depo.">
+                <Select
+                  value={form.warehouseId}
+                  onValueChange={(warehouseId) => patch("warehouseId", warehouseId)}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>
+                        {w.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Miktar" htmlFor="stock-qty" required>
+                <Input
+                  id="stock-qty"
+                  type="number"
+                  required
+                  min={0}
+                  step="any"
+                  className="bg-white"
+                  placeholder="450"
+                  value={form.quantity}
+                  onChange={(e) => patch("quantity", e.target.value)}
+                />
+              </FormField>
+              <FormField label="Birim" required>
+                <Select
+                  value={form.unit}
+                  onValueChange={(unit) => patch("unit", unit)}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {units.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
             <FormField
-              label="Depo"
-              hint="Tablodaki Depo sütunu ve depo detay listesi."
+              label="Minimum stok"
+              htmlFor="stock-min"
+              required
+              hint="Altına düşünce durum Düşük/Kritik olur."
             >
-              <Select
-                value={form.warehouseId}
-                onValueChange={(warehouseId) => patch("warehouseId", warehouseId)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses.map((w) => (
-                    <SelectItem key={w.id} value={w.id}>
-                      {w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Miktar" htmlFor="stock-qty">
               <Input
-                id="stock-qty"
+                id="stock-min"
                 type="number"
                 required
                 min={0}
                 step="any"
-                placeholder="450"
-                value={form.quantity}
-                onChange={(e) => patch("quantity", e.target.value)}
+                className="bg-white"
+                placeholder="200"
+                value={form.minStock}
+                onChange={(e) => patch("minStock", e.target.value)}
               />
             </FormField>
-            <FormField label="Birim">
-              <Select
-                value={form.unit}
-                onValueChange={(unit) => patch("unit", unit)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {units.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
+          </FormSection>
 
-          <FormField
-            label="Minimum Stok"
-            htmlFor="stock-min"
-            hint="Tabloda miktarın altında Min: olarak görünür. Altına düşünce durum Düşük/Kritik olur."
-          >
-            <Input
-              id="stock-min"
-              type="number"
-              required
-              min={0}
-              step="any"
-              placeholder="200"
-              value={form.minStock}
-              onChange={(e) => patch("minStock", e.target.value)}
-            />
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Lot No" htmlFor="stock-lot">
-              <Input
-                id="stock-lot"
-                required
-                className="font-mono"
-                placeholder="LOT-2026-0845"
-                value={form.lotNo}
-                onChange={(e) => patch("lotNo", e.target.value)}
-              />
-            </FormField>
-            <FormField label="Son Kullanma (SKT)" htmlFor="stock-expiry">
-              <Input
-                id="stock-expiry"
-                type="date"
-                required
-                value={form.expiryDate}
-                onChange={(e) => patch("expiryDate", e.target.value)}
-              />
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField
-              label="Durum"
-              hint="Miktar / min / SKT değişince otomatik önerilir."
-            >
-              <Select
-                value={form.status}
-                onValueChange={(status) =>
-                  patch("status", status as StockStatus)
-                }
+          <FormSection title="Lot ve durum">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Lot no" htmlFor="stock-lot" required>
+                <Input
+                  id="stock-lot"
+                  required
+                  className="bg-white font-mono"
+                  placeholder="LOT-2026-0845"
+                  value={form.lotNo}
+                  onChange={(e) => patch("lotNo", e.target.value)}
+                />
+              </FormField>
+              <FormField label="Son kullanma (SKT)" htmlFor="stock-expiry" required>
+                <Input
+                  id="stock-expiry"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.expiryDate}
+                  onChange={(e) => patch("expiryDate", e.target.value)}
+                />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField
+                label="Durum"
+                hint="Miktar / min / SKT değişince otomatik önerilir."
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-            <FormField
-              label="Sıcaklık / Soğuk Zincir"
-              hint="Doluysa tabloda kar tanesi ikonu çıkar."
-            >
-              <Select
-                value={form.temperature || "__none"}
-                onValueChange={(v) =>
-                  patch("temperature", v === "__none" ? "" : v)
-                }
+                <Select
+                  value={form.status}
+                  onValueChange={(status) =>
+                    patch("status", status as StockStatus)
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField
+                label="Sıcaklık / soğuk zincir"
+                hint="Doluysa tabloda kar tanesi ikonu çıkar."
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Yok" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Yok</SelectItem>
-                  {TEMPERATURE_OPTIONS.filter(Boolean).map((t) => (
-                    <SelectItem key={t} value={t}>
-                      {t}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
+                <Select
+                  value={form.temperature || "__none"}
+                  onValueChange={(v) =>
+                    patch("temperature", v === "__none" ? "" : v)
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="Yok" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Yok</SelectItem>
+                    {selectItemValues(TEMPERATURE_OPTIONS).map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+          </FormSection>
 
           {isLab && (
-            <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-violet-700">
-                Laboratuvar girişi
-              </p>
+            <FormSection
+              title="Laboratuvar girişi"
+              description="Doğrudan lab veya ana depodan aktarım."
+            >
+            <div className="space-y-3">
               <FormField
                 label="Kaynak"
                 hint="Doğrudan lab: değerli/az miktar. Aktarım: üretim deposundan tamamlanır."
@@ -415,7 +466,7 @@ export function StockFormSheet({
                     patch("labEntry", labEntry as LabEntryMode)
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="bg-white">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -473,6 +524,7 @@ export function StockFormSheet({
                 </>
               )}
             </div>
+            </FormSection>
           )}
         </FormSheetBody>
 
@@ -483,16 +535,17 @@ export function StockFormSheet({
             className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
-            İptal
+            Vazgeç
           </Button>
           <Button
             type="submit"
+            disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            Stoğa Ekle
+            {saving ? "Kaydediliyor…" : "Stoğa ekle"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

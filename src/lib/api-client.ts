@@ -1,10 +1,39 @@
 import { csrfHeader } from "@/lib/auth/csrf-client";
 
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isForbiddenError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403;
+}
+
+/** Yetki yoksa isteği atmaz; 403 gelirse de fallback döner. */
+export async function ifAllowed<T>(
+  allowed: boolean,
+  load: () => Promise<T>,
+  fallback: T
+): Promise<T> {
+  if (!allowed) return fallback;
+  try {
+    return await load();
+  } catch (error) {
+    if (isForbiddenError(error)) return fallback;
+    throw error;
+  }
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(
-      typeof body.error === "string" ? body.error : "İstek başarısız"
+    throw new ApiError(
+      typeof body.error === "string" ? body.error : "İstek başarısız",
+      res.status
     );
   }
   return res.json() as Promise<T>;

@@ -32,14 +32,14 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
 export async function getOrderCustomers(): Promise<string[]> {
   const orders = await getAllOrders();
-  return [...new Set(orders.map((o) => o.customer))].sort((a, b) =>
-    a.localeCompare(b, "tr")
+  return [...new Set(orders.map((o) => o.customer).filter((c) => c.trim()))].sort(
+    (a, b) => a.localeCompare(b, "tr")
   );
 }
 
 export async function getOrderProducts(): Promise<string[]> {
   const orders = await getAllOrders();
-  return [...new Set(orders.map((o) => o.product))].sort((a, b) =>
-    a.localeCompare(b, "tr")
+  return [...new Set(orders.map((o) => o.product).filter((p) => p.trim()))].sort(
+    (a, b) => a.localeCompare(b, "tr")
   );
 }

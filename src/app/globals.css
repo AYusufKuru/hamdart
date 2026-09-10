@@ -98,6 +98,13 @@
   }
 }
 
+@layer components {
+  th:last-child > .col-resize-handle,
+  th:has(+ th.col-head-empty) > .col-resize-handle {
+    display: none;
+  }
+}
+
 @layer utilities {
   .glass-card {
     @apply bg-white/85 backdrop-blur-xl border border-white/30 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] rounded-2xl;

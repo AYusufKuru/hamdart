@@ -10,6 +10,7 @@ import type {
 import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { ConflictError, FieldError } from "@/lib/server/fields";
+import { capitalizeWordsTr } from "@/lib/utils";
 
 type AuditCtx = { actor: string; ip?: string };
 
@@ -352,10 +353,16 @@ export async function dbCreatePersonnel(
   },
   ctx: AuditCtx
 ): Promise<Personnel> {
+  const data = {
+    ...input,
+    firstName: capitalizeWordsTr(input.firstName),
+    lastName: capitalizeWordsTr(input.lastName),
+    title: capitalizeWordsTr(input.title),
+  };
   const row = await prisma.personnel.create({
     data: {
       id: `per-${Date.now()}`,
-      ...input,
+      ...data,
     },
   });
   const mapped = toPersonnel(row);
@@ -388,7 +395,19 @@ export async function dbUpdatePersonnel(
 ): Promise<Personnel> {
   const before = await prisma.personnel.findUnique({ where: { id } });
   if (!before) throw new FieldError("Personel bulunamadı");
-  const row = await prisma.personnel.update({ where: { id }, data: input });
+  const data = {
+    ...input,
+    ...(input.firstName !== undefined
+      ? { firstName: capitalizeWordsTr(input.firstName) }
+      : {}),
+    ...(input.lastName !== undefined
+      ? { lastName: capitalizeWordsTr(input.lastName) }
+      : {}),
+    ...(input.title !== undefined
+      ? { title: capitalizeWordsTr(input.title) }
+      : {}),
+  };
+  const row = await prisma.personnel.update({ where: { id }, data });
   const mapped = toPersonnel(row);
   await logAudit({
     actor: ctx.actor,

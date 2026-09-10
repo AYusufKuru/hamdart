@@ -98,7 +98,6 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "ADMIN">, Permission[]> = {
   ],
   PRODUCTION: resourcePerms(
     [
-      "dashboard",
       "factory",
       "recipes",
       "raw_materials",
@@ -244,6 +243,12 @@ export function getApiPermission(
       permission: write ? "admin:write" : "admin:read",
     };
   }
+  if (pathname.startsWith("/api/departments")) {
+    return {
+      kind: "require",
+      permission: write ? "admin:write" : "dashboard:read",
+    };
+  }
 
   const catalogMatch = pathname.match(/^\/api\/catalog\/([^/]+)/);
   if (catalogMatch) {
@@ -282,8 +287,8 @@ export const NAV_ITEMS: {
   { title: "Ticari", href: "/invoices", resource: "invoices", label: "Cari Açık" },
   { title: "Ticari", href: "/ledger", resource: "ledger", label: "Yevmiye" },
   { title: "Ticari", href: "/budget", resource: "budget", label: "Bütçe" },
-  { title: "Sistem", href: "/admin", resource: "admin", label: "Denetim & Yedek" },
   { title: "Ar-Ge", href: "/rd-lab", resource: "lab", label: "Laboratuvar" },
+  { title: "Sistem", href: "/admin", resource: "admin", label: "Denetim & Yedek" },
 ];
 
 export function getFirstAllowedPath(role: Role): string {

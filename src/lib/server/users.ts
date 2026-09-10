@@ -3,6 +3,7 @@ import { ROLES, type Role, type SessionUser } from "@/lib/auth/permissions";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
 import { invalidateSessionCache } from "@/lib/auth/live-session";
 import { logAudit } from "@/lib/server/audit";
+import { capitalizeWordsTr } from "@/lib/utils";
 
 export type UserRow = {
   id: string;
@@ -74,7 +75,7 @@ function normalizeName(raw: unknown): string {
   if (typeof raw !== "string") {
     throw new UserInputError("Ad soyad zorunludur");
   }
-  const name = raw.trim().replace(/\s+/g, " ");
+  const name = capitalizeWordsTr(raw);
   if (name.length < 2 || name.length > 120) {
     throw new UserInputError("Ad soyad 2-120 karakter olmalıdır");
   }

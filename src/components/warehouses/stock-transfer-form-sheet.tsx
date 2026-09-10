@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -77,12 +79,11 @@ export function StockTransferFormSheet({
   );
 
   const source = sourceItems.find((item) => item.id === form.sourceItemId);
-  const destOptions = warehouses.filter(
-    (w) => w.id !== source?.warehouseId
-  );
+  const destOptions = warehouses.filter((w) => w.id !== source?.warehouseId);
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     setForm(emptyForm(defaultFromWarehouseId, items));
   }, [open, defaultFromWarehouseId, items]);
 
@@ -121,125 +122,132 @@ export function StockTransferFormSheet({
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Stok Aktar"
-      description="Kaynak depodaki miktar düşer, hedef depoda aynı SKU ve lot varsa artar."
+      icon={ArrowLeftRight}
+      title="Stok aktar"
+      description="Kaynak depodaki miktar düşer; hedef depoda aynı SKU ve lot varsa artar."
     >
-      <form className="flex h-full min-h-0 flex-col" onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Kaynak kalem">
-            <Select
-              value={form.sourceItemId}
-              onValueChange={(sourceItemId) => {
-                const next = sourceItems.find((item) => item.id === sourceItemId);
-                setForm((f) => ({
-                  ...f,
-                  sourceItemId,
-                  quantity: next ? String(next.quantity) : f.quantity,
-                  toWarehouseId:
-                    f.toWarehouseId === next?.warehouseId ? "" : f.toWarehouseId,
-                }));
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Stok kalemi seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {sourceItems.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name} · {item.quantity} {item.unit} · {item.lotNo}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection title="Kaynak ve hedef">
+            <FormField label="Kaynak kalem" required>
+              <Select
+                value={form.sourceItemId || undefined}
+                onValueChange={(sourceItemId) => {
+                  const next = sourceItems.find((item) => item.id === sourceItemId);
+                  setForm((f) => ({
+                    ...f,
+                    sourceItemId,
+                    quantity: next ? String(next.quantity) : f.quantity,
+                    toWarehouseId:
+                      f.toWarehouseId === next?.warehouseId ? "" : f.toWarehouseId,
+                  }));
+                }}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Stok kalemi seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sourceItems.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name} · {item.quantity} {item.unit} · {item.lotNo}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField label="Hedef depo" required>
+              <Select
+                value={form.toWarehouseId || undefined}
+                onValueChange={(toWarehouseId) =>
+                  setForm((f) => ({ ...f, toWarehouseId }))
+                }
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Hedef depo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {destOptions.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>
+                      {w.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          </FormSection>
 
-          <FormField label="Hedef depo">
-            <Select
-              value={form.toWarehouseId}
-              onValueChange={(toWarehouseId) =>
-                setForm((f) => ({ ...f, toWarehouseId }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Hedef depo" />
-              </SelectTrigger>
-              <SelectContent>
-                {destOptions.map((w) => (
-                  <SelectItem key={w.id} value={w.id}>
-                    {w.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
-
-          <FormField
-            label="Miktar"
-            hint={
-              source
-                ? `En fazla ${source.quantity} ${source.unit}`
-                : undefined
-            }
-          >
-            <Input
-              type="number"
-              min={0}
-              step="any"
+          <FormSection title="Miktar ve tür">
+            <FormField
+              label="Miktar"
               required
-              value={form.quantity}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, quantity: e.target.value }))
-              }
-            />
-          </FormField>
-
-          <FormField label="Tür">
-            <Select
-              value={form.reason}
-              onValueChange={(reason) =>
-                setForm((f) => ({
-                  ...f,
-                  reason: reason as TransferForm["reason"],
-                }))
-              }
+              hint={source ? `En fazla ${source.quantity} ${source.unit}` : undefined}
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {REASON_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
+              <Input
+                type="number"
+                min={0}
+                step="any"
+                required
+                className="bg-white"
+                value={form.quantity}
+                onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Tür" required>
+              <Select
+                value={form.reason}
+                onValueChange={(reason) =>
+                  setForm((f) => ({
+                    ...f,
+                    reason: reason as TransferForm["reason"],
+                  }))
+                }
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REASON_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          </FormSection>
 
-          <FormField label="Not">
-            <Textarea
-              value={form.note}
-              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-              rows={3}
-            />
-          </FormField>
+          <FormSection title="Not" description="Opsiyonel açıklama.">
+            <FormField label="Not" optional>
+              <Textarea
+                className="bg-white"
+                rows={3}
+                value={form.note}
+                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+              />
+            </FormField>
+          </FormSection>
         </FormSheetBody>
         <FormSheetFooter>
           <Button
             type="button"
             variant="outline"
+            className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
             Vazgeç
           </Button>
-          <Button type="submit" disabled={saving || sourceItems.length === 0}>
+          <Button
+            type="submit"
+            disabled={saving || sourceItems.length === 0}
+            className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+          >
             {saving ? "Aktarılıyor…" : "Aktar"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

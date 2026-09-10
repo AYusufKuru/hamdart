@@ -13,6 +13,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  sortCollection,
+  type TableSortState,
 } from "@/components/ui/table";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { ChevronLeft, ChevronRight, Search, Snowflake } from "lucide-react";
@@ -25,6 +27,30 @@ const statusMap = {
   critical: { label: "Kritik", variant: "danger" as const },
   expiring: { label: "SKT Yakın", variant: "warning" as const },
 };
+
+function stockSortText(
+  item: WarehouseStockItem,
+  column: number,
+  isLab: boolean
+): string {
+  const statusLabel = statusMap[item.status]?.label ?? item.status;
+  const labSource = item.labDirectEntry
+    ? "Doğrudan lab"
+    : item.replenishFromWarehouseId
+      ? getWarehouseName(item.replenishFromWarehouseId)
+      : "—";
+  const values = [
+    item.sku,
+    item.name,
+    item.category,
+    `${item.quantity.toLocaleString("tr-TR", { maximumFractionDigits: 4 })} ${item.unit}`,
+    item.lotNo,
+    formatDate(item.expiryDate),
+    ...(isLab ? [labSource] : []),
+    statusLabel,
+  ];
+  return values[column] ?? "";
+}
 
 interface WarehouseStockTableProps {
   items: WarehouseStockItem[];
@@ -41,6 +67,7 @@ export function WarehouseStockTable({
   const [category, setCategory] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<TableSortState>(null);
 
   const filtered = useMemo(() => {
     return items.filter((item) => {
@@ -59,14 +86,23 @@ export function WarehouseStockTable({
     });
   }, [items, search, category, statusFilter]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const isLab = warehouseId === WAREHOUSE_IDS.laboratory;
+
+  const sorted = useMemo(() => {
+    const colCount = isLab ? 8 : 7;
+    const safeSort =
+      sort && sort.column >= 0 && sort.column < colCount ? sort : null;
+    return sortCollection(filtered, safeSort, (item, column) =>
+      stockSortText(item, column, isLab)
+    );
+  }, [filtered, sort, isLab]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const paginated = filtered.slice(
+  const paginated = sorted.slice(
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE
   );
-
-  const isLab = warehouseId === WAREHOUSE_IDS.laboratory;
 
   return (
     <div className="space-y-4">
@@ -119,8 +155,14 @@ export function WarehouseStockTable({
         {filtered.length !== items.length && ` (${items.length} toplam)`}
       </p>
 
-      <div className="rounded-xl border overflow-hidden">
-        <Table>
+      <div className="rounded-xl border overflow-x-auto">
+        <Table
+          sort={sort}
+          onSortChange={(next) => {
+            setSort(next);
+            setPage(1);
+          }}
+        >
           <TableHeader>
             <TableRow>
               <TableHead>SKU</TableHead>
@@ -212,7 +254,7 @@ export function WarehouseStockTable({
         </div>
       )}
 
-      {filtered.length > PAGE_SIZE && (
+      {sorted.length > PAGE_SIZE && (
         <div className="flex items-center justify-between pt-2">
           <p className="text-sm text-muted-foreground">
             Sayfa {safePage} / {totalPages}

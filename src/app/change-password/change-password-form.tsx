@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/lib/auth/auth-context";
+import { getFirstAllowedPath } from "@/lib/auth/permissions";
 import {
   PASSWORD_RULES_TEXT,
   validatePassword,
@@ -23,13 +24,17 @@ export function ChangePasswordForm({
   forced,
   username,
   name,
+  variant = "page",
+  onSuccess,
 }: {
   forced: boolean;
   username: string;
   name: string;
+  variant?: "page" | "embedded";
+  onSuccess?: () => void;
 }) {
   const router = useRouter();
-  const { refresh, logout } = useAuth();
+  const { refresh, logout, user } = useAuth();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -70,13 +75,92 @@ export function ChangePasswordForm({
       }
       toast.success("Şifreniz değiştirildi");
       await refresh();
-      router.push("/dashboard");
-      router.refresh();
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        router.push(user ? getFirstAllowedPath(user.role) : "/dashboard");
+        router.refresh();
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Şifre değiştirilemedi");
     } finally {
       setLoading(false);
     }
+  }
+
+  const form = (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor={`${variant}-currentPassword`}>Mevcut şifre</Label>
+        <Input
+          id={`${variant}-currentPassword`}
+          type="password"
+          autoComplete="current-password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          className="rounded-xl"
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={`${variant}-newPassword`}>Yeni şifre</Label>
+        <Input
+          id={`${variant}-newPassword`}
+          type="password"
+          autoComplete="new-password"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          className="rounded-xl"
+          required
+        />
+        <p
+          className={
+            localProblem
+              ? "text-xs text-destructive flex items-start gap-1.5"
+              : "text-xs text-muted-foreground flex items-start gap-1.5"
+          }
+        >
+          <ShieldCheck className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          {localProblem ?? PASSWORD_RULES_TEXT}
+        </p>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor={`${variant}-confirmPassword`}>Yeni şifre (tekrar)</Label>
+        <Input
+          id={`${variant}-confirmPassword`}
+          type="password"
+          autoComplete="new-password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          className="rounded-xl"
+          required
+        />
+        {mismatch && (
+          <p className="text-xs text-destructive">Şifre tekrarı eşleşmiyor.</p>
+        )}
+      </div>
+      <Button
+        type="submit"
+        className="w-full rounded-xl"
+        disabled={loading || !!localProblem || mismatch}
+      >
+        {loading ? "Kaydediliyor..." : "Şifreyi Değiştir"}
+      </Button>
+      {forced && variant === "page" && (
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full rounded-xl text-muted-foreground"
+          onClick={() => void logout()}
+        >
+          Çıkış yap
+        </Button>
+      )}
+    </form>
+  );
+
+  if (variant === "embedded") {
+    return form;
   }
 
   return (
@@ -96,78 +180,7 @@ export function ChangePasswordForm({
           </p>
         </div>
       </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="currentPassword">Mevcut şifre</Label>
-            <Input
-              id="currentPassword"
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="rounded-xl"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="newPassword">Yeni şifre</Label>
-            <Input
-              id="newPassword"
-              type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="rounded-xl"
-              required
-            />
-            <p
-              className={
-                localProblem
-                  ? "text-xs text-destructive flex items-start gap-1.5"
-                  : "text-xs text-muted-foreground flex items-start gap-1.5"
-              }
-            >
-              <ShieldCheck className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              {localProblem ?? PASSWORD_RULES_TEXT}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword">Yeni şifre (tekrar)</Label>
-            <Input
-              id="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="rounded-xl"
-              required
-            />
-            {mismatch && (
-              <p className="text-xs text-destructive">
-                Şifre tekrarı eşleşmiyor.
-              </p>
-            )}
-          </div>
-          <Button
-            type="submit"
-            className="w-full rounded-xl"
-            disabled={loading || !!localProblem || mismatch}
-          >
-            {loading ? "Kaydediliyor..." : "Şifreyi Değiştir"}
-          </Button>
-          {forced && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full rounded-xl text-muted-foreground"
-              onClick={() => void logout()}
-            >
-              Çıkış yap
-            </Button>
-          )}
-        </form>
-      </CardContent>
+      <CardContent>{form}</CardContent>
     </Card>
   );
 }

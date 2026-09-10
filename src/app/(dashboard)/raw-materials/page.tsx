@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -61,9 +60,6 @@ export default function RawMaterialsPage() {
         description="Excel hammadde kataloğu (SKU, malzeme adı, kategori, birim)."
         actions={
           <>
-            <Button className="rounded-2xl" variant="outline" asChild>
-              <Link href="/raw-material-orders">Hammadde Siparişleri</Link>
-            </Button>
             <CanWrite resource="raw_materials">
               <Button
                 className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"

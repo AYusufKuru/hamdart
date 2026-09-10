@@ -15,6 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { formatNumber } from "@/lib/utils";
 import { getAllProductionLines } from "@/lib/production-store";
 import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
+import { useAuth } from "@/lib/auth/auth-context";
+import { ifAllowed } from "@/lib/api-client";
 
 function useChartMounted() {
   const [mounted, setMounted] = useState(false);
@@ -24,13 +26,15 @@ function useChartMounted() {
 
 export function ProductionChart() {
   const mounted = useChartMounted();
+  const { canRead } = useAuth();
   const [data, setData] = useState<{ name: string; output: number }[]>([]);
 
   useEffect(() => {
-    void getAllProductionLines().then((lines) =>
-      setData(lines.map((l) => ({ name: l.name, output: l.outputToday })))
+    void ifAllowed(canRead("factory"), () => getAllProductionLines(), []).then(
+      (lines) =>
+        setData(lines.map((l) => ({ name: l.name, output: l.outputToday })))
     );
-  }, []);
+  }, [canRead]);
 
   return (
     <Card className="glass-card border-none">
@@ -70,18 +74,23 @@ export function ProductionChart() {
 
 export function StockChart() {
   const mounted = useChartMounted();
+  const { canRead } = useAuth();
   const [data, setData] = useState<{ category: string; value: number }[]>([]);
 
   useEffect(() => {
     void (async () => {
-      const items = await getAllWarehouseStockItems();
+      const items = await ifAllowed(
+        canRead("stock"),
+        () => getAllWarehouseStockItems(),
+        []
+      );
       const map = new Map<string, number>();
       for (const i of toDisplayStockItems(items)) {
         map.set(i.category, (map.get(i.category) ?? 0) + i.quantity);
       }
       setData([...map.entries()].map(([category, value]) => ({ category, value })));
     })();
-  }, []);
+  }, [canRead]);
 
   return (
     <Card className="glass-card border-none">

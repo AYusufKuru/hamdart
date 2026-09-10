@@ -17,6 +17,7 @@ import { Progress } from "@/components/ui/progress";
 import { formatNumber } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth/auth-context";
+import { ifAllowed } from "@/lib/api-client";
 import { generateDashboardPdf } from "@/lib/dashboard-report";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
 
@@ -28,22 +29,27 @@ const lineStatusMap = {
 };
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, canRead, canWrite } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [productionLines, setProductionLines] = useState<ProductionLine[]>([]);
   const [exporting, setExporting] = useState(false);
+  const showFactory = canRead("factory");
+  const showOrders = canRead("orders");
+  const showStock = canRead("stock");
 
   useEffect(() => {
     void (async () => {
-      await syncReplenishmentOrders();
+      if (canWrite("raw_material_orders")) {
+        await ifAllowed(true, () => syncReplenishmentOrders(), []);
+      }
       const [orderList, lines] = await Promise.all([
-        getAllOrders(),
-        getAllProductionLines(),
+        ifAllowed(showOrders, () => getAllOrders(), []),
+        ifAllowed(showFactory, () => getAllProductionLines(), []),
       ]);
       setOrders(orderList);
       setProductionLines(lines);
     })();
-  }, []);
+  }, [showFactory, showOrders, canWrite]);
 
   const urgentOrders = orders.filter(
     (o) =>
@@ -75,7 +81,7 @@ export default function DashboardPage() {
           <>
             Hoş geldiniz,{" "}
             <span className="bg-gradient-to-r from-indigo-600 to-blue-500 bg-clip-text text-transparent">
-              Ayşe
+              {user?.name ?? "…"}
             </span>
           </>
         }
@@ -99,15 +105,20 @@ export default function DashboardPage() {
 
       <StatCards />
 
-      <div className="grid gap-8 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <ProductionChart />
-        </div>
-        <ComplianceCard />
+      {(showFactory || showStock) && (
+      <div className={showFactory && showStock ? "grid gap-8 lg:grid-cols-3" : "grid gap-8"}>
+        {showFactory ? (
+          <div className={showStock ? "lg:col-span-2" : undefined}>
+            <ProductionChart />
+          </div>
+        ) : null}
+        {showStock ? <ComplianceCard /> : null}
       </div>
+      )}
 
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-8">
+          {showFactory ? (
           <Card className="glass-card border-none">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Üretim Hatları — Canlı Durum</CardTitle>
@@ -144,13 +155,15 @@ export default function DashboardPage() {
               })}
             </CardContent>
           </Card>
+          ) : null}
 
-          <StockChart />
+          {showStock ? <StockChart /> : null}
         </div>
 
         <div className="space-y-8">
           <RecentActivity />
 
+          {showOrders ? (
           <Card className="glass-card border-none">
             <CardHeader>
               <CardTitle>Acil Siparişler</CardTitle>
@@ -182,6 +195,7 @@ export default function DashboardPage() {
               )}
             </CardContent>
           </Card>
+          ) : null}
         </div>
       </div>
 

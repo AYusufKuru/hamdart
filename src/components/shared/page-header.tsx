@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 interface PageHeaderProps {
   badge: string;
   title: ReactNode;
-  description: string;
+  description?: string;
   badgeClassName?: string;
   actions?: React.ReactNode;
 }
@@ -30,9 +30,11 @@ export function PageHeader({
         <h1 className="text-4xl font-black tracking-tight text-foreground leading-none mt-2">
           {title}
         </h1>
-        <p className="text-muted-foreground mt-3 font-medium text-sm lg:text-base max-w-2xl opacity-80 leading-relaxed">
-          {description}
-        </p>
+        {description ? (
+          <p className="text-muted-foreground mt-3 font-medium text-sm lg:text-base max-w-2xl opacity-80 leading-relaxed">
+            {description}
+          </p>
+        ) : null}
       </div>
       {actions && <div className="flex items-center gap-3 relative z-10">{actions}</div>}
       <div className="absolute -top-10 -left-10 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -z-10 animate-pulse" />

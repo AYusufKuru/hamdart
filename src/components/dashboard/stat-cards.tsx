@@ -26,6 +26,8 @@ import {
 } from "@/lib/production-store";
 import { getAllLabExperiments } from "@/lib/lab-store";
 import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
+import { useAuth } from "@/lib/auth/auth-context";
+import { ifAllowed } from "@/lib/api-client";
 
 function lineTotals(lines: ProductionLine[]) {
   return {
@@ -60,6 +62,7 @@ function countsFrom(
 }
 
 export function StatCards() {
+  const { canRead } = useAuth();
   const [live, setLive] = useState(() =>
     countsFrom([], [], [], [])
   );
@@ -67,61 +70,71 @@ export function StatCards() {
   useEffect(() => {
     void (async () => {
       const [batches, orderList, experiments, lines] = await Promise.all([
-        getAllProductionBatches(),
-        getAllOrders(),
-        getAllLabExperiments(),
-        getAllProductionLines(),
+        ifAllowed(canRead("factory"), () => getAllProductionBatches(), []),
+        ifAllowed(canRead("orders"), () => getAllOrders(), []),
+        ifAllowed(canRead("lab"), () => getAllLabExperiments(), []),
+        ifAllowed(canRead("factory"), () => getAllProductionLines(), []),
       ]);
       setLive(countsFrom(batches, orderList, experiments, lines));
     })();
-  }, []);
+  }, [canRead]);
 
   const statItems = [
-    {
-      label: "Günlük Üretim",
-      value: formatNumber(live.dailyProduction),
-      unit: "adet",
-      description: `Hedef: ${formatNumber(live.productionTarget)}`,
-      trend: "Hat kartları",
-      href: "/factory",
-      icon: Factory,
-      color: "text-indigo-500",
-      bg: "bg-indigo-500/10",
-    },
-    {
-      label: "Aktif Batch",
-      value: String(live.activeBatches),
-      unit: "batch",
-      description: `${live.lines} üretim hattında`,
-      trend: "Canlı",
-      href: "/factory?tab=batches",
-      icon: Package,
-      color: "text-blue-500",
-      bg: "bg-blue-500/10",
-    },
-    {
-      label: "Bekleyen Sipariş",
-      value: String(live.pendingOrders),
-      unit: "sipariş",
-      description: `${live.urgentOrders} acil öncelikli`,
-      trend: "Canlı",
-      href: "/orders",
-      icon: ShoppingCart,
-      color: "text-violet-500",
-      bg: "bg-violet-500/10",
-    },
-    {
-      label: "Ar-Ge Deneyleri",
-      value: String(live.labExperiments),
-      unit: "proje",
-      description: `${live.activeLab} aktif test`,
-      trend: "Canlı",
-      href: "/rd-lab?tab=experiments",
-      icon: FlaskConical,
-      color: "text-emerald-500",
-      bg: "bg-emerald-500/10",
-    },
-  ];
+    canRead("factory")
+      ? {
+          label: "Günlük Üretim",
+          value: formatNumber(live.dailyProduction),
+          unit: "adet",
+          description: `Hedef: ${formatNumber(live.productionTarget)}`,
+          trend: "Hat kartları",
+          href: "/factory",
+          icon: Factory,
+          color: "text-indigo-500",
+          bg: "bg-indigo-500/10",
+        }
+      : null,
+    canRead("factory")
+      ? {
+          label: "Aktif Batch",
+          value: String(live.activeBatches),
+          unit: "batch",
+          description: `${live.lines} üretim hattında`,
+          trend: "Canlı",
+          href: "/factory?tab=batches",
+          icon: Package,
+          color: "text-blue-500",
+          bg: "bg-blue-500/10",
+        }
+      : null,
+    canRead("orders")
+      ? {
+          label: "Bekleyen Sipariş",
+          value: String(live.pendingOrders),
+          unit: "sipariş",
+          description: `${live.urgentOrders} acil öncelikli`,
+          trend: "Canlı",
+          href: "/orders",
+          icon: ShoppingCart,
+          color: "text-violet-500",
+          bg: "bg-violet-500/10",
+        }
+      : null,
+    canRead("lab")
+      ? {
+          label: "Ar-Ge Deneyleri",
+          value: String(live.labExperiments),
+          unit: "proje",
+          description: `${live.activeLab} aktif test`,
+          trend: "Canlı",
+          href: "/rd-lab?tab=experiments",
+          icon: FlaskConical,
+          color: "text-emerald-500",
+          bg: "bg-emerald-500/10",
+        }
+      : null,
+  ].filter((stat) => stat !== null);
+
+  if (statItems.length === 0) return null;
 
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -156,6 +169,7 @@ export function StatCards() {
 }
 
 export function ComplianceCard() {
+  const { canRead } = useAuth();
   const [meta, setMeta] = useState({
     alerts: 0,
     utilization: 0,
@@ -165,8 +179,8 @@ export function ComplianceCard() {
   useEffect(() => {
     void (async () => {
       const [warehouseItems, warehouses] = await Promise.all([
-        getAllWarehouseStockItems(),
-        getWarehouses(),
+        ifAllowed(canRead("stock"), () => getAllWarehouseStockItems(), []),
+        ifAllowed(canRead("warehouses"), () => getWarehouses(), []),
       ]);
       const display = toDisplayStockItems(warehouseItems);
       const alerts = display.filter(
@@ -183,7 +197,7 @@ export function ComplianceCard() {
         warehouseCount: warehouses.length,
       });
     })();
-  }, []);
+  }, [canRead]);
 
   return (
     <Link href="/stock" className="block h-full">

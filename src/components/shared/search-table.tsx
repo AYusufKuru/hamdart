@@ -10,6 +10,9 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  collectSortText,
+  sortCollection,
+  type TableSortState,
 } from "@/components/ui/table";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 
@@ -37,6 +40,7 @@ export function SearchTable<T extends { id: string }>({
 }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<TableSortState>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLocaleLowerCase("tr");
@@ -46,12 +50,20 @@ export function SearchTable<T extends { id: string }>({
     );
   }, [rows, q, searchText]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const sorted = useMemo(() => {
+    const safeSort =
+      sort && sort.column >= 0 && sort.column < columns.length ? sort : null;
+    return sortCollection(filtered, safeSort, (row, column) =>
+      collectSortText(columns[column]?.render(row))
+    );
+  }, [filtered, sort, columns]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const slice = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const slice = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
@@ -64,7 +76,13 @@ export function SearchTable<T extends { id: string }>({
           }}
         />
       </div>
-      <Table>
+      <Table
+        sort={sort}
+        onSortChange={(next) => {
+          setSort(next);
+          setPage(1);
+        }}
+      >
         <TableHeader>
           <TableRow>
             {columns.map((c) => (
@@ -90,13 +108,13 @@ export function SearchTable<T extends { id: string }>({
           ))}
         </TableBody>
       </Table>
-      {filtered.length === 0 && (
+      {sorted.length === 0 && (
         <p className="py-12 text-center text-muted-foreground">{empty}</p>
       )}
-      {filtered.length > pageSize && (
+      {sorted.length > pageSize && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {filtered.length} kayıt · sayfa {safePage}/{totalPages}
+            {sorted.length} kayıt · sayfa {safePage}/{totalPages}
           </span>
           <div className="flex gap-2">
             <Button

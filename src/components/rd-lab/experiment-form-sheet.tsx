@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Microscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -26,7 +28,7 @@ import {
   LAB_DEPARTMENTS,
   nextExperimentCode,
 } from "@/lib/lab-store";
-import { plusDaysIso, todayIso } from "@/lib/utils";
+import { plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
 
 function emptyForm() {
   return {
@@ -55,13 +57,20 @@ export function ExperimentFormSheet({
   onCreated,
 }: ExperimentFormSheetProps) {
   const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
   const [researchers, setResearchers] = useState<string[]>([]);
-  const [departments, setDepartments] = useState<string[]>([
-    ...LAB_DEPARTMENTS,
-  ]);
+  const [departments, setDepartments] = useState<string[]>([...LAB_DEPARTMENTS]);
+
+  const researcherOptions = useMemo(() => {
+    const base = selectItemValues(researchers);
+    const current = form.researcher.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.researcher, researchers]);
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     setForm(emptyForm());
     void (async () => {
       const [researcherList, departmentList, code] = await Promise.all([
@@ -69,8 +78,8 @@ export function ExperimentFormSheet({
         getLabDepartments(),
         nextExperimentCode(),
       ]);
-      setResearchers(researcherList);
-      setDepartments(departmentList);
+      setResearchers(selectItemValues(researcherList));
+      setDepartments(selectItemValues(departmentList));
       setForm((f) => ({ ...f, code }));
     })();
   }, [open]);
@@ -96,6 +105,7 @@ export function ExperimentFormSheet({
       return;
     }
 
+    setSaving(true);
     try {
       const created = await createLabExperiment({
         code: form.code,
@@ -115,177 +125,198 @@ export function ExperimentFormSheet({
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Deney kaydedilemedi");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Yeni Deney"
-      description="Kod otomatik üretilir. Kartta görünen departman, araştırmacı, ilerleme ve numune sayısı burada girilir."
+      icon={Microscope}
+      title="Yeni deney"
+      description="Kod otomatik üretilir. Karttaki departman, ilerleme ve numune sayısı burada girilir."
+      className="max-w-2xl"
     >
-      <form className="flex flex-1 flex-col min-h-0" noValidate onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Deney Kodu" htmlFor="exp-code">
-            <Input
-              id="exp-code"
-              required
-              className="font-mono"
-              value={form.code}
-              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-            />
-          </FormField>
+      <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection title="Deney bilgisi">
+            <FormField label="Deney kodu" htmlFor="exp-code" required>
+              <Input
+                id="exp-code"
+                required
+                className="bg-white font-mono"
+                value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Başlık" htmlFor="exp-title" required>
+              <Input
+                id="exp-title"
+                required
+                className="bg-white"
+                placeholder="Örn: Hepanorm çözünme testi"
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Araştırmacı" htmlFor="exp-researcher" required>
+              {researcherOptions.length > 0 ? (
+                <Select
+                  value={form.researcher || undefined}
+                  onValueChange={(researcher) =>
+                    setForm((f) => ({ ...f, researcher }))
+                  }
+                >
+                  <SelectTrigger id="exp-researcher" className="bg-white">
+                    <SelectValue placeholder="Araştırmacı seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {researcherOptions.map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="exp-researcher"
+                  required
+                  className="bg-white"
+                  placeholder="Örn: HİLAL ÇELİK"
+                  value={form.researcher}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, researcher: e.target.value }))
+                  }
+                />
+              )}
+            </FormField>
+          </FormSection>
 
-          <FormField label="Başlık" htmlFor="exp-title">
-            <Input
-              id="exp-title"
-              required
-              placeholder="Örn: Hepanorm çözünme testi"
-              value={form.title}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, title: e.target.value }))
-              }
-            />
-          </FormField>
-
-          <FormField label="Araştırmacı" htmlFor="exp-researcher">
-            <Input
-              id="exp-researcher"
-              list="exp-researcher-list"
-              required
-              placeholder="Örn: HİLAL ÇELİK"
-              value={form.researcher}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, researcher: e.target.value }))
-              }
-            />
-            <datalist id="exp-researcher-list">
-              {researchers.map((r) => (
-                <option key={r} value={r} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Departman">
+          <FormSection title="Organizasyon">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Departman" required>
+                <Select
+                  value={form.department}
+                  onValueChange={(department) =>
+                    setForm((f) => ({ ...f, department }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Öncelik" required>
+                <Select
+                  value={form.priority}
+                  onValueChange={(priority) =>
+                    setForm((f) => ({
+                      ...f,
+                      priority: priority as LabExperiment["priority"],
+                    }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">Normal</SelectItem>
+                    <SelectItem value="high">Yüksek</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+            <FormField label="Durum" required>
               <Select
-                value={form.department}
-                onValueChange={(department) =>
-                  setForm((f) => ({ ...f, department }))
+                value={form.status}
+                onValueChange={(status) =>
+                  setForm((f) => ({ ...f, status: status as ExperimentStatus }))
                 }
               >
-                <SelectTrigger>
+                <SelectTrigger className="bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {departments.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
+                  {EXPERIMENT_STATUSES.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </FormField>
-            <FormField label="Öncelik">
-              <Select
-                value={form.priority}
-                onValueChange={(priority) =>
-                  setForm((f) => ({
-                    ...f,
-                    priority: priority as LabExperiment["priority"],
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="high">Yüksek</SelectItem>
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
+          </FormSection>
 
-          <FormField label="Durum">
-            <Select
-              value={form.status}
-              onValueChange={(status) =>
-                setForm((f) => ({ ...f, status: status as ExperimentStatus }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXPERIMENT_STATUSES.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Başlangıç" htmlFor="exp-start">
-              <Input
-                id="exp-start"
-                type="date"
-                required
-                value={form.startDate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, startDate: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Bitiş" htmlFor="exp-due">
-              <Input
-                id="exp-due"
-                type="date"
-                required
-                value={form.dueDate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, dueDate: e.target.value }))
-                }
-              />
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField
-              label="İlerleme (%)"
-              htmlFor="exp-progress"
-              hint="Karttaki ilerleme çubuğu."
-            >
-              <Input
-                id="exp-progress"
-                type="number"
-                min={0}
-                max={100}
-                value={form.progress}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, progress: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              label="Numune sayısı"
-              htmlFor="exp-samples"
-              hint="Kartın altındaki numune adedi."
-            >
-              <Input
-                id="exp-samples"
-                type="number"
-                min={0}
-                value={form.samples}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, samples: e.target.value }))
-                }
-              />
-            </FormField>
-          </div>
+          <FormSection title="Takvim ve ilerleme">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Başlangıç" htmlFor="exp-start" required>
+                <Input
+                  id="exp-start"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.startDate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, startDate: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Bitiş" htmlFor="exp-due" required>
+                <Input
+                  id="exp-due"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.dueDate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, dueDate: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="İlerleme" htmlFor="exp-progress" hint="Karttaki ilerleme çubuğu (%).">
+                <div className="relative">
+                  <Input
+                    id="exp-progress"
+                    type="number"
+                    min={0}
+                    max={100}
+                    className="bg-white pr-8"
+                    value={form.progress}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, progress: e.target.value }))
+                    }
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                    %
+                  </span>
+                </div>
+              </FormField>
+              <FormField label="Numune sayısı" htmlFor="exp-samples" hint="Kartın altındaki numune adedi.">
+                <Input
+                  id="exp-samples"
+                  type="number"
+                  min={0}
+                  className="bg-white"
+                  value={form.samples}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, samples: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+          </FormSection>
         </FormSheetBody>
 
         <FormSheetFooter>
@@ -295,16 +326,17 @@ export function ExperimentFormSheet({
             className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
-            İptal
+            Vazgeç
           </Button>
           <Button
             type="submit"
+            disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            Deneyi Oluştur
+            {saving ? "Kaydediliyor…" : "Deneyi oluştur"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

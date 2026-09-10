@@ -1,19 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { ClipboardList, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
 import { createRecipe, getAllRecipes, nextRecipeCode } from "@/lib/recipe-store";
 import { fetchProducts } from "@/lib/catalog-store";
+import { capitalizeWordsTr, selectItemValues } from "@/lib/utils";
+
+const LINE_UNITS = ["mg", "g", "kg", "adet", "mL", "L"] as const;
 
 type Line = { materialName: string; unit: string; quantity: string };
 
@@ -42,9 +53,11 @@ export function RecipeFormSheet({
     []
   );
   const [productNames, setProductNames] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     setForm(emptyForm());
     void (async () => {
       const [materialList, recipes, products] = await Promise.all([
@@ -59,22 +72,34 @@ export function RecipeFormSheet({
       setMaterials(
         [...byName.entries()]
           .map(([name, unit]) => ({ name, unit }))
+          .filter((m) => m.name.trim())
           .sort((a, b) => a.name.localeCompare(b.name, "tr"))
       );
       setProductNames(
-        [
-          ...new Set([
-            ...recipes.map((r) => r.productName),
-            ...products.map((p) => p.name),
-          ]),
-        ]
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b, "tr"))
+        selectItemValues(
+          [
+            ...new Set([
+              ...recipes.map((r) => r.productName),
+              ...products.map((p) => p.name),
+            ]),
+          ]
+        ).sort((a, b) => a.localeCompare(b, "tr"))
       );
       const code = await nextRecipeCode();
       setForm((f) => ({ ...f, code }));
     })();
   }, [open]);
+
+  const productOptions = useMemo(() => {
+    const base = selectItemValues(productNames);
+    const current = form.productName.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.productName, productNames]);
+
+  const validLineCount = form.lines.filter(
+    (l) => l.materialName.trim() && parseFloat(l.quantity.replace(",", ".")) > 0
+  ).length;
 
   function patchLine(index: number, patch: Partial<Line>) {
     setForm((f) => ({
@@ -84,175 +109,284 @@ export function RecipeFormSheet({
         const next = { ...l, ...patch };
         if (patch.materialName) {
           const hit = materials.find((m) => m.name === patch.materialName);
-          if (hit) next.unit = hit.unit || next.unit;
+          if (hit?.unit) next.unit = hit.unit;
         }
         return next;
       }),
     }));
   }
 
+  function addLine() {
+    setForm((f) => ({
+      ...f,
+      lines: [...f.lines, { materialName: "", unit: "mg", quantity: "" }],
+    }));
+  }
+
+  function removeLine(index: number) {
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.filter((_, i) => i !== index),
+    }));
+  }
+
+  function materialOptionsFor(line: Line) {
+    const named = materials.filter((m) => m.name.trim());
+    if (
+      line.materialName.trim() &&
+      !named.some((m) => m.name === line.materialName)
+    ) {
+      return [{ name: line.materialName, unit: line.unit }, ...named];
+    }
+    return named;
+  }
+
+  function unitOptionsFor(line: Line) {
+    const fromMaterial = materials.find((m) => m.name === line.materialName)?.unit;
+    const base = new Set<string>(LINE_UNITS);
+    if (fromMaterial?.trim()) base.add(fromMaterial);
+    if (line.unit.trim()) base.add(line.unit);
+    return selectItemValues(base);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.productName.trim()) {
+      toast.error("Ürün adı zorunludur");
+      return;
+    }
+
+    const parsedLines = form.lines
+      .map((l) => ({
+        materialName: l.materialName.trim(),
+        unit: l.unit.trim() || "mg",
+        quantityPerUnit: parseFloat(l.quantity.replace(",", ".")) || 0,
+      }))
+      .filter((l) => l.materialName && l.quantityPerUnit > 0);
+
+    if (parsedLines.length === 0) {
+      toast.error("En az bir geçerli hammadde satırı girin");
+      return;
+    }
+
+    setSaving(true);
     try {
       const created = await createRecipe({
-        code: form.code,
-        productCode: form.productCode,
-        productName: form.productName,
-        lines: form.lines.map((l) => ({
-          materialName: l.materialName,
-          unit: l.unit,
-          quantityPerUnit: parseFloat(l.quantity.replace(",", ".")) || 0,
-        })),
+        code: form.code.trim(),
+        productCode: form.productCode.trim(),
+        productName: capitalizeWordsTr(form.productName),
+        lines: parsedLines,
       });
-      toast.success(`${created.code} kaydedildi`);
+      toast.success(`${created.code || created.productName} kaydedildi`);
       onOpenChange(false);
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Kayıt başarısız");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Reçete Ekle"
-      description="Excel yapısı: reçete kodu, ürün kodu, ürün adı ve hammadde satırları."
-      className="sm:w-[40rem] sm:max-w-[40rem]"
+      icon={ClipboardList}
+      title="Yeni reçete"
+      description="Reçete kodu otomatik gelir. Hammaddeler 1 birim çıktı başına miktar olarak kaydedilir."
+      className="max-w-2xl"
     >
-      <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
-        <FormSheetBody>
-          <FormField label="Reçete Kodu" htmlFor="rec-code">
-            <Input
-              id="rec-code"
-              value={form.code}
-              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="Ürün Kodu" htmlFor="rec-pcode">
-            <Input
-              id="rec-pcode"
-              value={form.productCode}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, productCode: e.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Ürün adı" htmlFor="rec-pname">
-            <Input
-              id="rec-pname"
-              list="rec-product-names"
-              value={form.productName}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, productName: e.target.value }))
-              }
-              placeholder="Örn: Hepanorm 30 Tablet"
-              required
-            />
-            <datalist id="rec-product-names">
-              {productNames.map((n) => (
-                <option key={n} value={n} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-bold">Hammadde satırları</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-xl"
-                onClick={() =>
-                  setForm((f) => ({
-                    ...f,
-                    lines: [
-                      ...f.lines,
-                      { materialName: "", unit: "mg", quantity: "" },
-                    ],
-                  }))
-                }
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Satır
-              </Button>
-            </div>
-            {form.lines.map((line, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-[1fr_5rem_6rem_auto] gap-2 items-end"
-              >
-                <FormField
-                  label={index === 0 ? "Hammadde adı" : ""}
-                  htmlFor={`mat-${index}`}
-                >
-                  <Input
-                    id={`mat-${index}`}
-                    list="rec-material-names"
-                    value={line.materialName}
-                    onChange={(e) =>
-                      patchLine(index, { materialName: e.target.value })
-                    }
-                    placeholder="Malzeme"
-                  />
-                </FormField>
-                <FormField label={index === 0 ? "Birim" : ""} htmlFor={`unit-${index}`}>
-                  <Input
-                    id={`unit-${index}`}
-                    value={line.unit}
-                    onChange={(e) => patchLine(index, { unit: e.target.value })}
-                  />
-                </FormField>
-                <FormField
-                  label={index === 0 ? "Birim Miktar" : ""}
-                  htmlFor={`qty-${index}`}
-                >
-                  <Input
-                    id={`qty-${index}`}
-                    inputMode="decimal"
-                    value={line.quantity}
-                    onChange={(e) =>
-                      patchLine(index, { quantity: e.target.value })
-                    }
-                  />
-                </FormField>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="mb-0.5"
-                  disabled={form.lines.length <= 1}
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      lines: f.lines.filter((_, i) => i !== index),
-                    }))
+      <form
+        className="flex min-h-0 flex-1 flex-col"
+        noValidate
+        onSubmit={handleSubmit}
+      >
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Reçete bilgisi"
+            description="Ürün adı üretim ve sipariş kayıtlarıyla eşleşmeli."
+          >
+            <FormField label="Reçete kodu" htmlFor="rec-code" optional>
+              <Input
+                id="rec-code"
+                className="bg-white font-mono"
+                value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                placeholder="REC-001"
+              />
+            </FormField>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Ürün kodu" htmlFor="rec-pcode" optional>
+                <Input
+                  id="rec-pcode"
+                  className="bg-white font-mono"
+                  value={form.productCode}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, productCode: e.target.value }))
                   }
+                  placeholder="PRD-001"
+                />
+              </FormField>
+              <FormField label="Ürün adı" htmlFor="rec-pname" required>
+                {productOptions.length > 0 ? (
+                  <Select
+                    value={form.productName || undefined}
+                    onValueChange={(productName) =>
+                      setForm((f) => ({ ...f, productName }))
+                    }
+                  >
+                    <SelectTrigger id="rec-pname" className="bg-white">
+                      <SelectValue placeholder="Ürün seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {productOptions.map((n) => (
+                        <SelectItem key={n} value={n}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="rec-pname"
+                    className="bg-white"
+                    required
+                    value={form.productName}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, productName: e.target.value }))
+                    }
+                    placeholder="Örn. Hepanorm 30 Tablet"
+                  />
+                )}
+              </FormField>
+            </div>
+          </FormSection>
+
+          <FormSection
+            title="Hammadde satırları"
+            description={`1 birim mamul için gereken miktar. ${validLineCount > 0 ? `${validLineCount} geçerli satır.` : "En az bir satır doldurun."}`}
+          >
+            <div className="space-y-2">
+              {form.lines.map((line, index) => (
+                <div
+                  key={index}
+                  className="relative grid grid-cols-1 gap-2 rounded-xl border bg-white p-3 sm:grid-cols-[1fr_5.5rem_6.5rem_auto]"
                 >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            ))}
-            <datalist id="rec-material-names">
-              {materials.map((m) => (
-                <option key={m.name} value={m.name} />
+                  <FormField
+                    label={index === 0 ? "Hammadde" : ""}
+                    htmlFor={`mat-${index}`}
+                    required={index === 0}
+                  >
+                    {materials.length > 0 ? (
+                      <Select
+                        value={line.materialName || undefined}
+                        onValueChange={(materialName) =>
+                          patchLine(index, { materialName })
+                        }
+                      >
+                        <SelectTrigger id={`mat-${index}`} className="bg-white">
+                          <SelectValue placeholder="Malzeme seçin" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialOptionsFor(line).map((m) => (
+                            <SelectItem key={m.name} value={m.name}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Input
+                        id={`mat-${index}`}
+                        className="bg-white"
+                        value={line.materialName}
+                        onChange={(e) =>
+                          patchLine(index, { materialName: e.target.value })
+                        }
+                        placeholder="Malzeme adı"
+                      />
+                    )}
+                  </FormField>
+                  <FormField label={index === 0 ? "Birim" : ""}>
+                    <Select
+                      value={line.unit || "mg"}
+                      onValueChange={(unit) => patchLine(index, { unit })}
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {unitOptionsFor(line).map((u) => (
+                          <SelectItem key={u} value={u}>
+                            {u}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField
+                    label={index === 0 ? "Miktar" : ""}
+                    htmlFor={`qty-${index}`}
+                    required={index === 0}
+                  >
+                    <Input
+                      id={`qty-${index}`}
+                      className="bg-white"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={line.quantity}
+                      onChange={(e) =>
+                        patchLine(index, { quantity: e.target.value })
+                      }
+                    />
+                  </FormField>
+                  <div className={index === 0 ? "flex items-end pb-0.5" : "flex items-center"}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground hover:text-rose-600"
+                      disabled={form.lines.length <= 1}
+                      aria-label="Satırı sil"
+                      onClick={() => removeLine(index)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               ))}
-            </datalist>
-          </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1 w-full rounded-xl border-dashed sm:w-auto"
+              onClick={addLine}
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Hammadde satırı ekle
+            </Button>
+          </FormSection>
         </FormSheetBody>
+
         <FormSheetFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            İptal
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => onOpenChange(false)}
+          >
+            Vazgeç
           </Button>
           <Button
             type="submit"
-            className="bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            disabled={saving || !form.productName.trim()}
+            className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            Reçeteyi Kaydet
+            {saving ? "Kaydediliyor…" : "Reçeteyi kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

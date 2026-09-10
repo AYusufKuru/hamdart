@@ -91,7 +91,6 @@ export default function PersonnelPage() {
       <PageHeader
         badge="İK"
         title="Personel"
-        description="Personel kartları. Maaş ve IBAN yalnızca yetkili rollere gösterilir."
         actions={
           <CanWrite resource="personnel">
             <Button

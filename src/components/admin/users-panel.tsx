@@ -31,7 +31,7 @@ import {
 import { useAuth } from "@/lib/auth/auth-context";
 import { ROLES, ROLE_LABELS, type Role } from "@/lib/auth/permissions";
 import { PASSWORD_RULES_TEXT } from "@/lib/auth/password-rules";
-import { formatDate } from "@/lib/utils";
+import { capitalizeWordsTr, formatDate } from "@/lib/utils";
 import { KeyRound, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -70,7 +70,10 @@ export function UsersPanel() {
     e.preventDefault();
     setSaving(true);
     try {
-      await createUser(form);
+      await createUser({
+        ...form,
+        name: capitalizeWordsTr(form.name),
+      });
       toast.success(
         `${form.username} oluşturuldu. Kullanıcı ilk girişte şifresini değiştirecek.`
       );
@@ -150,82 +153,98 @@ export function UsersPanel() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <form
-              onSubmit={handleCreate}
-              className="grid gap-4 md:grid-cols-2 lg:grid-cols-5 lg:items-end"
-            >
-              <div className="space-y-2">
-                <Label htmlFor="new-username">Kullanıcı adı</Label>
-                <Input
-                  id="new-username"
-                  value={form.username}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, username: e.target.value }))
-                  }
-                  placeholder="ahmet.yilmaz"
-                  className="rounded-xl"
-                  required
-                />
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(10rem,0.9fr)_minmax(0,1fr)_auto]">
+                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
+                  <Label htmlFor="new-username" className="self-end truncate">
+                    Kullanıcı adı
+                  </Label>
+                  <Input
+                    id="new-username"
+                    value={form.username}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, username: e.target.value }))
+                    }
+                    placeholder="ahmet.yilmaz"
+                    className="h-10 rounded-xl"
+                    required
+                  />
+                </div>
+                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
+                  <Label htmlFor="new-name" className="self-end truncate">
+                    Ad soyad
+                  </Label>
+                  <Input
+                    id="new-name"
+                    value={form.name}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      const trailing = /\s+$/.test(value);
+                      const name = capitalizeWordsTr(value);
+                      setForm((f) => ({
+                        ...f,
+                        name: trailing && name ? `${name} ` : name,
+                      }));
+                    }}
+                    placeholder="Ahmet Yılmaz"
+                    className="h-10 rounded-xl"
+                    required
+                  />
+                </div>
+                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
+                  <Label htmlFor="new-role" className="self-end truncate">
+                    Rol
+                  </Label>
+                  <Select
+                    value={form.role}
+                    onValueChange={(role) =>
+                      setForm((f) => ({ ...f, role: role as Role }))
+                    }
+                  >
+                    <SelectTrigger id="new-role" className="h-10 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ROLES.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {ROLE_LABELS[role]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
+                  <Label htmlFor="new-password" className="self-end truncate">
+                    Geçici şifre
+                  </Label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, password: e.target.value }))
+                    }
+                    className="h-10 rounded-xl"
+                    required
+                  />
+                </div>
+                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
+                  <span className="hidden xl:block" aria-hidden />
+                  <Button
+                    type="submit"
+                    className="h-10 rounded-xl"
+                    disabled={saving}
+                  >
+                    {saving ? "Ekleniyor..." : "Kullanıcı Ekle"}
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-name">Ad soyad</Label>
-                <Input
-                  id="new-name"
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  placeholder="Ahmet Yılmaz"
-                  className="rounded-xl"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-role">Rol</Label>
-                <Select
-                  value={form.role}
-                  onValueChange={(role) =>
-                    setForm((f) => ({ ...f, role: role as Role }))
-                  }
-                >
-                  <SelectTrigger id="new-role" className="rounded-xl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ROLES.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {ROLE_LABELS[role]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-password">Geçici şifre</Label>
-                <Input
-                  id="new-password"
-                  type="password"
-                  autoComplete="new-password"
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, password: e.target.value }))
-                  }
-                  className="rounded-xl"
-                  required
-                />
-              </div>
-              <Button
-                type="submit"
-                className="rounded-xl"
-                disabled={saving}
-              >
-                {saving ? "Ekleniyor..." : "Kullanıcı Ekle"}
-              </Button>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {PASSWORD_RULES_TEXT} Kullanıcı ilk girişinde bu şifreyi
+                değiştirmek zorunda kalacak.
+              </p>
             </form>
-            <p className="text-xs text-muted-foreground mt-3">
-              {PASSWORD_RULES_TEXT} Kullanıcı ilk girişinde bu şifreyi
-              değiştirmek zorunda kalacak.
-            </p>
           </CardContent>
         </Card>
       )}

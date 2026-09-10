@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -22,7 +24,7 @@ import { fetchCustomers } from "@/lib/catalog-store";
 import { getWarehouses } from "@/lib/warehouse-store";
 import { getAllRecipes } from "@/lib/recipe-store";
 import type { Order, OrderStatus } from "@/data/mock";
-import { plusDaysIso, todayIso } from "@/lib/utils";
+import { plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
 import {
   createOrder,
   getOrderCustomers,
@@ -76,9 +78,25 @@ export function OrderFormSheet({
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [customers, setCustomers] = useState<string[]>([]);
   const [products, setProducts] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const customerOptions = useMemo(() => {
+    const base = selectItemValues(customers);
+    const current = form.customer.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.customer, customers]);
+
+  const productOptions = useMemo(() => {
+    const base = selectItemValues(products);
+    const current = form.product.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.product, products]);
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     void (async () => {
       const [customerList, orderCustomers, orderProducts, recipes, whList] =
         await Promise.all([
@@ -95,14 +113,14 @@ export function OrderFormSheet({
         whList[0];
       setForm(emptyForm(production?.name ?? "Fabrika"));
       setCustomers(
-        [...new Set([...customerList.map((c) => c.name), ...orderCustomers])]
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b, "tr"))
+        selectItemValues(
+          [...new Set([...customerList.map((c) => c.name), ...orderCustomers])]
+        ).sort((a, b) => a.localeCompare(b, "tr"))
       );
       setProducts(
-        [...new Set([...recipes.map((r) => r.productName), ...orderProducts])]
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b, "tr"))
+        selectItemValues(
+          [...new Set([...recipes.map((r) => r.productName), ...orderProducts])]
+        ).sort((a, b) => a.localeCompare(b, "tr"))
       );
     })();
   }, [open]);
@@ -128,6 +146,7 @@ export function OrderFormSheet({
       return;
     }
 
+    setSaving(true);
     try {
       const created = await createOrder({
         customer: form.customer.trim(),
@@ -147,213 +166,240 @@ export function OrderFormSheet({
       onCreated?.(created);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sipariş kaydedilemedi");
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Yeni Sipariş"
-      description="Müşteri siparişi tablodaki alanlarla kaydedilir. Sipariş numarası otomatik üretilir; reçete sipariş detayından oluşturulur."
+      icon={ShoppingCart}
+      title="Yeni sipariş"
+      description="Sipariş numarası otomatik üretilir. Reçete sipariş detayından oluşturulur."
+      className="max-w-2xl"
     >
-      <form
-        className="flex flex-1 flex-col min-h-0"
-        noValidate
-        onSubmit={handleSubmit}
-      >
-        <FormSheetBody>
-          <FormField
-            label="Müşteri"
-            htmlFor="order-customer"
-            hint="Mevcut müşterilerden seçebilir veya yeni yazabilirsiniz."
+      <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Müşteri ve ürün"
+            description="Ürün adı üretim reçetesiyle aynı olmalıdır."
           >
-            <Input
-              id="order-customer"
-              list="order-customer-list"
-              required
-              placeholder="Örn: ALLIANCE HEALTHCARE ECZA DEPOSU A.Ş."
-              value={form.customer}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, customer: e.target.value }))
-              }
-            />
-            <datalist id="order-customer-list">
-              {customers.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <FormField
-            label="Ürün"
-            htmlFor="order-product"
-            hint="Üretimdeki ürün adıyla aynı yazın; reçete ve maliyet bu isme bağlanır."
-          >
-            <Input
-              id="order-product"
-              list="order-product-list"
-              required
-              placeholder="Örn: Hepanorm 30 Tablet"
-              value={form.product}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, product: e.target.value }))
-              }
-            />
-            <datalist id="order-product-list">
-              {products.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Miktar" htmlFor="order-quantity">
-              <Input
-                id="order-quantity"
-                type="number"
-                required
-                min={1}
-                step="any"
-                placeholder="50000"
-                value={form.quantity}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, quantity: e.target.value }))
-                }
-              />
+            <FormField label="Müşteri" htmlFor="order-customer" required>
+              {customerOptions.length > 0 ? (
+                <Select
+                  value={form.customer || undefined}
+                  onValueChange={(customer) => setForm((f) => ({ ...f, customer }))}
+                >
+                  <SelectTrigger id="order-customer" className="bg-white">
+                    <SelectValue placeholder="Müşteri seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customerOptions.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="order-customer"
+                  required
+                  className="bg-white"
+                  placeholder="Örn: ALLIANCE HEALTHCARE ECZA DEPOSU A.Ş."
+                  value={form.customer}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, customer: e.target.value }))
+                  }
+                />
+              )}
             </FormField>
-            <FormField label="Birim">
+            <FormField label="Ürün" htmlFor="order-product" required>
+              {productOptions.length > 0 ? (
+                <Select
+                  value={form.product || undefined}
+                  onValueChange={(product) => setForm((f) => ({ ...f, product }))}
+                >
+                  <SelectTrigger id="order-product" className="bg-white">
+                    <SelectValue placeholder="Ürün seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {productOptions.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="order-product"
+                  required
+                  className="bg-white"
+                  placeholder="Örn: Hepanorm 30 Tablet"
+                  value={form.product}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, product: e.target.value }))
+                  }
+                />
+              )}
+            </FormField>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Miktar" htmlFor="order-quantity" required>
+                <Input
+                  id="order-quantity"
+                  type="number"
+                  required
+                  min={1}
+                  step="any"
+                  className="bg-white"
+                  placeholder="50000"
+                  value={form.quantity}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, quantity: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Birim" required>
+                <Select
+                  value={form.unit}
+                  onValueChange={(unit) => setForm((f) => ({ ...f, unit }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+          </FormSection>
+
+          <FormSection title="Sevkiyat ve durum">
+            <FormField label="Depo" required hint="Sevkiyatın çıkacağı depo.">
               <Select
-                value={form.unit}
-                onValueChange={(unit) => setForm((f) => ({ ...f, unit }))}
+                value={form.warehouse}
+                onValueChange={(warehouse) => setForm((f) => ({ ...f, warehouse }))}
               >
-                <SelectTrigger>
-                  <SelectValue />
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Depo seçin" />
                 </SelectTrigger>
                 <SelectContent>
-                  {UNITS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
+                  {warehouses
+                    .filter((w) => w.name.trim())
+                    .map((w) => (
+                    <SelectItem key={w.id} value={w.name}>
+                      {w.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </FormField>
-          </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Öncelik" required>
+                <Select
+                  value={form.priority}
+                  onValueChange={(priority) =>
+                    setForm((f) => ({
+                      ...f,
+                      priority: priority as typeof form.priority,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRIORITY_OPTIONS.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Durum" required hint="Yeni sipariş genelde Bekliyor ile başlar.">
+                <Select
+                  value={form.status}
+                  onValueChange={(status) =>
+                    setForm((f) => ({ ...f, status: status as OrderStatus }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+            </div>
+          </FormSection>
 
-          <FormField
-            label="Depo"
-            hint="Sevkiyatın çıkacağı depo — tablodaki Depo sütunu."
-          >
-            <Select
-              value={form.warehouse}
-              onValueChange={(warehouse) =>
-                setForm((f) => ({ ...f, warehouse }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Depo seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {warehouses.map((w) => (
-                  <SelectItem key={w.id} value={w.name}>
-                    {w.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Öncelik">
-              <Select
-                value={form.priority}
-                onValueChange={(priority) =>
-                  setForm((f) => ({
-                    ...f,
-                    priority: priority as typeof form.priority,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <SelectItem key={p.value} value={p.value}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
+          <FormSection title="Tarih ve tutar">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Sipariş tarihi" htmlFor="order-date" required>
+                <Input
+                  id="order-date"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.orderDate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, orderDate: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Teslimat tarihi" htmlFor="order-delivery" required>
+                <Input
+                  id="order-delivery"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.deliveryDate}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, deliveryDate: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
             <FormField
-              label="Durum"
-              hint="Yeni sipariş genelde Bekliyor ile başlar."
-            >
-              <Select
-                value={form.status}
-                onValueChange={(status) =>
-                  setForm((f) => ({ ...f, status: status as OrderStatus }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Sipariş Tarihi" htmlFor="order-date">
-              <Input
-                id="order-date"
-                type="date"
-                required
-                value={form.orderDate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, orderDate: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Teslimat Tarihi" htmlFor="order-delivery">
-              <Input
-                id="order-delivery"
-                type="date"
-                required
-                value={form.deliveryDate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, deliveryDate: e.target.value }))
-                }
-              />
-            </FormField>
-          </div>
-
-          <FormField
-            label="Fatura Tutarı (₺)"
-            htmlFor="order-value"
-            hint="Tablodaki Fatura sütunu ve reçete gelir hesabı bu tutarı kullanır."
-          >
-            <Input
-              id="order-value"
-              type="number"
+              label="Fatura tutarı"
+              htmlFor="order-value"
               required
-              min={0}
-              step="0.01"
-              placeholder="425000"
-              value={form.value}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, value: e.target.value }))
-              }
-            />
-          </FormField>
+              hint="Tablodaki Fatura sütunu ve reçete gelir hesabı bu tutarı kullanır."
+            >
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                  ₺
+                </span>
+                <Input
+                  id="order-value"
+                  type="number"
+                  required
+                  min={0}
+                  step="0.01"
+                  className="bg-white pl-8"
+                  placeholder="425000"
+                  value={form.value}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, value: e.target.value }))
+                  }
+                />
+              </div>
+            </FormField>
+          </FormSection>
         </FormSheetBody>
 
         <FormSheetFooter>
@@ -363,16 +409,17 @@ export function OrderFormSheet({
             className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
-            İptal
+            Vazgeç
           </Button>
           <Button
             type="submit"
+            disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            Siparişi Oluştur
+            {saving ? "Kaydediliyor…" : "Siparişi oluştur"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

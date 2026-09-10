@@ -166,7 +166,7 @@ console.log("\n3) Aktör başlığı yok sayılır");
   check("denetim kaydı var", Boolean(row), audit.payload);
   check(
     "aktör oturum adı (başlık değil)",
-    row?.actor === "Sistem Yöneticisi",
+    row?.actor === "Yönetici",
     row?.actor
   );
   check("başlık değeri yazılmadı", row?.actor !== "Saldirgan", row?.actor);

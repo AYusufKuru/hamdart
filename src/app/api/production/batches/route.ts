@@ -11,8 +11,9 @@ import {
   dbCreateProductionBatch,
   dbGetAllProductionBatches,
   dbNextBatchNo,
+  dbUpdateProductionBatch,
 } from "@/lib/server/data-service";
-import { batchCreateSchema } from "@/lib/server/schemas";
+import { batchCreateSchema, batchPatchSchema } from "@/lib/server/schemas";
 
 export async function GET(req: NextRequest) {
   const auth = await requireSession(req, "factory:read");
@@ -35,6 +36,26 @@ export async function POST(req: NextRequest) {
       ip: getIpFromRequest(req),
     });
     return jsonOk(batch, 201);
+  } catch (e) {
+    return jsonCaught(e);
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const auth = await requireSession(req, "factory:write");
+  if (!auth.ok) return auth.response;
+  try {
+    const parsed = await parseBody(req, batchPatchSchema);
+    if (!parsed.ok) return parsed.response;
+    const batch = await dbUpdateProductionBatch(
+      parsed.data.id,
+      { action: parsed.data.action, patch: parsed.data.patch },
+      {
+        actor: auth.session.name,
+        ip: getIpFromRequest(req),
+      }
+    );
+    return jsonOk(batch);
   } catch (e) {
     return jsonCaught(e);
   }

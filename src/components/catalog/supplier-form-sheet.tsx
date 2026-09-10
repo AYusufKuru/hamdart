@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Factory, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -64,49 +66,72 @@ export function SupplierFormSheet({
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={editing ? "Tedarikçi düzenle" : "Yeni tedarikçi"}
+      icon={editing ? Factory : Truck}
+      title={editing ? "Tedarikçiyi düzenle" : "Yeni tedarikçi"}
+      description="Hammadde ve hizmet alımlarında kullanılacak firma kartını oluşturun."
     >
-      <form className="flex h-full min-h-0 flex-col" onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Firma adı" htmlFor="sup-name">
-            <Input
-              id="sup-name"
-              required
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            />
-          </FormField>
-          <FormField label="İletişim" htmlFor="sup-contact">
-            <Input
-              id="sup-contact"
-              value={form.contact}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, contact: e.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Adres" htmlFor="sup-address">
-            <Input
-              id="sup-address"
-              value={form.address}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, address: e.target.value }))
-              }
-            />
-          </FormField>
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Firma bilgileri"
+            description="Sipariş ve faturalarda görünecek resmi unvan."
+          >
+            <FormField label="Firma adı" htmlFor="sup-name" required>
+              <Input
+                id="sup-name"
+                required
+                placeholder="Örn. BioKimya A.Ş."
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
+            </FormField>
+            <FormField label="Adres" htmlFor="sup-address" optional>
+              <Input
+                id="sup-address"
+                placeholder="İlçe, şehir"
+                value={form.address}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, address: e.target.value }))
+                }
+              />
+            </FormField>
+            <FormField
+              label="Yetkili / telefon"
+              htmlFor="sup-contact"
+              optional
+              hint="İrsaliye ve sipariş teyidi için ulaşılacak kişi."
+            >
+              <Input
+                id="sup-contact"
+                placeholder="Ad soyad veya telefon"
+                value={form.contact}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, contact: e.target.value }))
+                }
+              />
+            </FormField>
+          </FormSection>
         </FormSheetBody>
         <FormSheetFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
             Vazgeç
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Kaydediliyor…" : "Kaydet"}
+            {saving
+              ? "Kaydediliyor…"
+              : editing
+                ? "Değişiklikleri kaydet"
+                : "Tedarikçiyi kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

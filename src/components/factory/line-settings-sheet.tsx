@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -12,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -25,13 +28,23 @@ import {
   getAllProductionLines,
   updateProductionLine,
 } from "@/lib/production-store";
+import { capitalizeWordsTr, formatNumber } from "@/lib/utils";
 
-const LINE_STATUS_OPTIONS: { value: ProductionLineStatus; label: string }[] = [
-  { value: "active", label: "Aktif" },
-  { value: "idle", label: "Boşta" },
-  { value: "maintenance", label: "Bakımda" },
-  { value: "alert", label: "Uyarı" },
+const LINE_STATUS_OPTIONS: {
+  value: ProductionLineStatus;
+  label: string;
+  hint: string;
+  color: string;
+}[] = [
+  { value: "active", label: "Aktif", hint: "Hat çalışıyor", color: "bg-emerald-500" },
+  { value: "idle", label: "Boşta", hint: "Beklemede, iş yok", color: "bg-slate-400" },
+  { value: "maintenance", label: "Bakımda", hint: "Üretim durduruldu", color: "bg-amber-500" },
+  { value: "alert", label: "Uyarı", hint: "Müdahale gerekir", color: "bg-rose-500" },
 ];
+
+function statusMeta(value: ProductionLineStatus) {
+  return LINE_STATUS_OPTIONS.find((s) => s.value === value) ?? LINE_STATUS_OPTIONS[0];
+}
 
 interface LineSettingsSheetProps {
   open: boolean;
@@ -48,6 +61,7 @@ export function LineSettingsSheet({
 }: LineSettingsSheetProps) {
   const [lines, setLines] = useState<ProductionLine[]>([]);
   const [lineId, setLineId] = useState("");
+  const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     product: "",
     status: "active" as ProductionLineStatus,
@@ -61,6 +75,7 @@ export function LineSettingsSheet({
 
   useEffect(() => {
     if (!open) return;
+    setSaving(false);
     void (async () => {
       const all = await getAllProductionLines();
       setLines(all);
@@ -73,7 +88,7 @@ export function LineSettingsSheet({
   function applyLine(line: ProductionLine) {
     setLineId(line.id);
     setForm({
-      product: line.product,
+      product: line.product === "-" ? "" : line.product,
       status: line.status,
       operator: line.operator === "-" ? "" : line.operator,
       currentBatch: line.currentBatch === "-" ? "" : line.currentBatch,
@@ -89,17 +104,30 @@ export function LineSettingsSheet({
     if (line) applyLine(line);
   }
 
+  const selected = lines.find((l) => l.id === lineId);
+  const outputToday = Number(form.outputToday);
+  const targetToday = Number(form.targetToday);
+  const progressPct = useMemo(() => {
+    if (!Number.isFinite(outputToday) || !Number.isFinite(targetToday) || targetToday <= 0) {
+      return 0;
+    }
+    return Math.min(100, Math.round((outputToday / targetToday) * 100));
+  }, [outputToday, targetToday]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const outputToday = parseFloat(form.outputToday);
-    const targetToday = parseFloat(form.targetToday);
+    const output = parseFloat(form.outputToday);
+    const target = parseFloat(form.targetToday);
     const efficiency = parseFloat(form.efficiency);
-    if (!lineId) return;
-    if (!Number.isFinite(outputToday) || outputToday < 0) {
+    if (!lineId) {
+      toast.error("Önce bir hat seçin");
+      return;
+    }
+    if (!Number.isFinite(output) || output < 0) {
       toast.error("Günlük çıktı 0 veya daha büyük olmalıdır");
       return;
     }
-    if (!Number.isFinite(targetToday) || targetToday < 0) {
+    if (!Number.isFinite(target) || target < 0) {
       toast.error("Günlük hedef 0 veya daha büyük olmalıdır");
       return;
     }
@@ -112,14 +140,15 @@ export function LineSettingsSheet({
       return;
     }
 
+    setSaving(true);
     try {
       const updated = await updateProductionLine(lineId, {
-        product: form.product.trim() || "-",
+        product: capitalizeWordsTr(form.product) || "-",
         status: form.status,
-        operator: form.operator.trim() || "-",
+        operator: capitalizeWordsTr(form.operator) || "-",
         currentBatch: form.currentBatch.trim() || "-",
-        outputToday,
-        targetToday,
+        outputToday: output,
+        targetToday: target,
         efficiency,
         lastMaintenance: form.lastMaintenance,
       });
@@ -133,171 +162,239 @@ export function LineSettingsSheet({
       onSaved?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Hat güncellenemedi");
+    } finally {
+      setSaving(false);
     }
   }
 
-  const selected = lines.find((l) => l.id === lineId);
+  const currentStatus = statusMeta(form.status);
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Hat Ayarları"
-      description="Hat kartındaki ürün, operatör, günlük hedef, verimlilik ve bakım tarihi buradan güncellenir."
+      icon={Settings2}
+      title="Hat ayarları"
+      description="Seçtiğiniz hattın kartındaki ürün, durum, hedef ve bakım bilgilerini günceller."
+      className="max-w-2xl"
     >
-      <form className="flex flex-1 flex-col min-h-0" noValidate onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Hat">
-            <Select value={lineId || undefined} onValueChange={handleSelect}>
-              <SelectTrigger>
-                <SelectValue placeholder="Hat seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {lines.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
-
-          <FormField label="Ürün" htmlFor="line-product">
-            <Input
-              id="line-product"
-              placeholder="Örn: Hepanorm 30 Tablet"
-              value={form.product}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, product: e.target.value }))
-              }
-            />
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Durum">
-              <Select
-                value={form.status}
-                onValueChange={(status) =>
-                  setForm((f) => ({
-                    ...f,
-                    status: status as ProductionLineStatus,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
+      <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection
+            title="Hangi hat?"
+            description="Değişiklikler yalnızca seçilen hattın kartına yazılır."
+          >
+            <FormField label="Üretim hattı" htmlFor="line-pick" required>
+              <Select value={lineId || undefined} onValueChange={handleSelect}>
+                <SelectTrigger id="line-pick" className="bg-white">
+                  <SelectValue placeholder="Hat seçin" />
                 </SelectTrigger>
                 <SelectContent>
-                  {LINE_STATUS_OPTIONS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
+                  {lines.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.code ? `${l.code} · ${l.name}` : l.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </FormField>
+            {selected ? (
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                Düzenlenen hat:{" "}
+                <span className="font-semibold text-foreground">{selected.name}</span>
+                {selected.code ? ` (${selected.code})` : ""}
+              </p>
+            ) : null}
+          </FormSection>
+
+          <FormSection
+            title="Kart bilgileri"
+            description="Hat kartında görünen ürün, batch, durum ve operatör."
+          >
+            <FormField label="Ürün" htmlFor="line-product">
+              <Input
+                id="line-product"
+                className="bg-white"
+                placeholder="Örn. Hepanorm 30 Tablet"
+                value={form.product}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, product: e.target.value }))
+                }
+              />
+            </FormField>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField
+                label="Durum"
+                hint={currentStatus.hint}
+              >
+                <Select
+                  value={form.status}
+                  onValueChange={(status) =>
+                    setForm((f) => ({
+                      ...f,
+                      status: status as ProductionLineStatus,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LINE_STATUS_OPTIONS.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 rounded-full ${s.color}`}
+                            aria-hidden
+                          />
+                          {s.label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField
+                label="Güncel batch"
+                htmlFor="line-batch"
+                optional
+                hint="Boş bırakılırsa kartta — görünür."
+              >
+                <Input
+                  id="line-batch"
+                  className="bg-white font-mono"
+                  placeholder="BT-2026-0847"
+                  value={form.currentBatch}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, currentBatch: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
             <FormField
-              label="Güncel Batch"
-              htmlFor="line-batch"
-              hint="Karttaki Batch alanı."
+              label="Operatör"
+              htmlFor="line-operator"
+              optional
+              hint="Hat başındaki sorumlu kişi."
             >
               <Input
-                id="line-batch"
-                className="font-mono"
-                placeholder="BT-2026-0847"
-                value={form.currentBatch}
+                id="line-operator"
+                className="bg-white"
+                autoComplete="name"
+                placeholder="Örn. Melek Parlak"
+                value={form.operator}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, currentBatch: e.target.value }))
+                  setForm((f) => ({ ...f, operator: e.target.value }))
                 }
               />
             </FormField>
-          </div>
+          </FormSection>
 
-          <FormField label="Operatör" htmlFor="line-operator">
-            <Input
-              id="line-operator"
-              placeholder="Örn: MELEK PARLAK"
-              value={form.operator}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, operator: e.target.value }))
-              }
-            />
-          </FormField>
+          <FormSection
+            title="Günlük üretim"
+            description="Bugünkü çıktı ve hedef; ilerleme çubuğu karttaki günlük çıktıya karşılık gelir."
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Bugünkü çıktı" htmlFor="line-out" required>
+                <Input
+                  id="line-out"
+                  className="bg-white"
+                  type="number"
+                  min={0}
+                  inputMode="numeric"
+                  value={form.outputToday}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, outputToday: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Günlük hedef" htmlFor="line-target" required>
+                <Input
+                  id="line-target"
+                  className="bg-white"
+                  type="number"
+                  min={0}
+                  inputMode="numeric"
+                  value={form.targetToday}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, targetToday: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+            <div className="space-y-2 rounded-xl bg-white/70 px-3 py-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-muted-foreground">
+                  Hedefe ilerleme
+                </span>
+                <span className="font-bold tabular-nums">
+                  {Number.isFinite(outputToday) ? formatNumber(outputToday) : "0"}
+                  {" / "}
+                  {Number.isFinite(targetToday) ? formatNumber(targetToday) : "0"}
+                  {" · %"}
+                  {progressPct}
+                </span>
+              </div>
+              <Progress value={progressPct} className="h-2.5" />
+            </div>
+            <FormField
+              label="Verimlilik"
+              htmlFor="line-eff"
+              required
+              hint="Kartın altındaki verimlilik yüzdesi. 0–100 arası."
+            >
+              <div className="relative">
+                <Input
+                  id="line-eff"
+                  className="bg-white pr-8"
+                  type="number"
+                  min={0}
+                  max={100}
+                  inputMode="numeric"
+                  value={form.efficiency}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, efficiency: e.target.value }))
+                  }
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </FormField>
+          </FormSection>
 
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Günlük çıktı" htmlFor="line-out">
-              <Input
-                id="line-out"
-                type="number"
-                min={0}
-                value={form.outputToday}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, outputToday: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Günlük hedef" htmlFor="line-target">
-              <Input
-                id="line-target"
-                type="number"
-                min={0}
-                value={form.targetToday}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, targetToday: e.target.value }))
-                }
-              />
-            </FormField>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Verimlilik (%)" htmlFor="line-eff">
-              <Input
-                id="line-eff"
-                type="number"
-                min={0}
-                max={100}
-                value={form.efficiency}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, efficiency: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="Son bakım" htmlFor="line-maint">
+          <FormSection
+            title="Bakım"
+            description="Son bakım tarihi hat kartının altında görünür."
+          >
+            <FormField label="Son bakım tarihi" htmlFor="line-maint" required>
               <Input
                 id="line-maint"
+                className="bg-white"
                 type="date"
+                required
                 value={form.lastMaintenance}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, lastMaintenance: e.target.value }))
                 }
               />
             </FormField>
-          </div>
-
-          {selected && (
-            <p className="text-[11px] text-muted-foreground">
-              {selected.name} — değişiklikler hat kartına ve dashboard’a yansır.
-            </p>
-          )}
+          </FormSection>
         </FormSheetBody>
 
         <FormSheetFooter>
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
             onClick={() => onOpenChange(false)}
           >
-            İptal
+            Vazgeç
           </Button>
-          <Button
-            type="submit"
-            className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-          >
-            Ayarları Kaydet
+          <Button type="submit" disabled={saving || !lineId}>
+            {saving ? "Kaydediliyor…" : "Ayarları kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }

@@ -16,6 +16,7 @@ import {
   validatePassword,
 } from "../src/lib/auth/password-rules";
 import { loadSeedFromExcel, resolveExcelPath } from "./load-excel";
+import { DEFAULT_DEPARTMENTS } from "../src/data/departments";
 
 const prisma = new PrismaClient();
 
@@ -103,12 +104,27 @@ async function main() {
     prisma.budgetRow.createMany({ skipDuplicates: true, data: chunk })
   );
 
+  await seedDepartments();
   await seedAdminUser();
 
   console.log("\nSeed tamamlandı.");
 }
 
 const ADMIN_USERNAME = "admin";
+
+async function seedDepartments(): Promise<void> {
+  console.log("\nDepartmanlar...");
+  let created = 0;
+  for (const name of DEFAULT_DEPARTMENTS) {
+    const exists = await prisma.department.findFirst({
+      where: { name: { equals: name, mode: "insensitive" } },
+    });
+    if (exists) continue;
+    await prisma.department.create({ data: { name } });
+    created += 1;
+  }
+  console.log(`  ${created} eklendi (${DEFAULT_DEPARTMENTS.length} tanımlı)`);
+}
 
 /**
  * Tek yönetici hesabını oluşturur. Şifre .env dosyasındaki
@@ -140,7 +156,7 @@ async function seedAdminUser(): Promise<void> {
 
   const problem = validatePassword(password, {
     username: ADMIN_USERNAME,
-    name: "Sistem Yöneticisi",
+    name: "Yönetici",
   });
   if (problem) {
     throw new Error(
@@ -152,7 +168,7 @@ async function seedAdminUser(): Promise<void> {
   await prisma.user.create({
     data: {
       username: ADMIN_USERNAME,
-      name: "Sistem Yöneticisi",
+      name: "Yönetici",
       passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
       role: "ADMIN",
       mustChangePassword: true,

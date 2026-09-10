@@ -20,6 +20,9 @@ import { type ProductionBatch, type ProductionLine } from "@/data/mock";
 import {
   getAllProductionBatches,
   getAllProductionLines,
+  lineHasActiveBatch,
+  queuedBatchesForLine,
+  updateProductionBatch,
 } from "@/lib/production-store";
 import { BatchFormSheet } from "@/components/factory/batch-form-sheet";
 import { LineSettingsSheet } from "@/components/factory/line-settings-sheet";
@@ -30,11 +33,13 @@ import {
   AlertTriangle,
   Cog,
   Factory,
+  ListOrdered,
   Pause,
   Play,
   Settings,
   Wrench,
 } from "lucide-react";
+import { toast } from "sonner";
 
 const lineStatusMap = {
   active: { label: "Aktif", variant: "success" as const, icon: Play },
@@ -46,6 +51,7 @@ const lineStatusMap = {
 const batchStatusMap = {
   planned: { label: "Planlandı", variant: "info" as const },
   in_progress: { label: "Üretimde", variant: "success" as const },
+  queued: { label: "Sırada", variant: "secondary" as const },
   qc_pending: { label: "KK Bekliyor", variant: "warning" as const },
   completed: { label: "Tamamlandı", variant: "success" as const },
   rejected: { label: "Reddedildi", variant: "danger" as const },
@@ -73,15 +79,43 @@ function FactoryPageContent() {
     setProductionBatches(batches);
   };
 
+  async function finishCurrent(batchId: string) {
+    try {
+      const updated = await updateProductionBatch(batchId, {
+        action: "complete_and_next",
+      });
+      toast.success(
+        updated.status === "in_progress"
+          ? `Sıradaki parti başladı: ${updated.batchNo}`
+          : `${updated.batchNo} bitirildi`
+      );
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "İşlem başarısız");
+    }
+  }
+
+  async function startQueued(batchId: string) {
+    try {
+      const updated = await updateProductionBatch(batchId, {
+        action: "start_next",
+      });
+      toast.success(`Sıradaki parti başladı: ${updated.batchNo}`);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "İşlem başarısız");
+    }
+  }
+
   useEffect(() => {
     void refresh();
     const nextTab = searchParams.get("tab");
     if (nextTab === "batches") setTab("batches");
     if (nextTab === "lines") setTab("lines");
+    if (nextTab === "queue") setTab("queue");
   }, [searchParams]);
 
-  const activeLines = productionLines.filter((l) => l.status === "active").length;
-  const alertLines = productionLines.filter((l) => l.status === "alert").length;
+  const queuedCount = productionBatches.filter((b) => b.status === "queued").length;
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -119,8 +153,8 @@ function FactoryPageContent() {
       <div className="grid gap-4 md:grid-cols-4">
         {[
           { label: "Toplam Hat", value: productionLines.length, icon: Factory },
-          { label: "Aktif Hat", value: activeLines, icon: Play },
-          { label: "Uyarı", value: alertLines, icon: AlertTriangle },
+          { label: "Aktif Hat", value: productionLines.filter((l) => l.status === "active").length, icon: Play },
+          { label: "Sırada", value: queuedCount, icon: ListOrdered },
           { label: "Bakımda", value: productionLines.filter((l) => l.status === "maintenance").length, icon: Cog },
         ].map((item) => (
           <Card key={item.label} className="glass-card border-none">
@@ -142,6 +176,7 @@ function FactoryPageContent() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="lines">Üretim Hatları</TabsTrigger>
+          <TabsTrigger value="queue">Sıra</TabsTrigger>
           <TabsTrigger value="batches">Batch Takibi</TabsTrigger>
         </TabsList>
 
@@ -153,6 +188,10 @@ function FactoryPageContent() {
               const progress = line.targetToday
                 ? Math.min(100, Math.round((line.outputToday / line.targetToday) * 100))
                 : 0;
+              const queue = queuedBatchesForLine(productionBatches, line.name);
+              const activeBatch = productionBatches.find(
+                (b) => b.line === line.name && b.status === "in_progress"
+              );
 
               return (
                 <Card
@@ -201,6 +240,61 @@ function FactoryPageContent() {
                       </div>
                     </div>
 
+                    {queue.length > 0 && (
+                      <div className="rounded-xl border bg-indigo-500/5 p-3 space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">
+                          Sıra · {queue.length}
+                        </p>
+                        <ol className="space-y-1.5">
+                          {queue.map((b) => (
+                            <li
+                              key={b.id}
+                              className="flex items-start justify-between gap-2 text-xs"
+                            >
+                              <span>
+                                <span className="font-mono font-bold">
+                                  {b.queuePosition}. {b.batchNo}
+                                </span>
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  · {b.product}
+                                </span>
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+
+                    {canEditFactory && (activeBatch || (queue.length > 0 && !activeBatch)) && (
+                      <div className="flex flex-wrap gap-2">
+                        {activeBatch ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-lg"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void finishCurrent(activeBatch.id);
+                            }}
+                          >
+                            {queue.length > 0 ? "Bitir, sıradakini al" : "Bitir"}
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className="rounded-lg"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void startQueued(queue[0].id);
+                            }}
+                          >
+                            Sıradakini başlat
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
                     <div>
                       <div className="flex justify-between text-xs mb-2">
                         <span className="text-muted-foreground">Günlük çıktı</span>
@@ -232,6 +326,61 @@ function FactoryPageContent() {
           </div>
         </TabsContent>
 
+        <TabsContent value="queue">
+          <div className="grid gap-6 md:grid-cols-2">
+            {productionLines
+              .map((line) => ({
+                line,
+                queue: queuedBatchesForLine(productionBatches, line.name),
+                busy: lineHasActiveBatch(productionBatches, line.name),
+              }))
+              .filter((row) => row.queue.length > 0)
+              .map(({ line, queue, busy }) => (
+                <Card key={line.id} className="glass-card border-none">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <CardTitle className="text-base">{line.name}</CardTitle>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {busy
+                            ? `Üretimde: ${line.currentBatch}`
+                            : "Hat boşta — sıra bekliyor"}
+                        </p>
+                      </div>
+                      <Badge variant="secondary">{queue.length} sırada</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <ol className="space-y-2">
+                      {queue.map((b) => (
+                        <li
+                          key={b.id}
+                          className="flex items-center justify-between gap-3 rounded-xl bg-muted/30 px-3 py-2.5"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-mono text-sm font-bold">
+                              {b.queuePosition}. {b.batchNo}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {b.product} · {formatNumber(b.quantity)} {b.unit}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </CardContent>
+                </Card>
+              ))}
+          </div>
+          {queuedCount === 0 && (
+              <Card className="glass-card border-none">
+                <CardContent className="py-16 text-center text-muted-foreground">
+                  <p className="font-medium">Sırada bekleyen iş yok</p>
+                </CardContent>
+              </Card>
+            )}
+        </TabsContent>
+
         <TabsContent value="batches">
           <Card className="glass-card border-none">
             <CardContent className="p-0">
@@ -257,7 +406,12 @@ function FactoryPageContent() {
                         <TableCell>{batch.product}</TableCell>
                         <TableCell className="text-muted-foreground">{batch.line}</TableCell>
                         <TableCell>
-                          <Badge variant={status.variant}>{status.label}</Badge>
+                          <Badge variant={status.variant}>
+                            {status.label}
+                            {batch.status === "queued" && batch.queuePosition
+                              ? ` · ${batch.queuePosition}`
+                              : ""}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           {formatNumber(batch.quantity)} {batch.unit}
@@ -312,7 +466,7 @@ function FactoryPageContent() {
         onOpenChange={setFormOpen}
         onCreated={() => {
           void refresh();
-          setTab("batches");
+          setTab("lines");
         }}
       />
       <LineSettingsSheet

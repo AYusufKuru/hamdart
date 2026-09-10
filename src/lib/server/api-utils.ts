@@ -45,6 +45,19 @@ export async function requireSession(
   return { ok: true, session };
 }
 
+/** Departman yönetimi gibi işlemler yalnızca ADMIN rolüne açık. */
+export async function requireAdmin(req: NextRequest): Promise<SessionCheck> {
+  const auth = await requireSession(req);
+  if (!auth.ok) return auth;
+  if (auth.session.role !== "ADMIN") {
+    return {
+      ok: false,
+      response: jsonError("Yalnızca yönetici erişebilir", 403),
+    };
+  }
+  return auth;
+}
+
 /**
  * Denetim kaydındaki aktör — yalnızca imzalı canlı oturum.
  * HTTP başlıkları (x-hamdart-actor vb.) yok sayılır.

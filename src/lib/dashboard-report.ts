@@ -20,6 +20,7 @@ import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
 import { formatDate, formatNumber, todayIso } from "@/lib/utils";
 import { getWarehouses } from "@/lib/warehouse-store";
+import { ifAllowed } from "@/lib/api-client";
 
 const NAVY = "#1e1b4b";
 const INDIGO = "#4338ca";
@@ -55,6 +56,7 @@ const LINE_STATUS: Record<string, { label: string; color: string }> = {
 const BATCH_STATUS: Record<string, { label: string; color: string }> = {
   planned: { label: "Planlandı", color: "#1d4ed8" },
   in_progress: { label: "Üretimde", color: "#047857" },
+  queued: { label: "Sırada", color: "#5b21b6" },
   qc_pending: { label: "KK Bekliyor", color: "#b45309" },
   completed: { label: "Tamamlandı", color: "#047857" },
   rejected: { label: "Reddedildi", color: "#b91c1c" },
@@ -301,15 +303,15 @@ function rank(order: Record<string, number>, key: string, fallback: number) {
 export async function generateDashboardPdf(options?: {
   generatedBy?: string;
 }): Promise<void> {
-  await syncReplenishmentOrders();
+  await ifAllowed(true, () => syncReplenishmentOrders(), []);
   const [orders, batches, lines, experiments, warehouseItems, warehouses] =
     await Promise.all([
-      getAllOrders(),
-      getAllProductionBatches(),
-      getAllProductionLines(),
-      getAllLabExperiments(),
-      getAllWarehouseStockItems(),
-      getWarehouses(),
+      ifAllowed(true, () => getAllOrders(), []),
+      ifAllowed(true, () => getAllProductionBatches(), []),
+      ifAllowed(true, () => getAllProductionLines(), []),
+      ifAllowed(true, () => getAllLabExperiments(), []),
+      ifAllowed(true, () => getAllWarehouseStockItems(), []),
+      ifAllowed(true, () => getWarehouses(), []),
     ]);
 
   const stock = toDisplayStockItems(warehouseItems);
@@ -386,12 +388,12 @@ function buildReport(input: {
   const sortedBatches = [...input.batches].sort((a, b) => {
     const byStatus =
       rank(
-        { in_progress: 0, qc_pending: 1, planned: 2, completed: 3, rejected: 4 },
+        { in_progress: 0, queued: 1, qc_pending: 2, planned: 3, completed: 4, rejected: 5 },
         a.status,
         9
       ) -
       rank(
-        { in_progress: 0, qc_pending: 1, planned: 2, completed: 3, rejected: 4 },
+        { in_progress: 0, queued: 1, qc_pending: 2, planned: 3, completed: 4, rejected: 5 },
         b.status,
         9
       );

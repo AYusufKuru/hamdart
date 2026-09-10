@@ -164,17 +164,21 @@ model ProductionLine {
 }
 
 model ProductionBatch {
-  id        String @id
-  batchNo   String @unique
-  product   String
-  line      String
-  status    String
-  quantity  Float
-  unit      String
-  startDate String
-  endDate   String
-  yield     Float
-  qcScore   Float
+  id            String @id
+  batchNo       String @unique
+  product       String
+  line          String
+  status        String
+  queuePosition Int?
+  quantity      Float
+  unit          String
+  startDate     String
+  endDate       String
+  yield         Float
+  qcScore       Float
+
+  @@index([line, status])
+  @@index([line, queuePosition])
 }
 
 model LabExperiment {
@@ -331,4 +335,11 @@ model User {
   tokenVersion       Int       @default(0)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

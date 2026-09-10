@@ -1,6 +1,6 @@
 
 export type ProductionLineStatus = "active" | "maintenance" | "idle" | "alert";
-export type BatchStatus = "planned" | "in_progress" | "qc_pending" | "completed" | "rejected";
+export type BatchStatus = "planned" | "in_progress" | "queued" | "qc_pending" | "completed" | "rejected";
 export type StockStatus = "normal" | "low" | "critical" | "expiring";
 export type OrderStatus = "pending" | "confirmed" | "picking" | "shipped" | "delivered" | "cancelled";
 export type ExperimentStatus = "planning" | "running" | "analysis" | "approved" | "on_hold";
@@ -37,6 +37,7 @@ export interface ProductionBatch {
   product: string;
   line: string;
   status: BatchStatus;
+  queuePosition: number | null;
   quantity: number;
   unit: string;
   startDate: string;

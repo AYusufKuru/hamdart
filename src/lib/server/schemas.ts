@@ -69,6 +69,7 @@ const LINE_STATUSES = ["active", "maintenance", "idle", "alert"] as const;
 const BATCH_STATUSES = [
   "planned",
   "in_progress",
+  "queued",
   "qc_pending",
   "completed",
   "rejected",
@@ -316,6 +317,16 @@ export const batchCreateSchema = z.object({
   qcScore: finiteNumber({ min: 0, max: 100 }),
 });
 
+export const batchPatchSchema = z.object({
+  id: text(MAX_ID),
+  action: z.enum(["complete_and_next", "start_next"]).optional(),
+  patch: z
+    .object({
+      status: z.enum(BATCH_STATUSES, { error: "Geçersiz parti durumu" }).optional(),
+    })
+    .optional(),
+});
+
 export const stockTransferCreateSchema = z.object({
   sourceItemId: text(MAX_ID),
   toWarehouseId: text(MAX_ID),
@@ -474,4 +485,12 @@ export const backupCreateSchema = z.object({
 
 export const backupRestoreSchema = z.object({
   confirmFilename: text(200),
+});
+
+export const departmentCreateSchema = z.object({
+  name: text(80),
+});
+
+export const departmentUpdateSchema = z.object({
+  name: text(80),
 });

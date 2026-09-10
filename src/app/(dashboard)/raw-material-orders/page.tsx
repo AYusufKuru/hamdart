@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
@@ -26,7 +26,7 @@ import {
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { RawMaterialOrderFormSheet } from "@/components/raw-material-orders/raw-material-order-form-sheet";
 import { CanWrite } from "@/components/auth/can-write";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, selectItemValues } from "@/lib/utils";
 import {
   AlertCircle,
   Factory,
@@ -69,6 +69,13 @@ export default function RawMaterialOrdersPage() {
   });
 
   const toOrderCount = orders.filter((o) => o.status === "to_order").length;
+  const supplierHints = useMemo(
+    () =>
+      selectItemValues(orders.map((o) => o.supplier)).sort((a, b) =>
+        a.localeCompare(b, "tr")
+      ),
+    [orders]
+  );
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -262,6 +269,7 @@ export default function RawMaterialOrdersPage() {
       <RawMaterialOrderFormSheet
         open={formOpen}
         onOpenChange={setFormOpen}
+        supplierHints={supplierHints}
         onCreated={(order) => {
           void refresh();
           router.push(`/raw-material-orders/${order.id}`);

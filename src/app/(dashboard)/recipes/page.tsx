@@ -29,10 +29,13 @@ import { type Recipe } from "@/data/recipes";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
 import { getAllRecipes } from "@/lib/recipe-store";
 import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { ifAllowed } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { ClipboardList, Plus } from "lucide-react";
 
 export default function RecipesPage() {
+  const { canRead } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [materials, setMaterials] = useState<RawMaterial[]>([]);
@@ -43,13 +46,13 @@ export default function RecipesPage() {
   const refresh = useCallback(async () => {
     const [recipeList, orderList, materialList] = await Promise.all([
       getAllRecipes(),
-      getAllOrders(),
+      ifAllowed(canRead("orders"), () => getAllOrders(), []),
       getAllRawMaterials(),
     ]);
     setRecipes(recipeList);
     setOrders(orderList);
     setMaterials(materialList);
-  }, []);
+  }, [canRead]);
 
   useEffect(() => {
     void refresh();

@@ -23,10 +23,7 @@ import {
   Shield,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { cn, formatDate } from "@/lib/utils";
-import type { Warehouse as WarehouseRow } from "@/data/warehouses";
-import { getWarehouses } from "@/lib/warehouse-store";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/auth-context";
 import { NAV_ITEMS, type Resource } from "@/lib/auth/permissions";
 
@@ -51,12 +48,14 @@ const ICONS: Record<Resource, LucideIcon> = {
 };
 
 export function useSidebarSections() {
-  const { canRead } = useAuth();
+  const { canRead, loading, user } = useAuth();
 
   const sections: {
     title: string;
     items: { icon: LucideIcon; label: string; href: string }[];
   }[] = [];
+
+  if (loading && !user) return sections;
 
   const titles = [...new Set(NAV_ITEMS.map((i) => i.title))];
 
@@ -90,14 +89,9 @@ export const sidebarSections = NAV_ITEMS.map((item) => ({
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { loading, user } = useAuth();
   const sections = useSidebarSections();
-  const [warehouses, setWarehouses] = useState<WarehouseRow[]>([]);
-
-  useEffect(() => {
-    void getWarehouses()
-      .then(setWarehouses)
-      .catch(() => setWarehouses([]));
-  }, []);
+  const waiting = loading && !user;
 
   return (
     <div className="flex flex-col h-full bg-card/80 backdrop-blur-xl border-r w-64 pt-8 pb-6">
@@ -116,7 +110,15 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 px-4 space-y-5 overflow-y-auto">
-        {sections.map((section) => (
+        {waiting
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="space-y-2 px-2">
+                <div className="mx-2 h-2 w-16 animate-pulse rounded bg-muted" />
+                <div className="h-9 animate-pulse rounded-xl bg-muted/70" />
+                <div className="h-9 animate-pulse rounded-xl bg-muted/50" />
+              </div>
+            ))
+          : sections.map((section) => (
           <div key={section.title}>
             <p className="px-4 mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground/70">
               {section.title}
@@ -157,25 +159,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <div className="px-6 pt-6 mt-4 border-t border-border/50">
-        <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-700">
-            Depolar
-          </p>
-          <p className="text-2xl font-black text-emerald-600 mt-1">
-            {warehouses.length}
-          </p>
-          <p className="text-[10px] text-muted-foreground mt-1">
-            Son denetim:{" "}
-            {formatDate(
-              [...warehouses].sort((a, b) =>
-                b.lastAudit.localeCompare(a.lastAudit)
-              )[0]?.lastAudit ?? ""
-            )}
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

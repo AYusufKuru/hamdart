@@ -1020,11 +1020,118 @@ export async function dbApplyRawMaterialOrderAction(
 
 // ─── Production ─────────────────────────────────────────────────────────────
 
+function mapProductionBatch(row: {
+  id: string;
+  batchNo: string;
+  product: string;
+  line: string;
+  status: string;
+  queuePosition: number | null;
+  quantity: number;
+  unit: string;
+  startDate: string;
+  endDate: string;
+  yield: number;
+  qcScore: number;
+}): ProductionBatch {
+  return {
+    id: row.id,
+    batchNo: row.batchNo,
+    product: row.product,
+    line: row.line,
+    status: row.status as ProductionBatch["status"],
+    queuePosition: row.queuePosition,
+    quantity: asNumber(row.quantity),
+    unit: row.unit,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    yield: asNumber(row.yield),
+    qcScore: asNumber(row.qcScore),
+  };
+}
+
 export async function dbGetAllProductionBatches(): Promise<ProductionBatch[]> {
   const rows = await prisma.productionBatch.findMany({
     orderBy: { startDate: "desc" },
   });
-  return rows as ProductionBatch[];
+  return rows.map(mapProductionBatch);
+}
+
+async function lineHasActiveBatch(lineName: string): Promise<boolean> {
+  const count = await prisma.productionBatch.count({
+    where: { line: lineName, status: "in_progress" },
+  });
+  return count > 0;
+}
+
+async function nextQueuePosition(lineName: string): Promise<number> {
+  const queued = await prisma.productionBatch.findMany({
+    where: { line: lineName, status: "queued" },
+    select: { queuePosition: true },
+  });
+  const max = queued.reduce((m, row) => Math.max(m, row.queuePosition ?? 0), 0);
+  return max + 1;
+}
+
+async function reindexQueue(lineName: string): Promise<void> {
+  const queued = await prisma.productionBatch.findMany({
+    where: { line: lineName, status: "queued" },
+    orderBy: [{ queuePosition: "asc" }, { startDate: "asc" }],
+  });
+  await prisma.$transaction(
+    queued.map((row, index) =>
+      prisma.productionBatch.update({
+        where: { id: row.id },
+        data: { queuePosition: index + 1 },
+      })
+    )
+  );
+}
+
+async function assignBatchToLine(
+  batch: ProductionBatch,
+  ctx: AuditCtx
+): Promise<void> {
+  const line = (await dbGetAllProductionLines()).find((l) => l.name === batch.line);
+  if (!line) return;
+  await dbUpdateProductionLine(
+    line.id,
+    {
+      product: batch.product,
+      currentBatch: batch.batchNo,
+      status: line.status === "idle" ? "active" : line.status,
+    },
+    ctx
+  );
+}
+
+async function promoteNextQueued(
+  lineName: string,
+  ctx: AuditCtx
+): Promise<ProductionBatch | null> {
+  const next = await prisma.productionBatch.findFirst({
+    where: { line: lineName, status: "queued" },
+    orderBy: [{ queuePosition: "asc" }, { startDate: "asc" }],
+  });
+  if (!next) return null;
+  const updated = await prisma.productionBatch.update({
+    where: { id: next.id },
+    data: { status: "in_progress", queuePosition: null },
+  });
+  await reindexQueue(lineName);
+  const mapped = mapProductionBatch(updated);
+  await assignBatchToLine(mapped, ctx);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "ProductionBatch",
+    entityId: mapped.id,
+    summary: `Sıradaki parti başlatıldı: ${mapped.batchNo}`,
+    before: mapProductionBatch(next),
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
 }
 
 export async function dbGetAllProductionLines(): Promise<ProductionLine[]> {
@@ -1143,12 +1250,22 @@ export async function dbCreateProductionBatch(
   if (all.some((b) => b.batchNo.toLowerCase() === batchNo.toLowerCase())) {
     throw new Error("Bu batch numarası zaten kayıtlı");
   }
+
+  const busy = await lineHasActiveBatch(input.line);
+  let status = input.status;
+  let queuePosition: number | null = null;
+  if (input.status === "queued" || (input.status === "in_progress" && busy)) {
+    status = "queued";
+    queuePosition = await nextQueuePosition(input.line);
+  }
+
   const batch: ProductionBatch = {
     id: `b-${Date.now()}`,
     batchNo,
     product: input.product.trim(),
     line: input.line,
-    status: input.status,
+    status,
+    queuePosition,
     quantity: input.quantity,
     unit: input.unit,
     startDate: input.startDate,
@@ -1156,21 +1273,25 @@ export async function dbCreateProductionBatch(
     yield: input.yield,
     qcScore: input.qcScore,
   };
-  await prisma.productionBatch.create({ data: batch });
+  await prisma.productionBatch.create({
+    data: {
+      id: batch.id,
+      batchNo: batch.batchNo,
+      product: batch.product,
+      line: batch.line,
+      status: batch.status,
+      queuePosition: batch.queuePosition,
+      quantity: batch.quantity,
+      unit: batch.unit,
+      startDate: batch.startDate,
+      endDate: batch.endDate,
+      yield: batch.yield,
+      qcScore: batch.qcScore,
+    },
+  });
 
-  if (input.status === "in_progress") {
-    const line = (await dbGetAllProductionLines()).find((l) => l.name === input.line);
-    if (line) {
-      await dbUpdateProductionLine(
-        line.id,
-        {
-          product: batch.product,
-          currentBatch: batch.batchNo,
-          status: line.status === "idle" ? "active" : line.status,
-        },
-        ctx
-      );
-    }
+  if (batch.status === "in_progress") {
+    await assignBatchToLine(batch, ctx);
   }
 
   await logAudit({
@@ -1178,11 +1299,123 @@ export async function dbCreateProductionBatch(
     action: "CREATE",
     entityType: "ProductionBatch",
     entityId: batch.id,
-    summary: `Üretim partisi oluşturuldu: ${batch.batchNo}`,
+    summary:
+      batch.status === "queued"
+        ? `Üretim partisi sıraya alındı: ${batch.batchNo} (${batch.queuePosition}. sıra)`
+        : `Üretim partisi oluşturuldu: ${batch.batchNo}`,
     after: batch,
     ipAddress: ctx.ip,
   });
   return batch;
+}
+
+const FINISHED_BATCH_STATUSES = new Set(["qc_pending", "completed", "rejected"]);
+
+export async function dbUpdateProductionBatch(
+  id: string,
+  input: { action?: "complete_and_next" | "start_next"; patch?: { status?: ProductionBatch["status"] } },
+  ctx: AuditCtx
+): Promise<ProductionBatch> {
+  const beforeRow = await prisma.productionBatch.findUnique({ where: { id } });
+  if (!beforeRow) throw new FieldError("Parti bulunamadı");
+  const before = mapProductionBatch(beforeRow);
+
+  if (input.action === "start_next") {
+    if (await lineHasActiveBatch(before.line)) {
+      throw new FieldError("Hat meşgul; önce mevcut batch’i bitirin");
+    }
+    const started = await promoteNextQueued(before.line, ctx);
+    if (!started) throw new FieldError("Bu hatta sırada parti yok");
+    return started;
+  }
+
+  if (input.action === "complete_and_next") {
+    if (before.status !== "in_progress") {
+      throw new FieldError("Yalnızca üretimdeki parti bitirilebilir");
+    }
+    const updated = await prisma.productionBatch.update({
+      where: { id },
+      data: { status: "qc_pending", queuePosition: null },
+    });
+    const mapped = mapProductionBatch(updated);
+    await logAudit({
+      actor: ctx.actor,
+      action: "UPDATE",
+      entityType: "ProductionBatch",
+      entityId: id,
+      summary: `Parti bitirildi: ${mapped.batchNo}`,
+      before,
+      after: mapped,
+      ipAddress: ctx.ip,
+    });
+    const next = await promoteNextQueued(before.line, ctx);
+    if (!next) {
+      const line = (await dbGetAllProductionLines()).find((l) => l.name === before.line);
+      if (line) {
+        await dbUpdateProductionLine(
+          line.id,
+          { currentBatch: "-", status: line.status === "active" ? "idle" : line.status },
+          ctx
+        );
+      }
+    }
+    return next ?? mapped;
+  }
+
+  let nextStatus = input.patch?.status;
+  if (!nextStatus) throw new FieldError("Güncellenecek alan belirtilmedi");
+
+  if (nextStatus === "in_progress" && before.status !== "in_progress") {
+    if (await lineHasActiveBatch(before.line)) {
+      nextStatus = "queued";
+    }
+  }
+
+  const data: { status: string; queuePosition?: number | null } = { status: nextStatus };
+  if (nextStatus !== "queued") data.queuePosition = null;
+  if (nextStatus === "queued") {
+    data.queuePosition = await nextQueuePosition(before.line);
+  }
+
+  const updated = await prisma.productionBatch.update({
+    where: { id },
+    data,
+  });
+  const mapped = mapProductionBatch(updated);
+
+  if (nextStatus === "in_progress") {
+    await assignBatchToLine(mapped, ctx);
+    if (before.status === "queued") await reindexQueue(before.line);
+  }
+
+  if (
+    before.status === "in_progress" &&
+    FINISHED_BATCH_STATUSES.has(nextStatus)
+  ) {
+    const next = await promoteNextQueued(before.line, ctx);
+    if (!next) {
+      const line = (await dbGetAllProductionLines()).find((l) => l.name === before.line);
+      if (line) {
+        await dbUpdateProductionLine(
+          line.id,
+          { currentBatch: "-", status: line.status === "active" ? "idle" : line.status },
+          ctx
+        );
+      }
+    }
+  }
+
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "ProductionBatch",
+    entityId: id,
+    summary: `Parti güncellendi: ${mapped.batchNo}`,
+    before,
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
 }
 
 // ─── Lab ────────────────────────────────────────────────────────────────────

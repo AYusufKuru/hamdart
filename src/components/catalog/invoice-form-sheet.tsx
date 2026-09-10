@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { FileText, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
   FormField,
-  FormSheet,
+  FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
@@ -73,7 +75,10 @@ export function InvoiceFormSheet({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (open) setForm(emptyForm(editing ?? undefined, editingLines));
+    if (open) {
+      setSaving(false);
+      setForm(emptyForm(editing ?? undefined, editingLines));
+    }
   }, [open, editing, editingLines]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -124,178 +129,215 @@ export function InvoiceFormSheet({
   }
 
   return (
-    <FormSheet
+    <FormDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={editing ? "Fatura düzenle" : "Yeni fatura"}
+      icon={FileText}
+      title={editing ? "Faturayı düzenle" : "Yeni fatura"}
+      description="Satış veya alış faturasını taraf, tarih ve kalemlerle kaydedin."
+      className="max-w-2xl"
     >
-      <form className="flex h-full min-h-0 flex-col" onSubmit={handleSubmit}>
-        <FormSheetBody>
-          <FormField label="Fatura no" htmlFor="inv-no">
-            <Input
-              id="inv-no"
-              required
-              value={form.invoiceNo}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, invoiceNo: e.target.value }))
-              }
-            />
-          </FormField>
-          <FormField label="Müşteri / Tedarikçi" htmlFor="inv-party">
-            <Input
-              id="inv-party"
-              required
-              value={form.party}
-              onChange={(e) => setForm((f) => ({ ...f, party: e.target.value }))}
-            />
-          </FormField>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Tür">
-              <Select
-                value={form.kind}
-                onValueChange={(kind) => setForm((f) => ({ ...f, kind }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {KINDS.map((k) => (
-                    <SelectItem key={k} value={k}>
-                      {k}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-            <FormField label="Durum">
-              <Select
-                value={form.status}
-                onValueChange={(status) => setForm((f) => ({ ...f, status }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="Düzenleme" htmlFor="inv-issue">
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection title="Fatura bilgisi">
+            <FormField label="Fatura no" htmlFor="inv-no" required>
               <Input
-                id="inv-issue"
-                type="date"
+                id="inv-no"
                 required
-                value={form.issueDate}
+                className="bg-white font-mono"
+                value={form.invoiceNo}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, issueDate: e.target.value }))
+                  setForm((f) => ({ ...f, invoiceNo: e.target.value }))
                 }
               />
             </FormField>
-            <FormField label="Vade" htmlFor="inv-due">
+            <FormField label="Müşteri / tedarikçi" htmlFor="inv-party" required>
               <Input
-                id="inv-due"
-                type="date"
+                id="inv-party"
                 required
-                value={form.dueDate}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, dueDate: e.target.value }))
-                }
+                className="bg-white"
+                value={form.party}
+                onChange={(e) => setForm((f) => ({ ...f, party: e.target.value }))}
               />
             </FormField>
-          </div>
-          <FormField label="Tutar (₺)" htmlFor="inv-amt">
-            <Input
-              id="inv-amt"
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.amount}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, amount: e.target.value }))
-              }
-            />
-          </FormField>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">Kalemler</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }))
-                }
-              >
-                Kalem ekle
-              </Button>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Tür" required>
+                <Select
+                  value={form.kind}
+                  onValueChange={(kind) => setForm((f) => ({ ...f, kind }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KINDS.map((k) => (
+                      <SelectItem key={k} value={k}>
+                        {k}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
+              <FormField label="Durum" required>
+                <Select
+                  value={form.status}
+                  onValueChange={(status) => setForm((f) => ({ ...f, status }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
             </div>
-            {form.lines.map((line, i) => (
-              <div key={i} className="grid grid-cols-2 gap-2 rounded-xl border p-2">
+          </FormSection>
+
+          <FormSection title="Tarih ve tutar">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Düzenleme" htmlFor="inv-issue" required>
                 <Input
-                  placeholder="Açıklama"
-                  value={line.description}
+                  id="inv-issue"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.issueDate}
                   onChange={(e) =>
-                    setForm((f) => {
-                      const lines = [...f.lines];
-                      lines[i] = { ...lines[i], description: e.target.value };
-                      return { ...f, lines };
-                    })
+                    setForm((f) => ({ ...f, issueDate: e.target.value }))
                   }
                 />
+              </FormField>
+              <FormField label="Vade" htmlFor="inv-due" required>
                 <Input
-                  placeholder="Miktar"
-                  value={line.quantityLabel}
+                  id="inv-due"
+                  type="date"
+                  required
+                  className="bg-white"
+                  value={form.dueDate}
                   onChange={(e) =>
-                    setForm((f) => {
-                      const lines = [...f.lines];
-                      lines[i] = { ...lines[i], quantityLabel: e.target.value };
-                      return { ...f, lines };
-                    })
+                    setForm((f) => ({ ...f, dueDate: e.target.value }))
                   }
                 />
+              </FormField>
+            </div>
+            <FormField label="Toplam tutar" htmlFor="inv-amt" optional hint="Kalem girmezseniz toplam tutarı yazın.">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
+                  ₺
+                </span>
                 <Input
-                  placeholder="Birim fiyat"
+                  id="inv-amt"
                   type="number"
-                  value={line.unitPrice}
+                  min={0}
+                  step="0.01"
+                  className="bg-white pl-8"
+                  value={form.amount}
                   onChange={(e) =>
-                    setForm((f) => {
-                      const lines = [...f.lines];
-                      lines[i] = { ...lines[i], unitPrice: e.target.value };
-                      return { ...f, lines };
-                    })
-                  }
-                />
-                <Input
-                  placeholder="Kalem toplam"
-                  type="number"
-                  value={line.lineTotal}
-                  onChange={(e) =>
-                    setForm((f) => {
-                      const lines = [...f.lines];
-                      lines[i] = { ...lines[i], lineTotal: e.target.value };
-                      return { ...f, lines };
-                    })
+                    setForm((f) => ({ ...f, amount: e.target.value }))
                   }
                 />
               </div>
-            ))}
-          </div>
+            </FormField>
+          </FormSection>
+
+          <FormSection
+            title="Kalemler"
+            description={form.lines.length > 0 ? `${form.lines.length} kalem.` : "Opsiyonel satır detayı."}
+          >
+            {form.lines.length > 0 && (
+              <div className="space-y-2">
+                {form.lines.map((line, i) => (
+                  <div
+                    key={i}
+                    className="grid grid-cols-1 gap-2 rounded-xl border bg-white p-3 sm:grid-cols-2"
+                  >
+                    <Input
+                      placeholder="Açıklama"
+                      className="bg-white sm:col-span-2"
+                      value={line.description}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const lines = [...f.lines];
+                          lines[i] = { ...lines[i], description: e.target.value };
+                          return { ...f, lines };
+                        })
+                      }
+                    />
+                    <Input
+                      placeholder="Miktar"
+                      className="bg-white"
+                      value={line.quantityLabel}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const lines = [...f.lines];
+                          lines[i] = { ...lines[i], quantityLabel: e.target.value };
+                          return { ...f, lines };
+                        })
+                      }
+                    />
+                    <Input
+                      placeholder="Birim fiyat"
+                      type="number"
+                      className="bg-white"
+                      value={line.unitPrice}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const lines = [...f.lines];
+                          lines[i] = { ...lines[i], unitPrice: e.target.value };
+                          return { ...f, lines };
+                        })
+                      }
+                    />
+                    <Input
+                      placeholder="Kalem toplam"
+                      type="number"
+                      className="bg-white sm:col-span-2"
+                      value={line.lineTotal}
+                      onChange={(e) =>
+                        setForm((f) => {
+                          const lines = [...f.lines];
+                          lines[i] = { ...lines[i], lineTotal: e.target.value };
+                          return { ...f, lines };
+                        })
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full rounded-xl border-dashed sm:w-auto"
+              onClick={() =>
+                setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }))
+              }
+            >
+              <Plus className="mr-1.5 h-4 w-4" />
+              Kalem ekle
+            </Button>
+          </FormSection>
         </FormSheetBody>
         <FormSheetFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => onOpenChange(false)}
+          >
             Vazgeç
           </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Kaydediliyor…" : "Kaydet"}
+          <Button type="submit" disabled={saving} className="rounded-xl">
+            {saving ? "Kaydediliyor…" : editing ? "Değişiklikleri kaydet" : "Faturayı kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
-    </FormSheet>
+    </FormDialog>
   );
 }
