@@ -62,6 +62,7 @@ COPY --from=builder /app/.next/static ./.next/static
 # standalone'dan sonra: Excel seed ve migration dosyaları ezilmesin
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src/lib/auth/password-rules.ts ./src/lib/auth/password-rules.ts
+COPY --from=builder /app/src/data/departments.ts ./src/data/departments.ts
 
 COPY --from=tools /tools/node_modules /opt/hamdart-tools/node_modules
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
