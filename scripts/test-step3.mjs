@@ -143,7 +143,7 @@ console.log("\n3) Hesap kilidi (5 basarisiz deneme)");
   const created = await call("POST", "/api/users", {
     username: "kilit.test",
     name: "Kilit Deneme",
-    role: "VIEWER",
+    role: "HR",
     password: "GucluSifre123",
   });
   check("kilit test kullanicisi olusturuldu", created.status === 201, created);
@@ -196,7 +196,7 @@ console.log("\n5) tokenVersion: hesap kapatilinca eski oturum dusar");
   const created = await call("POST", "/api/users", {
     username: "oturum.test",
     name: "Oturum Deneme",
-    role: "VIEWER",
+    role: "HR",
     password: "GucluSifre123",
   });
   check("oturum test kullanicisi olusturuldu", created.status === 201, created);
@@ -228,7 +228,8 @@ console.log("\n5) tokenVersion: hesap kapatilinca eski oturum dusar");
 
   jar = victimCookie;
   const meAfter = await call("GET", "/api/auth/me");
-  check("kapatilmis hesap /me -> 401", meAfter.status === 401, meAfter);
+  check("kapatilmis hesap /me -> 200", meAfter.status === 200, meAfter);
+  check("kapatilmis hesap user null", meAfter.payload?.user == null, meAfter.payload);
 
   jar = adminJar;
   await call("PATCH", `/api/users/${created.payload.id}`, { active: true });

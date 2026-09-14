@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookieSecure } from "@/lib/auth/cookie-secure";
-import type { Role, SessionUser } from "@/lib/auth/permissions";
+import { ROLES, type Role, type SessionUser } from "@/lib/auth/permissions";
 
 export const SESSION_COOKIE = "hamdart-session";
 const MAX_AGE_SEC = 60 * 60 * 8; // 8 saat
@@ -34,15 +34,16 @@ export async function verifySessionToken(
     const userId = payload.userId as string;
     const username = payload.username as string;
     const name = payload.name as string;
-    const role = payload.role as Role;
+    const role = payload.role as string;
     if (!userId || !username || !name || !role) return null;
+    if (!ROLES.includes(role as Role)) return null;
     const tokenVersion = Number(payload.tokenVersion);
     if (!Number.isInteger(tokenVersion) || tokenVersion < 0) return null;
     return {
       userId,
       username,
       name,
-      role,
+      role: role as Role,
       mustChangePassword: payload.mustChangePassword === true,
       tokenVersion,
     };

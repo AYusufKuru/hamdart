@@ -17,6 +17,7 @@ import {
   Building2,
   Contact,
   FileSpreadsheet,
+  FileText,
   BookOpen,
   Wallet,
   Boxes,
@@ -25,7 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth/auth-context";
-import { NAV_ITEMS, type Resource } from "@/lib/auth/permissions";
+import { isNavItemVisible, NAV_ITEMS, type Resource } from "@/lib/auth/permissions";
 
 const ICONS: Record<Resource, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -41,10 +42,13 @@ const ICONS: Record<Resource, LucideIcon> = {
   customers: Contact,
   suppliers: Building2,
   invoices: FileSpreadsheet,
+  delivery_notes: FileText,
   ledger: BookOpen,
   budget: Wallet,
-  admin: Shield,
   lab: FlaskConical,
+  admin: Shield,
+  users: Users,
+  backups: Shield,
 };
 
 export function useSidebarSections() {
@@ -61,7 +65,10 @@ export function useSidebarSections() {
 
   for (const title of titles) {
     const items = NAV_ITEMS.filter(
-      (item) => item.title === title && canRead(item.resource)
+      (item) =>
+        item.title === title &&
+        canRead(item.resource) &&
+        (!user || isNavItemVisible(user.role, item))
     ).map((item) => ({
       icon: ICONS[item.resource],
       label: item.label,

@@ -25,7 +25,10 @@ import {
 } from "@/lib/raw-material-order-store";
 import { getWarehouseName } from "@/data/warehouses";
 import { getWarehouses } from "@/lib/warehouse-store";
+import { ifAllowed } from "@/lib/api-client";
 import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { canApplyRawMaterialOrderAction } from "@/lib/auth/permissions";
 import { formatDate, formatNumber } from "@/lib/utils";
 import { ArrowLeft, FileText, FlaskConical, Warehouse } from "lucide-react";
 import { toast } from "sonner";
@@ -36,6 +39,7 @@ export default function RawMaterialOrderDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { user, canWrite } = useAuth();
   const [order, setOrder] = useState<RawMaterialOrder | null | undefined>(
     undefined
   );
@@ -43,7 +47,11 @@ export default function RawMaterialOrderDetailPage({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      await syncReplenishmentOrders();
+      await ifAllowed(
+        canWrite("raw_material_orders"),
+        () => syncReplenishmentOrders(),
+        []
+      );
       await getWarehouses().catch(() => []);
       const found = await getRawMaterialOrder(id);
       if (!cancelled) setOrder(found ?? null);
@@ -62,7 +70,9 @@ export default function RawMaterialOrderDetailPage({
   const status =
     rawMaterialOrderStatusConfig[order.status] ??
     rawMaterialOrderStatusConfig.to_order;
-  const actions = getAvailableActions(order.status);
+  const actions = getAvailableActions(order.status).filter((action) =>
+    user ? canApplyRawMaterialOrderAction(user.role, action) : false
+  );
 
   async function handleAction(action: RawMaterialOrderAction) {
     try {
@@ -83,7 +93,7 @@ export default function RawMaterialOrderDetailPage({
       <Button variant="ghost" size="sm" className="rounded-xl" asChild>
         <Link href="/raw-material-orders">
           <ArrowLeft className="w-4 h-4 mr-1" />
-          Hammadde Siparişleri
+          Hammadde Talepleri
         </Link>
       </Button>
 

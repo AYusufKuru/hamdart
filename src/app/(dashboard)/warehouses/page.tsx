@@ -28,8 +28,10 @@ import {
 import { getAllWarehouseStockItems } from "@/lib/stock-store";
 import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { ifAllowed } from "@/lib/api-client";
 import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
-import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { canCreateStockTransfer } from "@/lib/auth/permissions";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ArrowRight,
@@ -48,6 +50,8 @@ const transferReasonLabel = {
 };
 
 export default function WarehousesPage() {
+  const { user, canWrite } = useAuth();
+  const canTransfer = Boolean(user && canCreateStockTransfer(user.role));
   const [activeTab, setActiveTab] = useState<string>("all");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [stock, setStock] = useState<WarehouseStockItem[]>([]);
@@ -55,7 +59,11 @@ export default function WarehousesPage() {
   const [transferOpen, setTransferOpen] = useState(false);
 
   async function refresh() {
-    await syncReplenishmentOrders();
+    await ifAllowed(
+      canWrite("raw_material_orders"),
+      () => syncReplenishmentOrders(),
+      []
+    );
     const [wh, items, tr] = await Promise.all([
       getWarehouses(),
       getAllWarehouseStockItems(),
@@ -87,7 +95,7 @@ export default function WarehousesPage() {
 
   const totalCapacity = warehouses.reduce((s, w) => s + w.capacity, 0);
   const totalUsed = warehouses.reduce((s, w) => s + w.used, 0);
-  const avgUtilization = Math.round((totalUsed / totalCapacity) * 100);
+  const avgUtilization = occupancyPercent(totalUsed, totalCapacity);
   const totalSkus = stock.length;
 
   function stockByWarehouse(warehouseId: string) {
@@ -102,15 +110,15 @@ export default function WarehousesPage() {
         title="Depolar"
         description="Her depo için ayrı detay sayfasında tüm stok kalemlerini arayın ve filtreleyin. Laboratuvar stoğu üretim deposundan aktarılır."
         actions={
-          <CanWrite resource="stock">
+          canTransfer ? (
             <Button
               className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
               onClick={() => setTransferOpen(true)}
             >
               <ArrowRightLeft className="w-4 h-4 mr-2" />
-              Stok Aktar
+              {user?.role === "PRODUCTION" ? "Depodan Talep" : "Stok Aktar"}
             </Button>
-          </CanWrite>
+          ) : null
         }
       />
 

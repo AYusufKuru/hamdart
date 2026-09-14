@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { canViewAuditLogs } from "@/lib/auth/permissions";
 import { jsonError, jsonOk, requireSession } from "@/lib/server/api-utils";
 import { listAuditLogs } from "@/lib/server/audit";
 
@@ -11,6 +12,9 @@ function clampLimit(raw: string | null): number {
 export async function GET(req: NextRequest) {
   const auth = await requireSession(req, "admin:read");
   if (!auth.ok) return auth.response;
+  if (!canViewAuditLogs(auth.session.role)) {
+    return jsonError("Yetkiniz yok", 403);
+  }
 
   const url = new URL(req.url);
   const limit = clampLimit(url.searchParams.get("limit"));

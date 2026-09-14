@@ -17,6 +17,7 @@ import {
 } from "../src/lib/auth/password-rules";
 import { loadSeedFromExcel, resolveExcelPath } from "./load-excel";
 import { DEFAULT_DEPARTMENTS } from "../src/data/departments";
+import { LEGACY_ROLE_MAP } from "../src/lib/auth/permissions";
 
 const prisma = new PrismaClient();
 
@@ -105,6 +106,7 @@ async function main() {
   );
 
   await seedDepartments();
+  await remapLegacyRoles();
   await seedAdminUser();
 
   console.log("\nSeed tamamlandı.");
@@ -127,20 +129,54 @@ async function seedDepartments(): Promise<void> {
 }
 
 /**
- * Tek yönetici hesabını oluşturur. Şifre .env dosyasındaki
+ * Tek sistem yöneticisi hesabını oluşturur. Şifre .env dosyasındaki
  * ADMIN_INITIAL_PASSWORD değerinden okunur; hesap ilk girişte şifre
- * değiştirmeye zorlanır.
+ * değiştirmeye zorlanır. Patron (ADMIN) bu hesaptan oluşturulur.
  */
+async function remapLegacyRoles(): Promise<void> {
+  console.log("\nEski roller...");
+  const users = await prisma.user.findMany({
+    select: { id: true, username: true, role: true },
+  });
+  let updated = 0;
+  for (const user of users) {
+    let next = LEGACY_ROLE_MAP[user.role];
+    if (user.username === ADMIN_USERNAME && user.role === "ADMIN") {
+      next = "SYSTEM_ADMIN";
+    }
+    if (!next || next === user.role) continue;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { role: next, tokenVersion: { increment: 1 } },
+    });
+    console.log(`  ${user.username}: ${user.role} → ${next}`);
+    updated += 1;
+  }
+  if (updated === 0) {
+    console.log("  güncellenecek eski rol yok");
+  }
+}
+
 async function seedAdminUser(): Promise<void> {
-  console.log("\nYönetici hesabı...");
+  console.log("\nSistem yöneticisi hesabı...");
 
   const existing = await prisma.user.findUnique({
     where: { username: ADMIN_USERNAME },
   });
   if (existing) {
-    console.log(
-      `  ${ADMIN_USERNAME}: zaten mevcut, atlandı (şifresine dokunulmadı)`
-    );
+    if (existing.role !== "SYSTEM_ADMIN") {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { role: "SYSTEM_ADMIN", tokenVersion: { increment: 1 } },
+      });
+      console.log(
+        `  ${ADMIN_USERNAME}: rol SYSTEM_ADMIN olarak güncellendi`
+      );
+    } else {
+      console.log(
+        `  ${ADMIN_USERNAME}: zaten mevcut, atlandı (şifresine dokunulmadı)`
+      );
+    }
     return;
   }
 
@@ -170,16 +206,16 @@ async function seedAdminUser(): Promise<void> {
       username: ADMIN_USERNAME,
       name: "Yönetici",
       passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
-      role: "ADMIN",
+      role: "SYSTEM_ADMIN",
       mustChangePassword: true,
     },
   });
 
-  console.log(`  ${ADMIN_USERNAME} (ADMIN) oluşturuldu.`);
+  console.log(`  ${ADMIN_USERNAME} (SYSTEM_ADMIN) oluşturuldu.`);
   console.log(
     "  Şifre: .env dosyasındaki ADMIN_INITIAL_PASSWORD değeri.\n" +
       "  İlk girişte şifre değiştirme ekranı zorunlu olarak açılacak.\n" +
-      "  Diğer kullanıcıları Denetim & Yedekleme > Kullanıcılar ekranından oluşturun."
+      "  Patron (Yönetici) hesabını Yönetim > Kullanıcılar ekranından oluşturun."
   );
 }
 

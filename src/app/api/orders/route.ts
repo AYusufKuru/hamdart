@@ -2,10 +2,12 @@ import type { NextRequest } from "next/server";
 import {
   getIpFromRequest,
   jsonCaught,
+  jsonError,
   jsonOk,
   parseBody,
   requireSession,
 } from "@/lib/server/api-utils";
+import { canCreateSalesOrder } from "@/lib/auth/permissions";
 import { dbCreateOrder, dbGetAllOrders } from "@/lib/server/data-service";
 import { orderCreateSchema } from "@/lib/server/schemas";
 
@@ -22,6 +24,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "orders:write");
   if (!auth.ok) return auth.response;
+  if (!canCreateSalesOrder(auth.session.role)) {
+    return jsonError("Depo satış siparişi oluşturamaz", 403);
+  }
   try {
     const parsed = await parseBody(req, orderCreateSchema);
     if (!parsed.ok) return parsed.response;

@@ -22,6 +22,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  FormDialog,
+  FormField,
+  FormSheetBody,
+  FormSheetFooter,
+} from "@/components/shared/form-sheet";
+import {
   createUser,
   deleteUser,
   fetchUsers,
@@ -29,8 +35,17 @@ import {
   type UserRow,
 } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
-import { ROLES, ROLE_LABELS, type Role } from "@/lib/auth/permissions";
-import { PASSWORD_RULES_TEXT } from "@/lib/auth/password-rules";
+import {
+  ROLES,
+  ROLE_LABELS,
+  assignableRoles,
+  canManageUser,
+  type Role,
+} from "@/lib/auth/permissions";
+import {
+  PASSWORD_RULES_TEXT,
+  validatePassword,
+} from "@/lib/auth/password-rules";
 import { capitalizeWordsTr, formatDate } from "@/lib/utils";
 import { KeyRound, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -38,18 +53,25 @@ import { toast } from "sonner";
 const EMPTY_FORM = {
   username: "",
   name: "",
-  role: "VIEWER" as Role,
+  role: "STOCK" as Role,
   password: "",
 };
 
 export function UsersPanel() {
   const { user: currentUser, canWrite } = useAuth();
-  const canManage = canWrite("admin");
+  const canManage = canWrite("users");
+  const roles = currentUser ? assignableRoles(currentUser.role) : [];
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [passwordTarget, setPasswordTarget] = useState<UserRow | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordAgain, setNewPasswordAgain] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -68,6 +90,10 @@ export function UsersPanel() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (!currentUser || !roles.includes(form.role)) {
+      toast.error("Bu rolü atama yetkiniz yok");
+      return;
+    }
     setSaving(true);
     try {
       await createUser({
@@ -87,6 +113,15 @@ export function UsersPanel() {
   }
 
   async function handleRoleChange(u: UserRow, role: Role) {
+    if (
+      !currentUser ||
+      u.id === currentUser.userId ||
+      !canManageUser(currentUser.role, u.role) ||
+      !roles.includes(role)
+    ) {
+      toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
+      return;
+    }
     try {
       await updateUser(u.id, { role });
       toast.success(`${u.username} rolü ${ROLE_LABELS[role]} olarak güncellendi`);
@@ -98,6 +133,14 @@ export function UsersPanel() {
   }
 
   async function handleToggleActive(u: UserRow) {
+    if (
+      !currentUser ||
+      u.id === currentUser.userId ||
+      !canManageUser(currentUser.role, u.role)
+    ) {
+      toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
+      return;
+    }
     try {
       await updateUser(u.id, { active: !u.active });
       toast.success(
@@ -111,34 +154,75 @@ export function UsersPanel() {
     }
   }
 
-  async function handleResetPassword(u: UserRow) {
-    const password = window.prompt(
-      `${u.username} için yeni şifre belirleyin.\n\n${PASSWORD_RULES_TEXT}\n\nKullanıcı ilk girişte bu şifreyi değiştirmek zorunda kalacak.`
-    );
-    if (!password) return;
+  function openPasswordDialog(u: UserRow) {
+    if (!currentUser || !canManageUser(currentUser.role, u.role)) {
+      toast.error("Bu kullanıcının şifresini değiştiremezsiniz");
+      return;
+    }
+    setPasswordTarget(u);
+    setNewPassword("");
+    setNewPasswordAgain("");
+  }
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passwordTarget) return;
+    const problem = validatePassword(newPassword, {
+      username: passwordTarget.username,
+      name: passwordTarget.name,
+    });
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    if (newPassword !== newPasswordAgain) {
+      toast.error("Şifre tekrarı eşleşmiyor");
+      return;
+    }
+    if (
+      !currentUser ||
+      !canManageUser(currentUser.role, passwordTarget.role)
+    ) {
+      toast.error("Bu kullanıcının şifresini değiştiremezsiniz");
+      return;
+    }
+    setPasswordSaving(true);
     try {
-      await updateUser(u.id, { password });
-      toast.success(`${u.username} şifresi sıfırlandı`);
+      await updateUser(passwordTarget.id, { password: newPassword });
+      toast.success(
+        `${passwordTarget.username} şifresi sıfırlandı. Kullanıcı ilk girişte yeni şifre belirleyecek.`
+      );
+      setPasswordTarget(null);
+      setNewPassword("");
+      setNewPasswordAgain("");
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Şifre sıfırlanamadı");
+    } finally {
+      setPasswordSaving(false);
     }
   }
 
-  async function handleDelete(u: UserRow) {
+  async function handleDelete() {
+    if (!deleteTarget) return;
     if (
-      !window.confirm(
-        `${u.username} kullanıcısı kalıcı olarak silinsin mi?\n\nHesabı silmek yerine kapatmayı düşünün — denetim kayıtlarındaki geçmişi korumak için kapatmak daha uygundur.`
-      )
+      !currentUser ||
+      deleteTarget.id === currentUser.userId ||
+      !canManageUser(currentUser.role, deleteTarget.role)
     ) {
+      toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
       return;
     }
+    setDeleting(true);
     try {
-      await deleteUser(u.id);
-      toast.success(`${u.username} silindi`);
+      await deleteUser(deleteTarget.id);
+      toast.success(`${deleteTarget.username} silindi`);
+      setDeleteTarget(null);
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Silinemedi");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -205,7 +289,7 @@ export function UsersPanel() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {ROLES.map((role) => (
+                      {roles.map((role) => (
                         <SelectItem key={role} value={role}>
                           {ROLE_LABELS[role]}
                         </SelectItem>
@@ -269,12 +353,20 @@ export function UsersPanel() {
                   <TableHead>Rol</TableHead>
                   <TableHead>Durum</TableHead>
                   <TableHead>Oluşturma</TableHead>
-                  <TableHead />
+                  <TableHead sortable={false}>İşlem</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {users.map((u) => {
                   const isSelf = u.id === currentUser?.userId;
+                  const roleKnown = ROLES.includes(u.role);
+                  const canActOnUser = Boolean(
+                    currentUser && canManageUser(currentUser.role, u.role)
+                  );
+                  const canEditRole = canManage && canActOnUser && !isSelf;
+                  const canResetPassword = canManage && canActOnUser;
+                  const canDisableOrDelete =
+                    canManage && canActOnUser && !isSelf;
                   return (
                     <TableRow key={u.id}>
                       <TableCell className="font-mono text-xs">
@@ -287,18 +379,20 @@ export function UsersPanel() {
                       </TableCell>
                       <TableCell>{u.name}</TableCell>
                       <TableCell>
-                        {canManage && !isSelf ? (
+                        {canEditRole ? (
                           <Select
-                            value={u.role}
+                            value={roleKnown ? u.role : undefined}
                             onValueChange={(role) =>
                               void handleRoleChange(u, role as Role)
                             }
                           >
                             <SelectTrigger className="rounded-lg h-8 w-44">
-                              <SelectValue />
+                              <SelectValue
+                                placeholder={ROLE_LABELS[u.role] ?? u.role}
+                              />
                             </SelectTrigger>
                             <SelectContent>
-                              {ROLES.map((role) => (
+                              {roles.map((role) => (
                                 <SelectItem key={role} value={role}>
                                   {ROLE_LABELS[role]}
                                 </SelectItem>
@@ -306,7 +400,9 @@ export function UsersPanel() {
                             </SelectContent>
                           </Select>
                         ) : (
-                          <span className="text-sm">{ROLE_LABELS[u.role]}</span>
+                          <span className="text-sm">
+                            {ROLE_LABELS[u.role] ?? u.role}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell className="space-x-1 whitespace-nowrap">
@@ -320,21 +416,25 @@ export function UsersPanel() {
                       <TableCell className="text-xs">
                         {formatDate(u.createdAt.slice(0, 10))}
                       </TableCell>
-                      <TableCell className="text-right space-x-2 whitespace-nowrap">
-                        {canManage && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-lg"
-                              onClick={() => void handleResetPassword(u)}
-                            >
-                              <KeyRound className="w-3 h-3 mr-1" />
-                              Şifre
-                            </Button>
-                            {!isSelf && (
+                      <TableCell className="max-w-none overflow-visible text-right whitespace-nowrap">
+                        {canResetPassword || canDisableOrDelete ? (
+                          <div className="flex justify-end gap-2">
+                            {canResetPassword ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg"
+                                onClick={() => openPasswordDialog(u)}
+                              >
+                                <KeyRound className="w-3 h-3 mr-1" />
+                                Şifre
+                              </Button>
+                            ) : null}
+                            {canDisableOrDelete ? (
                               <>
                                 <Button
+                                  type="button"
                                   size="sm"
                                   variant="outline"
                                   className="rounded-lg"
@@ -343,17 +443,18 @@ export function UsersPanel() {
                                   {u.active ? "Kapat" : "Aç"}
                                 </Button>
                                 <Button
+                                  type="button"
                                   size="sm"
                                   variant="ghost"
                                   className="rounded-lg text-destructive"
-                                  onClick={() => void handleDelete(u)}
+                                  onClick={() => setDeleteTarget(u)}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </Button>
                               </>
-                            )}
-                          </>
-                        )}
+                            ) : null}
+                          </div>
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   );
@@ -373,6 +474,107 @@ export function UsersPanel() {
           )}
         </CardContent>
       </Card>
+
+      <FormDialog
+        open={Boolean(passwordTarget)}
+        onOpenChange={(open) => {
+          if (!open && !passwordSaving) {
+            setPasswordTarget(null);
+            setNewPassword("");
+            setNewPasswordAgain("");
+          }
+        }}
+        icon={KeyRound}
+        title="Şifre sıfırla"
+        description={
+          passwordTarget
+            ? `${passwordTarget.username} için geçici şifre belirleyin. Kullanıcı ilk girişte bunu değiştirmek zorunda kalacak.`
+            : undefined
+        }
+      >
+        <form onSubmit={(e) => void handleResetPassword(e)}>
+          <FormSheetBody>
+            <FormField label="Yeni şifre" htmlFor="reset-password" required>
+              <Input
+                id="reset-password"
+                type="password"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="rounded-xl"
+                required
+              />
+            </FormField>
+            <FormField
+              label="Şifre tekrarı"
+              htmlFor="reset-password-again"
+              required
+            >
+              <Input
+                id="reset-password-again"
+                type="password"
+                autoComplete="new-password"
+                value={newPasswordAgain}
+                onChange={(e) => setNewPasswordAgain(e.target.value)}
+                className="rounded-xl"
+                required
+              />
+            </FormField>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {PASSWORD_RULES_TEXT}
+            </p>
+          </FormSheetBody>
+          <FormSheetFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              disabled={passwordSaving}
+              onClick={() => setPasswordTarget(null)}
+            >
+              Vazgeç
+            </Button>
+            <Button type="submit" className="rounded-xl" disabled={passwordSaving}>
+              {passwordSaving ? "Kaydediliyor..." : "Şifreyi sıfırla"}
+            </Button>
+          </FormSheetFooter>
+        </form>
+      </FormDialog>
+
+      <FormDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        icon={Trash2}
+        title="Kullanıcıyı sil"
+        description={
+          deleteTarget
+            ? `${deleteTarget.username} kalıcı olarak silinsin mi? Denetim geçmişini korumak için hesabı kapatmak daha uygundur.`
+            : undefined
+        }
+      >
+        <FormSheetFooter>
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            disabled={deleting}
+            onClick={() => setDeleteTarget(null)}
+          >
+            Vazgeç
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="rounded-xl"
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+          >
+            {deleting ? "Siliniyor..." : "Sil"}
+          </Button>
+        </FormSheetFooter>
+      </FormDialog>
     </div>
   );
 }

@@ -25,6 +25,7 @@ import {
   type BackupInfo,
 } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
+import { canViewAuditLogs, isPrivilegedRole } from "@/lib/auth/permissions";
 import { UsersPanel } from "@/components/admin/users-panel";
 import { DepartmentsPanel } from "@/components/admin/departments-panel";
 import {
@@ -46,7 +47,7 @@ function actionVariant(action: string) {
 }
 
 function AdminContent() {
-  const { user, canWrite } = useAuth();
+  const { user, canRead, canWrite } = useAuth();
   const [auditLogs, setAuditLogs] = useState<AuditLogRow[]>([]);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [backupNote, setBackupNote] = useState("");
@@ -54,15 +55,18 @@ function AdminContent() {
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [confirmFilename, setConfirmFilename] = useState("");
   const [restoring, setRestoring] = useState(false);
-  const canManage = canWrite("admin");
-  const isAdmin = user?.role === "ADMIN";
+  const canSeeAudit = Boolean(user && canViewAuditLogs(user.role));
+  const canSeeUsers = canRead("users");
+  const canSeeBackups = canRead("backups");
+  const canManageBackups = canWrite("backups");
+  const canManageDepartments = user ? isPrivilegedRole(user.role) : false;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const [logs, list] = await Promise.all([
-        fetchAuditLogs(200),
-        fetchBackups(),
+        canSeeAudit ? fetchAuditLogs(200) : Promise.resolve([] as AuditLogRow[]),
+        canSeeBackups ? fetchBackups() : Promise.resolve([] as BackupInfo[]),
       ]);
       setAuditLogs(logs);
       setBackups(list);
@@ -71,7 +75,7 @@ function AdminContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canSeeAudit, canSeeBackups]);
 
   useEffect(() => {
     void refresh();
@@ -128,8 +132,12 @@ function AdminContent() {
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
       <PageHeader
         badge="Sistem"
-        title="Denetim & Yedekleme"
-        description="Tüm veri değişiklikleri kayıt altında. Düzenli yedek alın."
+        title="Yönetim"
+        description={
+          canSeeAudit
+            ? "Kullanıcılar, denetim kaydı ve sistem ayarları."
+            : "Kullanıcılar ve sistem ayarları."
+        }
       />
 
       <Card className="glass-card border-none">
@@ -147,21 +155,27 @@ function AdminContent() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="audit">
+      <Tabs defaultValue={canSeeUsers ? "users" : "audit"}>
         <TabsList className="rounded-xl">
-          <TabsTrigger value="audit" className="rounded-lg gap-2">
-            <History className="w-4 h-4" />
-            Denetim Kaydı
-          </TabsTrigger>
-          <TabsTrigger value="backups" className="rounded-lg gap-2">
-            <Database className="w-4 h-4" />
-            Yedekler
-          </TabsTrigger>
-          <TabsTrigger value="users" className="rounded-lg gap-2">
-            <Users className="w-4 h-4" />
-            Kullanıcılar
-          </TabsTrigger>
-          {isAdmin && (
+          {canSeeUsers && (
+            <TabsTrigger value="users" className="rounded-lg gap-2">
+              <Users className="w-4 h-4" />
+              Kullanıcılar
+            </TabsTrigger>
+          )}
+          {canSeeAudit && (
+            <TabsTrigger value="audit" className="rounded-lg gap-2">
+              <History className="w-4 h-4" />
+              Denetim Kaydı
+            </TabsTrigger>
+          )}
+          {canSeeBackups && (
+            <TabsTrigger value="backups" className="rounded-lg gap-2">
+              <Database className="w-4 h-4" />
+              Yedekler
+            </TabsTrigger>
+          )}
+          {canManageDepartments && (
             <TabsTrigger value="departments" className="rounded-lg gap-2">
               <Building2 className="w-4 h-4" />
               Departmanlar
@@ -169,6 +183,7 @@ function AdminContent() {
           )}
         </TabsList>
 
+        {canSeeAudit && (
         <TabsContent value="audit" className="mt-6">
           <Card className="glass-card border-none">
             <CardContent className="p-0">
@@ -219,13 +234,15 @@ function AdminContent() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
+        {canSeeBackups && (
         <TabsContent value="backups" className="mt-6 space-y-6">
           <p className="text-sm text-muted-foreground">
             Geri yüklemek için dump dosya adını aynı şekilde yazmanız gerekir.
             Yüklemeden önce mevcut verinin güvenlik kopyası otomatik alınır.
           </p>
-          {canManage && (
+          {canManageBackups && (
           <Card className="glass-card border-none">
             <CardHeader>
               <CardTitle className="text-base">Yeni Yedek Al</CardTitle>
@@ -269,7 +286,7 @@ function AdminContent() {
                         {b.note ?? "—"}
                       </TableCell>
                       <TableCell className="text-right space-x-2">
-                        {canManage && (
+                        {canManageBackups && (
                           <>
                         <Button
                           size="sm"
@@ -305,12 +322,15 @@ function AdminContent() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
-        <TabsContent value="users" className="mt-6">
-          <UsersPanel />
-        </TabsContent>
+        {canSeeUsers && (
+          <TabsContent value="users" className="mt-6">
+            <UsersPanel />
+          </TabsContent>
+        )}
 
-        {isAdmin && (
+        {canManageDepartments && (
           <TabsContent value="departments" className="mt-6">
             <DepartmentsPanel />
           </TabsContent>

@@ -11,11 +11,11 @@ import {
 import { userCreateSchema } from "@/lib/server/schemas";
 
 export async function GET(req: NextRequest) {
-  const auth = await requireSession(req, "admin:read");
+  const auth = await requireSession(req, "users:read");
   if (!auth.ok) return auth.response;
 
   try {
-    return jsonOk(await listUsers());
+    return jsonOk(await listUsers(auth.session));
   } catch (e) {
     console.error("Kullanıcılar yüklenemedi:", e);
     return jsonError(formatApiError(e, "Kullanıcılar yüklenemedi"), 500);
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireSession(req, "admin:write");
+  const auth = await requireSession(req, "users:write");
   if (!auth.ok) return auth.response;
 
   try {

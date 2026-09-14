@@ -114,8 +114,8 @@ export default function InvoicesPage() {
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
       <PageHeader
         badge="Cari"
-        title="Cari Açık"
-        description="Faturalar ve kalemleri."
+        title="Faturalar"
+        description="Fatura girişi ve düzeltme. Satış ve alış faturaları ile kalemleri."
         actions={
           <CanWrite resource="invoices">
             <Button
@@ -144,17 +144,23 @@ export default function InvoicesPage() {
       <Card className="glass-card border-none">
         <CardContent className="p-6 space-y-4">
           <p className="text-sm font-bold">Cari Fatura Kalemleri</p>
-          <select
-            className="h-10 rounded-xl border px-3 text-sm bg-background"
-            value={selected ?? ""}
-            onChange={(e) => setSelected(e.target.value)}
-          >
-            {invoices.map((inv) => (
-              <option key={inv.id} value={inv.invoiceNo}>
-                {inv.invoiceNo}
-              </option>
-            ))}
-          </select>
+          {invoices.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Kalemleri görmek için önce bir fatura oluşturun.
+            </p>
+          ) : (
+            <select
+              className="h-10 min-w-[16rem] max-w-full rounded-xl border px-3 text-sm bg-background"
+              value={selected ?? ""}
+              onChange={(e) => setSelected(e.target.value)}
+            >
+              {invoices.map((inv) => (
+                <option key={inv.id} value={inv.invoiceNo}>
+                  {inv.invoiceNo}
+                </option>
+              ))}
+            </select>
+          )}
           <SearchTable
             rows={lines}
             columns={[

@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
+import { canCreateStockEntry } from "@/lib/auth/permissions";
 import {
   getIpFromRequest,
   jsonCaught,
+  jsonError,
   jsonOk,
   parseBody,
   requireSession,
@@ -25,6 +27,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "stock:write");
   if (!auth.ok) return auth.response;
+  if (!canCreateStockEntry(auth.session.role)) {
+    return jsonError("Stok girişi depo yetkisindedir", 403);
+  }
   try {
     const parsed = await parseBody(req, stockCreateSchema);
     if (!parsed.ok) return parsed.response;

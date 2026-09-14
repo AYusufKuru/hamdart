@@ -1,6 +1,15 @@
 import type { NextRequest } from "next/server";
-import { jsonCaught, jsonError, jsonOk, requireSession } from "@/lib/server/api-utils";
-import { dbGetOrder } from "@/lib/server/data-service";
+import {
+  getIpFromRequest,
+  jsonCaught,
+  jsonError,
+  jsonOk,
+  parseBody,
+  requireSession,
+} from "@/lib/server/api-utils";
+import { canSetOrderStatus } from "@/lib/auth/permissions";
+import { dbGetOrder, dbUpdateOrderShipment } from "@/lib/server/data-service";
+import { orderShipmentSchema } from "@/lib/server/schemas";
 
 export async function GET(
   req: NextRequest,
@@ -15,5 +24,31 @@ export async function GET(
     return jsonOk(order);
   } catch (e) {
     return jsonCaught(e, "Sipariş yüklenemedi");
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = await requireSession(req, "orders:write");
+  if (!auth.ok) return auth.response;
+  try {
+    const { id } = await params;
+    const parsed = await parseBody(req, orderShipmentSchema);
+    if (!parsed.ok) return parsed.response;
+    if (
+      parsed.data.status &&
+      !canSetOrderStatus(auth.session.role, parsed.data.status)
+    ) {
+      return jsonError("Bu sevkiyat durumunu güncelleme yetkiniz yok", 403);
+    }
+    const order = await dbUpdateOrderShipment(id, parsed.data, {
+      actor: auth.session.name,
+      ip: getIpFromRequest(req),
+    });
+    return jsonOk(order);
+  } catch (e) {
+    return jsonCaught(e, "Sevkiyat güncellenemedi");
   }
 }

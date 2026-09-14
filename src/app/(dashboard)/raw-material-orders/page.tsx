@@ -23,9 +23,10 @@ import {
   type RawMaterialOrder,
   type RawMaterialOrderStatus,
 } from "@/data/raw-material-orders";
-import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { getAllRawMaterialOrders, syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { RawMaterialOrderFormSheet } from "@/components/raw-material-orders/raw-material-order-form-sheet";
-import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { canCreatePurchaseOrder, isStockRole } from "@/lib/auth/permissions";
 import { formatNumber, selectItemValues } from "@/lib/utils";
 import {
   AlertCircle,
@@ -37,20 +38,23 @@ import {
   Warehouse,
 } from "lucide-react";
 
-function loadOrders() {
-  return syncReplenishmentOrders();
-}
-
 export default function RawMaterialOrdersPage() {
   const router = useRouter();
+  const { user, canWrite } = useAuth();
+  const canCreate = Boolean(user && canCreatePurchaseOrder(user.role));
+  const receivingOnly = Boolean(user && isStockRole(user.role));
   const [orders, setOrders] = useState<RawMaterialOrder[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [formOpen, setFormOpen] = useState(false);
 
   const refresh = useCallback(async () => {
-    setOrders(await loadOrders());
-  }, []);
+    setOrders(
+      canWrite("raw_material_orders")
+        ? await syncReplenishmentOrders()
+        : await getAllRawMaterialOrders()
+    );
+  }, [canWrite]);
 
   useEffect(() => {
     void refresh();
@@ -82,10 +86,14 @@ export default function RawMaterialOrdersPage() {
       <PageHeader
         badge="Tedarik"
         badgeClassName="bg-amber-500/10 text-amber-700 border-amber-500/20"
-        title="Hammadde Siparişleri"
-        description="Sipariş Verilecek kayıtları üç kaynaktan listeye düşer: stok uyarısı, üretim ihtiyacı veya manuel talep."
+        title={receivingOnly ? "Mal Kabul" : "Hammadde Talepleri"}
+        description={
+          receivingOnly
+            ? "Gelen hammaddeyi teslim alın. Satın alma talebi oluşturmak depo yetkisinde değildir."
+            : "Üretim ve plan ihtiyacı için satın alma talebi oluşturun. Teslim almayı depo yapar."
+        }
         actions={
-          <CanWrite resource="raw_material_orders">
+          canCreate ? (
             <Button
               className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
               onClick={() => setFormOpen(true)}
@@ -93,7 +101,7 @@ export default function RawMaterialOrdersPage() {
               <Plus className="w-4 h-4 mr-2" />
               Manuel Talep
             </Button>
-          </CanWrite>
+          ) : null
         }
       />
 

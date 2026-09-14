@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
@@ -12,9 +12,11 @@ import { getAllRawMaterialOrders } from "@/lib/raw-material-order-store";
 import { RawMaterialFormSheet } from "@/components/raw-materials/raw-material-form-sheet";
 import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { formatMoney } from "@/lib/recipe-calculations";
 import { Plus } from "lucide-react";
 
-const columns: Column<RawMaterial>[] = [
+const baseColumns: Column<RawMaterial>[] = [
   {
     key: "sku",
     header: "SKU",
@@ -32,6 +34,21 @@ const columns: Column<RawMaterial>[] = [
 
 export default function RawMaterialsPage() {
   const router = useRouter();
+  const { user, canRead } = useAuth();
+  const canOpenPurchaseOrders = canRead("raw_material_orders");
+  const showPurchasePrice = user?.role === "SALES";
+  const columns = useMemo(() => {
+    if (!showPurchasePrice) return baseColumns;
+    return [
+      ...baseColumns,
+      {
+        key: "unitCost",
+        header: "Satınalma Fiyatı",
+        className: "text-right font-medium",
+        render: (m: RawMaterial) => formatMoney(m.unitCost),
+      },
+    ];
+  }, [showPurchasePrice]);
   const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
   const [rawMaterialOrders, setRawMaterialOrders] = useState<
     Awaited<ReturnType<typeof getAllRawMaterialOrders>>
@@ -80,14 +97,18 @@ export default function RawMaterialsPage() {
             columns={columns}
             searchText={(m) => `${m.sku} ${m.name} ${m.category}`}
             pageSize={25}
-            onRowClick={(m) => {
-              const rmo = rawMaterialOrders.find(
-                (o) => o.sku.toLowerCase() === m.sku.toLowerCase()
-              );
-              router.push(
-                rmo ? `/raw-material-orders/${rmo.id}` : "/raw-material-orders"
-              );
-            }}
+            onRowClick={
+              canOpenPurchaseOrders
+                ? (m) => {
+                    const rmo = rawMaterialOrders.find(
+                      (o) => o.sku.toLowerCase() === m.sku.toLowerCase()
+                    );
+                    router.push(
+                      rmo ? `/raw-material-orders/${rmo.id}` : "/raw-material-orders"
+                    );
+                  }
+                : undefined
+            }
           />
         </CardContent>
       </Card>

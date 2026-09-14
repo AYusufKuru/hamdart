@@ -10,12 +10,14 @@ import {
 import {
   dbDeleteBudget,
   dbDeleteCustomer,
+  dbDeleteDeliveryNote,
   dbDeleteInvoice,
   dbDeleteLedger,
   dbDeletePersonnel,
   dbDeleteSupplier,
   dbUpdateBudget,
   dbUpdateCustomer,
+  dbUpdateDeliveryNote,
   dbUpdateInvoice,
   dbUpdateLedger,
   dbUpdatePersonnel,
@@ -25,6 +27,7 @@ import { getApiPermission } from "@/lib/auth/permissions";
 import {
   budgetUpdateSchema,
   customerUpdateSchema,
+  deliveryNoteUpdateSchema,
   invoiceUpdateSchema,
   ledgerUpdateSchema,
   personnelUpdateSchema,
@@ -37,6 +40,7 @@ const writable = new Set([
   "suppliers",
   "personnel",
   "invoices",
+  "delivery-notes",
   "ledger",
   "budget",
 ]);
@@ -46,6 +50,7 @@ const updateSchemas: Record<string, ZodType> = {
   suppliers: supplierUpdateSchema,
   personnel: personnelUpdateSchema,
   invoices: invoiceUpdateSchema,
+  "delivery-notes": deliveryNoteUpdateSchema,
   ledger: ledgerUpdateSchema,
   budget: budgetUpdateSchema,
 };
@@ -88,6 +93,8 @@ export async function PATCH(
         return jsonOk(await dbUpdatePersonnel(id, data, ctx));
       case "invoices":
         return jsonOk(await dbUpdateInvoice(id, data, ctx));
+      case "delivery-notes":
+        return jsonOk(await dbUpdateDeliveryNote(id, data, ctx));
       case "ledger":
         return jsonOk(await dbUpdateLedger(id, data, ctx));
       case "budget":
@@ -122,6 +129,9 @@ export async function DELETE(
         return jsonOk({ ok: true });
       case "invoices":
         await dbDeleteInvoice(id, ctx);
+        return jsonOk({ ok: true });
+      case "delivery-notes":
+        await dbDeleteDeliveryNote(id, ctx);
         return jsonOk({ ok: true });
       case "ledger":
         await dbDeleteLedger(id, ctx);

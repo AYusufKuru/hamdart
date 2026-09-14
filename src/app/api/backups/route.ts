@@ -9,7 +9,7 @@ import { createBackup, listBackups } from "@/lib/server/backup";
 import { backupCreateSchema } from "@/lib/server/schemas";
 
 export async function GET(req: NextRequest) {
-  const auth = await requireSession(req, "admin:read");
+  const auth = await requireSession(req, "backups:read");
   if (!auth.ok) return auth.response;
   try {
     return jsonOk(await listBackups());
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireSession(req, "admin:write");
+  const auth = await requireSession(req, "backups:write");
   if (!auth.ok) return auth.response;
   try {
     const parsed = await parseBody(req, backupCreateSchema);

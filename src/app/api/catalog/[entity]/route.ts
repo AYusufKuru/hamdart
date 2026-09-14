@@ -11,6 +11,8 @@ import type { Personnel } from "@/data/catalog";
 import {
   dbGetBudget,
   dbGetCustomers,
+  dbGetDeliveryNoteLines,
+  dbGetDeliveryNotes,
   dbGetInvoiceLines,
   dbGetInvoices,
   dbGetLedger,
@@ -22,6 +24,7 @@ import {
 import {
   dbCreateBudget,
   dbCreateCustomer,
+  dbCreateDeliveryNote,
   dbCreateInvoice,
   dbCreateLedger,
   dbCreatePersonnel,
@@ -32,6 +35,7 @@ import { getApiPermission, hasPermission } from "@/lib/auth/permissions";
 import {
   budgetCreateSchema,
   customerCreateSchema,
+  deliveryNoteCreateSchema,
   invoiceCreateSchema,
   ledgerCreateSchema,
   personnelCreateSchema,
@@ -46,6 +50,8 @@ const readers: Record<string, () => Promise<unknown>> = {
   products: dbGetProducts,
   invoices: dbGetInvoices,
   "invoice-lines": dbGetInvoiceLines,
+  "delivery-notes": dbGetDeliveryNotes,
+  "delivery-note-lines": dbGetDeliveryNoteLines,
   ledger: dbGetLedger,
   budget: dbGetBudget,
   warehouses: dbGetWarehouses,
@@ -56,6 +62,7 @@ const writable = new Set([
   "suppliers",
   "personnel",
   "invoices",
+  "delivery-notes",
   "ledger",
   "budget",
 ]);
@@ -65,6 +72,7 @@ const createSchemas: Record<string, ZodType> = {
   suppliers: supplierCreateSchema,
   personnel: personnelCreateSchema,
   invoices: invoiceCreateSchema,
+  "delivery-notes": deliveryNoteCreateSchema,
   ledger: ledgerCreateSchema,
   budget: budgetCreateSchema,
 };
@@ -134,6 +142,8 @@ export async function POST(
         return jsonOk(await dbCreatePersonnel(data, ctx), 201);
       case "invoices":
         return jsonOk(await dbCreateInvoice(data, ctx), 201);
+      case "delivery-notes":
+        return jsonOk(await dbCreateDeliveryNote(data, ctx), 201);
       case "ledger":
         return jsonOk(await dbCreateLedger(data, ctx), 201);
       case "budget":

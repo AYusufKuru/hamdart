@@ -2,10 +2,12 @@ import type { NextRequest } from "next/server";
 import {
   getIpFromRequest,
   jsonCaught,
+  jsonError,
   jsonOk,
   parseBody,
   requireSession,
 } from "@/lib/server/api-utils";
+import { canCreatePurchaseOrder } from "@/lib/auth/permissions";
 import {
   dbCreateManualRawMaterialOrder,
   dbGetAllRawMaterialOrders,
@@ -31,6 +33,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
+  if (!canCreatePurchaseOrder(auth.session.role)) {
+    return jsonError(
+      "Depo hammadde siparişi oluşturamaz; mal kabul yapabilir",
+      403
+    );
+  }
   try {
     const parsed = await parseBody(req, rmoCreateSchema);
     if (!parsed.ok) return parsed.response;
@@ -47,6 +55,9 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
+  if (!canCreatePurchaseOrder(auth.session.role)) {
+    return jsonError("Bu kaydı yalnızca satın alma güncelleyebilir", 403);
+  }
   try {
     const parsed = await parseBody(req, rmoPatchSchema);
     if (!parsed.ok) return parsed.response;

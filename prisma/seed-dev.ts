@@ -8,6 +8,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { LEGACY_ROLE_MAP } from "../src/lib/auth/permissions";
 
 const prisma = new PrismaClient();
 
@@ -15,14 +16,14 @@ const BCRYPT_ROUNDS = 12;
 
 /** Şifreler bilinçli olarak basit — sadece yerel geliştirme içindir */
 const DEV_USERS = [
-  { username: "dev-mudur", name: "Test Genel Müdür", role: "MANAGER" },
-  { username: "dev-uretim", name: "Test Üretim Operatörü", role: "PRODUCTION" },
-  { username: "dev-depo", name: "Test Depo Sorumlusu", role: "WAREHOUSE" },
-  { username: "dev-lab", name: "Test Laboratuvar Uzmanı", role: "LAB" },
-  { username: "dev-ticari", name: "Test Ticari Müdür", role: "COMMERCIAL" },
-  { username: "dev-izleyici", name: "Test İzleyici", role: "VIEWER" },
+  { username: "dev-mudur", name: "Test Müdür", role: "MANAGER" },
+  { username: "dev-stok", name: "Test Stok", role: "STOCK" },
+  { username: "dev-muhasebe", name: "Test Muhasebe", role: "ACCOUNTING" },
+  { username: "dev-uretim", name: "Test Üretim", role: "PRODUCTION" },
+  { username: "dev-satis", name: "Test Satış Pazarlama", role: "SALES" },
+  { username: "dev-ik", name: "Test İK", role: "HR" },
   { username: "dev-admin", name: "Test Yönetici", role: "ADMIN" },
-];
+] as const;
 
 const DEV_PASSWORD = "GelistirmeTest1";
 
@@ -36,6 +37,23 @@ async function main() {
   }
 
   console.log("Geliştirme test hesapları oluşturuluyor...\n");
+
+  const legacy = await prisma.user.findMany({
+    select: { id: true, username: true, role: true },
+  });
+  for (const user of legacy) {
+    let next = LEGACY_ROLE_MAP[user.role];
+    if (user.username === "admin" && user.role === "ADMIN") {
+      next = "SYSTEM_ADMIN";
+    }
+    if (!next || next === user.role) continue;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { role: next, tokenVersion: { increment: 1 } },
+    });
+    console.log(`  ${user.username}: ${user.role} → ${next}`);
+  }
+
   const passwordHash = await bcrypt.hash(DEV_PASSWORD, BCRYPT_ROUNDS);
 
   for (const u of DEV_USERS) {
@@ -43,7 +61,15 @@ async function main() {
       where: { username: u.username },
     });
     if (existing) {
-      console.log(`  ${u.username}: zaten mevcut, atlandı`);
+      if (existing.role !== u.role) {
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: { role: u.role, tokenVersion: { increment: 1 } },
+        });
+        console.log(`  ${u.username}: rol ${existing.role} → ${u.role}`);
+      } else {
+        console.log(`  ${u.username}: zaten mevcut, atlandı`);
+      }
       continue;
     }
     await prisma.user.create({

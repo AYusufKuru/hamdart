@@ -110,16 +110,16 @@ console.log("1) Varsayilan reddet — bilinmeyen API");
   check("bilinmeyen katalog -> 403", catalog.status === 403, catalog);
 }
 
-console.log("\n2) Rol yetkisi — LAB siparise erisemez");
+console.log("\n2) Rol yetkisi — İK siparise erisemez");
 {
-  const lab = await login("dev-lab", DEV_PASSWORD, false);
-  check("dev-lab giris -> 200", lab.status === 200, lab);
+  const hr = await login("dev-ik", DEV_PASSWORD, false);
+  check("dev-ik giris -> 200", hr.status === 200, hr);
 
   const orders = await call("GET", "/api/orders");
-  check("LAB GET /api/orders -> 403", orders.status === 403, orders);
+  check("HR GET /api/orders -> 403", orders.status === 403, orders);
 
-  const labOk = await call("GET", "/api/lab/experiments");
-  check("LAB GET /api/lab/experiments -> 200", labOk.status === 200, labOk);
+  const personnel = await call("GET", "/api/catalog/personnel");
+  check("HR GET /api/catalog/personnel -> 200", personnel.status === 200, personnel);
 
   const write = await call("POST", "/api/orders", {
     customer: "X",
@@ -133,7 +133,7 @@ console.log("\n2) Rol yetkisi — LAB siparise erisemez");
     warehouse: "wh-fabrika",
     value: 1,
   });
-  check("LAB POST /api/orders -> 403", write.status === 403, write);
+  check("HR POST /api/orders -> 403", write.status === 403, write);
 }
 
 console.log("\n3) Aktör başlığı yok sayılır");
@@ -178,7 +178,7 @@ console.log("\n4) İptal oturum route'ta kesilir");
   const created = await call("POST", "/api/users", {
     username: "step6.oturum",
     name: "Step6 Oturum",
-    role: "VIEWER",
+    role: "HR",
     password: "GucluSifre123",
   });
   check("test kullanicisi -> 201", created.status === 201, created);

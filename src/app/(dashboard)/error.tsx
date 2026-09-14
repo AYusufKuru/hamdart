@@ -21,8 +21,7 @@ export default function DashboardError({
       </p>
       <h1 className="text-2xl font-black tracking-tight">Bir şeyler ters gitti</h1>
       <p className="text-muted-foreground mt-2 max-w-md">
-        Bu ekran yüklenirken bir hata oluştu. Tekrar deneyebilir veya dashboard’a
-        dönebilirsiniz.
+        Bu ekran yüklenirken bir hata oluştu. Tekrar deneyebilirsiniz.
       </p>
       <Button
         className="mt-8 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"

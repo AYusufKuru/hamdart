@@ -23,6 +23,8 @@ import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
 import { fetchCustomers } from "@/lib/catalog-store";
 import { getWarehouses } from "@/lib/warehouse-store";
 import { getAllRecipes } from "@/lib/recipe-store";
+import { ifAllowed } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth/auth-context";
 import type { Order, OrderStatus } from "@/data/mock";
 import { plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
 import {
@@ -74,6 +76,7 @@ export function OrderFormSheet({
   onOpenChange,
   onCreated,
 }: OrderFormSheetProps) {
+  const { canRead } = useAuth();
   const [form, setForm] = useState(() => emptyForm());
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [customers, setCustomers] = useState<string[]>([]);
@@ -103,8 +106,8 @@ export function OrderFormSheet({
           fetchCustomers(),
           getOrderCustomers(),
           getOrderProducts(),
-          getAllRecipes(),
-          getWarehouses(),
+          ifAllowed(canRead("recipes"), () => getAllRecipes(), []),
+          ifAllowed(canRead("warehouses"), () => getWarehouses(), [] as Warehouse[]),
         ]);
       setWarehouses(whList);
       const production =
@@ -284,23 +287,34 @@ export function OrderFormSheet({
 
           <FormSection title="Sevkiyat ve durum">
             <FormField label="Depo" required hint="Sevkiyatın çıkacağı depo.">
-              <Select
-                value={form.warehouse}
-                onValueChange={(warehouse) => setForm((f) => ({ ...f, warehouse }))}
-              >
-                <SelectTrigger className="bg-white">
-                  <SelectValue placeholder="Depo seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {warehouses
-                    .filter((w) => w.name.trim())
-                    .map((w) => (
-                    <SelectItem key={w.id} value={w.name}>
-                      {w.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {warehouses.some((w) => w.name.trim()) ? (
+                <Select
+                  value={form.warehouse}
+                  onValueChange={(warehouse) => setForm((f) => ({ ...f, warehouse }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="Depo seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {warehouses
+                      .filter((w) => w.name.trim())
+                      .map((w) => (
+                        <SelectItem key={w.id} value={w.name}>
+                          {w.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  required
+                  className="bg-white"
+                  value={form.warehouse}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, warehouse: e.target.value }))
+                  }
+                />
+              )}
             </FormField>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FormField label="Öncelik" required>

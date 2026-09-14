@@ -45,8 +45,9 @@ import { getRecipeByOrderId } from "@/lib/recipe-store";
 import { getAllOrders } from "@/lib/order-store";
 
 import { OrderFormSheet } from "@/components/orders/order-form-sheet";
-import { CanWrite } from "@/components/auth/can-write";
 import { useAuth } from "@/lib/auth/auth-context";
+import { canCreateSalesOrder } from "@/lib/auth/permissions";
+import { ifAllowed } from "@/lib/api-client";
 
 import {
 
@@ -103,7 +104,8 @@ function OrdersPageContent() {
   const router = useRouter();
 
   const searchParams = useSearchParams();
-  const { canWrite } = useAuth();
+  const { user, canRead } = useAuth();
+  const canCreate = Boolean(user && canCreateSalesOrder(user.role));
 
   const [search, setSearch] = useState("");
 
@@ -124,17 +126,14 @@ function OrdersPageContent() {
     setOrders(list);
 
     const ids = new Set<string>();
-
-    await Promise.all(
-
-      list.map(async (o) => {
-
-        if (await getRecipeByOrderId(o.id)) ids.add(o.id);
-
-      })
-
-    );
-
+    if (canRead("recipes")) {
+      await Promise.all(
+        list.map(async (o) => {
+          const recipe = await ifAllowed(true, () => getRecipeByOrderId(o.id), undefined);
+          if (recipe) ids.add(o.id);
+        })
+      );
+    }
     setRecipeOrderIds(ids);
 
   };
@@ -145,7 +144,7 @@ function OrdersPageContent() {
 
     void refresh();
 
-    if (searchParams.get("yeni") === "1" && canWrite("orders")) {
+    if (searchParams.get("yeni") === "1" && canCreate) {
 
       setFormOpen(true);
 
@@ -191,12 +190,14 @@ function OrdersPageContent() {
 
         badgeClassName="bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
 
-        title="Siparişler"
-
-        description="Müşteri siparişleri, sevkiyat takibi ve depo atama yönetimi."
-
+        title="Sevkiyat"
+        description={
+          canCreate
+            ? "Satış siparişi oluşturun; toplama, sevk ve teslim takibini buradan yapın."
+            : "Sevk deposunu girin, toplamayı başlatın ve sevkiyatı tamamlayın."
+        }
         actions={
-          <CanWrite resource="orders">
+          canCreate ? (
             <Button
               className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
               onClick={() => setFormOpen(true)}
@@ -204,7 +205,7 @@ function OrdersPageContent() {
               <Plus className="w-4 h-4 mr-2" />
               Yeni Sipariş
             </Button>
-          </CanWrite>
+          ) : null
         }
 
       />

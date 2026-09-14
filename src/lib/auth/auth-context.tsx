@@ -69,11 +69,7 @@ export function AuthProvider({
         });
         if (id !== requestId.current) return;
         if (res.status === 401) {
-          if (attempt < 2) {
-            await sleep(250 * (attempt + 1));
-            continue;
-          }
-          setUser((prev) => prev ?? null);
+          setUser(null);
           return;
         }
         if (!res.ok) {
@@ -81,8 +77,8 @@ export function AuthProvider({
           await sleep(250 * (attempt + 1));
           continue;
         }
-        const data = (await res.json()) as { user: AuthUser };
-        setUser(data.user);
+        const data = (await res.json()) as { user: AuthUser | null };
+        setUser(data.user ?? null);
         lastError = false;
         return;
       } catch {

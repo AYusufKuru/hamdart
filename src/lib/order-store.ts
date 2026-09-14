@@ -1,5 +1,5 @@
 import type { Order } from "@/data/mock";
-import { apiGet, apiPost } from "@/lib/api-client";
+import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
 
 export type CreateOrderInput = {
   customer: string;
@@ -28,6 +28,13 @@ export async function getOrder(id: string): Promise<Order | undefined> {
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
   return apiPost<Order>("/api/orders", input);
+}
+
+export async function updateOrderShipment(
+  id: string,
+  patch: { status?: Order["status"]; warehouse?: string }
+): Promise<Order> {
+  return apiPatch<Order>(`/api/orders/${id}`, patch);
 }
 
 export async function getOrderCustomers(): Promise<string[]> {

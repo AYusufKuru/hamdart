@@ -154,7 +154,7 @@ console.log("\n7) Kullanici yonetimi");
 let createdId = null;
 {
   const weak = await call("POST", "/api/users", {
-    username: "test.depo", name: "Test Depo", role: "WAREHOUSE", password: "zayif",
+    username: "test.depo", name: "Test Depo", role: "STOCK", password: "zayif",
   });
   check("zayif sifreyle kullanici olusturma -> 400", weak.status === 400, weak);
 
@@ -164,12 +164,12 @@ let createdId = null;
   check("gecersiz rol -> 400", badRole.status === 400, badRole);
 
   const badUsername = await call("POST", "/api/users", {
-    username: "Test Depo!", name: "Test Depo", role: "WAREHOUSE", password: "GucluSifre123",
+    username: "Test Depo!", name: "Test Depo", role: "STOCK", password: "GucluSifre123",
   });
   check("gecersiz kullanici adi -> 400", badUsername.status === 400, badUsername);
 
   const ok = await call("POST", "/api/users", {
-    username: "test.depo", name: "Test Depo Sorumlusu", role: "WAREHOUSE", password: "GucluSifre123",
+    username: "test.depo", name: "Test Depo Sorumlusu", role: "STOCK", password: "GucluSifre123",
   });
   check("gecerli kullanici olusturma -> 201", ok.status === 201, ok);
   check("yeni kullanici mustChangePassword = true", ok.payload?.mustChangePassword === true, ok.payload);
@@ -177,7 +177,7 @@ let createdId = null;
   createdId = ok.payload?.id ?? null;
 
   const dup = await call("POST", "/api/users", {
-    username: "test.depo", name: "Kopya", role: "VIEWER", password: "GucluSifre123",
+    username: "test.depo", name: "Kopya", role: "HR", password: "GucluSifre123",
   });
   check("ayni kullanici adi tekrar -> 400", dup.status === 400, dup);
 
@@ -190,7 +190,7 @@ console.log("\n8) Kendini kilitleme korumalari");
   const me = await call("GET", "/api/auth/me");
   const myId = me.payload?.user?.userId;
 
-  const selfRole = await call("PATCH", `/api/users/${myId}`, { role: "VIEWER" });
+  const selfRole = await call("PATCH", `/api/users/${myId}`, { role: "STOCK" });
   check("kendi rolunu degistirme -> 400", selfRole.status === 400, selfRole);
 
   const selfDeactivate = await call("PATCH", `/api/users/${myId}`, { active: false });
@@ -219,15 +219,18 @@ console.log("\n9) Yetkisiz rol yonetim API'sine erisemiyor");
   check("yeni kullanici sifresini degistirdi -> 200", changed.status === 200, changed);
 
   const users = await call("GET", "/api/users");
-  check("WAREHOUSE rolu /api/users -> 403", users.status === 403, users);
+  check("STOCK rolu /api/users -> 403", users.status === 403, users);
 
   const create = await call("POST", "/api/users", {
     username: "yetkisiz.deneme", name: "Yetkisiz", role: "ADMIN", password: "GucluSifre123",
   });
-  check("WAREHOUSE rolu kullanici olusturamaz -> 403", create.status === 403, create);
+  check("STOCK rolu kullanici olusturamaz -> 403", create.status === 403, create);
 
   const audit = await call("GET", "/api/audit");
-  check("WAREHOUSE rolu /api/audit -> 403", audit.status === 403, audit);
+  check("STOCK rolu /api/audit -> 403", audit.status === 403, audit);
+
+  const backups = await call("GET", "/api/backups");
+  check("STOCK rolu /api/backups -> 403", backups.status === 403, backups);
 
   jar = adminJar;
 }
@@ -248,8 +251,8 @@ console.log("\n10) Son aktif yonetici korumasi");
 
   const list = await call("GET", "/api/users");
   const rows = Array.isArray(list.payload) ? list.payload : [];
-  const admins = rows.filter((u) => u.role === "ADMIN" && u.active);
-  check("sistemde en az bir aktif yonetici kaldi", admins.length >= 1, admins.map((a) => a.username));
+  const admins = rows.filter((u) => u.role === "SYSTEM_ADMIN" && u.active);
+  check("sistemde en az bir aktif sistem yoneticisi kaldi", admins.length >= 1, admins.map((a) => a.username));
 }
 
 console.log("\n11) Temizlik");

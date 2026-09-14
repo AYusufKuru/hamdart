@@ -78,7 +78,7 @@ export function ChangePasswordForm({
       if (onSuccess) {
         onSuccess();
       } else {
-        router.push(user ? getFirstAllowedPath(user.role) : "/dashboard");
+        router.push(user ? getFirstAllowedPath(user.role) : "/");
         router.refresh();
       }
     } catch (err) {

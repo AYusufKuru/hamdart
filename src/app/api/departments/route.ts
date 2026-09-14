@@ -16,7 +16,7 @@ import {
 import { departmentCreateSchema } from "@/lib/server/schemas";
 
 export async function GET(req: NextRequest) {
-  const auth = await requireSession(req, "dashboard:read");
+  const auth = await requireSession(req);
   if (!auth.ok) return auth.response;
 
   try {

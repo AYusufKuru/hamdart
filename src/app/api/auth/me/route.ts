@@ -10,9 +10,12 @@ import { NO_STORE_HEADERS } from "@/lib/server/api-utils";
 export async function GET(req: NextRequest) {
   const session = await getLiveSessionFromRequest(req);
   if (!session) {
+    // Oturum yoksa 401 değil 200 + user:null. Bu uç "kimim?" sorusudur;
+    // giriş sayfası her açılışta burayı çağırır, 401 tarayıcı konsolunda
+    // hata gibi görünür.
     const response = NextResponse.json(
       { user: null },
-      { status: 401, headers: NO_STORE_HEADERS }
+      { status: 200, headers: NO_STORE_HEADERS }
     );
     applyCookie(response, clearSessionCookieOptions());
     return response;
@@ -24,7 +27,7 @@ export async function GET(req: NextRequest) {
         username: session.username,
         name: session.name,
         role: session.role,
-        roleLabel: ROLE_LABELS[session.role],
+        roleLabel: ROLE_LABELS[session.role] ?? session.role,
         mustChangePassword: session.mustChangePassword,
       },
     },

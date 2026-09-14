@@ -1,6 +1,8 @@
 import type {
   BudgetRow,
   Customer,
+  DeliveryNote,
+  DeliveryNoteLine,
   Invoice,
   InvoiceLine,
   LedgerEntry,
@@ -595,6 +597,184 @@ export async function dbDeleteInvoice(id: string, ctx: AuditCtx): Promise<void> 
     entityId: id,
     summary: `Fatura silindi: ${before.invoiceNo}`,
     before: toInvoice(before),
+    ipAddress: ctx.ip,
+  });
+}
+
+type DeliveryLineInput = {
+  description: string;
+  quantityLabel: string;
+  unit: string;
+};
+
+function toDeliveryNote(row: {
+  id: string;
+  noteNo: string;
+  party: string;
+  kind: string;
+  issueDate: string;
+  shipDate: string;
+  warehouse: string;
+  relatedOrderNo: string;
+  relatedInvoiceNo: string;
+  status: string;
+}): DeliveryNote {
+  return { ...row };
+}
+
+function normalizeDeliveryLines(
+  lines: DeliveryLineInput[]
+): Omit<DeliveryNoteLine, "id" | "noteNo">[] {
+  return lines.map((line) => ({
+    description: line.description,
+    quantityLabel: line.quantityLabel,
+    unit: line.unit,
+  }));
+}
+
+export async function dbCreateDeliveryNote(
+  input: {
+    noteNo: string;
+    party: string;
+    kind: string;
+    issueDate: string;
+    shipDate: string;
+    warehouse: string;
+    relatedOrderNo?: string;
+    relatedInvoiceNo?: string;
+    status: string;
+    lines?: DeliveryLineInput[];
+  },
+  ctx: AuditCtx
+): Promise<DeliveryNote> {
+  const noteNo = input.noteNo.trim();
+  const existing = await prisma.deliveryNote.findUnique({ where: { noteNo } });
+  if (existing) throw new FieldError("Bu irsaliye numarası zaten kayıtlı");
+  const lines = normalizeDeliveryLines(input.lines ?? []);
+  const row = await prisma.$transaction(async (tx) => {
+    const created = await tx.deliveryNote.create({
+      data: {
+        id: `dn-${Date.now()}`,
+        noteNo,
+        party: input.party,
+        kind: input.kind,
+        issueDate: input.issueDate,
+        shipDate: input.shipDate,
+        warehouse: input.warehouse,
+        relatedOrderNo: input.relatedOrderNo?.trim() ?? "",
+        relatedInvoiceNo: input.relatedInvoiceNo?.trim() ?? "",
+        status: input.status,
+      },
+    });
+    if (lines.length > 0) {
+      await tx.deliveryNoteLine.createMany({
+        data: lines.map((line, i) => ({
+          id: `dnl-${Date.now()}-${i}`,
+          noteNo,
+          ...line,
+        })),
+      });
+    }
+    return created;
+  });
+  const mapped = toDeliveryNote(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "CREATE",
+    entityType: "DeliveryNote",
+    entityId: mapped.id,
+    summary: `İrsaliye eklendi: ${mapped.noteNo}`,
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
+}
+
+export async function dbUpdateDeliveryNote(
+  id: string,
+  input: {
+    noteNo?: string;
+    party?: string;
+    kind?: string;
+    issueDate?: string;
+    shipDate?: string;
+    warehouse?: string;
+    relatedOrderNo?: string;
+    relatedInvoiceNo?: string;
+    status?: string;
+    lines?: DeliveryLineInput[];
+  },
+  ctx: AuditCtx
+): Promise<DeliveryNote> {
+  const before = await prisma.deliveryNote.findUnique({ where: { id } });
+  if (!before) throw new FieldError("İrsaliye bulunamadı");
+  const noteNo = input.noteNo?.trim() ?? before.noteNo;
+  if (noteNo !== before.noteNo) {
+    const clash = await prisma.deliveryNote.findUnique({ where: { noteNo } });
+    if (clash) throw new FieldError("Bu irsaliye numarası zaten kayıtlı");
+  }
+  const lines = input.lines ? normalizeDeliveryLines(input.lines) : undefined;
+  const row = await prisma.$transaction(async (tx) => {
+    const updated = await tx.deliveryNote.update({
+      where: { id },
+      data: {
+        noteNo,
+        ...(input.party !== undefined ? { party: input.party } : {}),
+        ...(input.kind !== undefined ? { kind: input.kind } : {}),
+        ...(input.issueDate !== undefined ? { issueDate: input.issueDate } : {}),
+        ...(input.shipDate !== undefined ? { shipDate: input.shipDate } : {}),
+        ...(input.warehouse !== undefined ? { warehouse: input.warehouse } : {}),
+        ...(input.relatedOrderNo !== undefined
+          ? { relatedOrderNo: input.relatedOrderNo.trim() }
+          : {}),
+        ...(input.relatedInvoiceNo !== undefined
+          ? { relatedInvoiceNo: input.relatedInvoiceNo.trim() }
+          : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+      },
+    });
+    if (lines) {
+      await tx.deliveryNoteLine.deleteMany({ where: { noteNo } });
+      if (lines.length > 0) {
+        await tx.deliveryNoteLine.createMany({
+          data: lines.map((line, i) => ({
+            id: `dnl-${Date.now()}-${i}`,
+            noteNo,
+            ...line,
+          })),
+        });
+      }
+    }
+    return updated;
+  });
+  const mapped = toDeliveryNote(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "DeliveryNote",
+    entityId: id,
+    summary: `İrsaliye güncellendi: ${mapped.noteNo}`,
+    before: toDeliveryNote(before),
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
+}
+
+export async function dbDeleteDeliveryNote(
+  id: string,
+  ctx: AuditCtx
+): Promise<void> {
+  const before = await prisma.deliveryNote.findUnique({ where: { id } });
+  if (!before) throw new FieldError("İrsaliye bulunamadı");
+  await prisma.deliveryNote.delete({ where: { id } });
+  await logAudit({
+    actor: ctx.actor,
+    action: "DELETE",
+    entityType: "DeliveryNote",
+    entityId: id,
+    summary: `İrsaliye silindi: ${before.noteNo}`,
+    before: toDeliveryNote(before),
     ipAddress: ctx.ip,
   });
 }

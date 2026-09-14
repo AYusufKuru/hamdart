@@ -273,6 +273,31 @@ model InvoiceLine {
   @@index([invoiceNo])
 }
 
+model DeliveryNote {
+  id               String             @id
+  noteNo           String             @unique
+  party            String
+  kind             String
+  issueDate        String
+  shipDate         String
+  warehouse        String
+  relatedOrderNo   String             @default("")
+  relatedInvoiceNo String             @default("")
+  status           String
+  lines            DeliveryNoteLine[]
+}
+
+model DeliveryNoteLine {
+  id            String       @id
+  noteNo        String
+  description   String
+  quantityLabel String
+  unit          String
+  note          DeliveryNote @relation(fields: [noteNo], references: [noteNo], onDelete: Cascade)
+
+  @@index([noteNo])
+}
+
 model LedgerEntry {
   id          String  @id
   date        String

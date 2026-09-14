@@ -1,7 +1,12 @@
 import type { NextRequest } from "next/server";
 import { flattenError, type ZodError, type ZodType } from "zod";
 import { getLiveSessionFromRequest } from "@/lib/auth/live-session";
-import { hasPermission, type Permission, type SessionUser } from "@/lib/auth/permissions";
+import {
+  hasPermission,
+  isPrivilegedRole,
+  type Permission,
+  type SessionUser,
+} from "@/lib/auth/permissions";
 import { ConflictError, FieldError } from "@/lib/server/fields";
 
 /** JSON gövde üst sınırı — aşırı büyük yükleri reddeder */
@@ -45,11 +50,11 @@ export async function requireSession(
   return { ok: true, session };
 }
 
-/** Departman yönetimi gibi işlemler yalnızca ADMIN rolüne açık. */
+/** Departman yönetimi: sistem yöneticisi veya patron (yönetici). */
 export async function requireAdmin(req: NextRequest): Promise<SessionCheck> {
   const auth = await requireSession(req);
   if (!auth.ok) return auth;
-  if (auth.session.role !== "ADMIN") {
+  if (!isPrivilegedRole(auth.session.role)) {
     return {
       ok: false,
       response: jsonError("Yalnızca yönetici erişebilir", 403),

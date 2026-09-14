@@ -193,6 +193,15 @@ export const orderCreateSchema = z.object({
   value: finiteNumber({ min: 0 }),
 });
 
+export const orderShipmentSchema = z
+  .object({
+    status: z.enum(ORDER_STATUSES, { error: "Geçersiz sipariş durumu" }).optional(),
+    warehouse: optionalText(80),
+  })
+  .refine((value) => value.status !== undefined || value.warehouse !== undefined, {
+    message: "Güncellenecek alan belirtilmedi",
+  });
+
 const recipeLineSchema = z.object({
   materialId: optionalText(MAX_ID).default(""),
   materialName: optionalText().default(""),
@@ -455,6 +464,44 @@ export const invoiceUpdateSchema = z.object({
   status: optionalText(40),
   lines: z
     .array(invoiceLineInputSchema)
+    .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
+    .optional(),
+});
+
+const deliveryNoteLineInputSchema = z.object({
+  description: text(),
+  quantityLabel: text(80),
+  unit: text(40),
+});
+
+export const deliveryNoteCreateSchema = z.object({
+  noteNo: text(80),
+  party: text(),
+  kind: text(40),
+  issueDate: isoDate,
+  shipDate: isoDate,
+  warehouse: text(80),
+  relatedOrderNo: optionalText(80),
+  relatedInvoiceNo: optionalText(80),
+  status: text(40),
+  lines: z
+    .array(deliveryNoteLineInputSchema)
+    .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
+    .optional(),
+});
+
+export const deliveryNoteUpdateSchema = z.object({
+  noteNo: optionalText(80),
+  party: optionalText(),
+  kind: optionalText(40),
+  issueDate: isoDate.optional(),
+  shipDate: isoDate.optional(),
+  warehouse: optionalText(80),
+  relatedOrderNo: optionalText(80),
+  relatedInvoiceNo: optionalText(80),
+  status: optionalText(40),
+  lines: z
+    .array(deliveryNoteLineInputSchema)
     .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
     .optional(),
 });

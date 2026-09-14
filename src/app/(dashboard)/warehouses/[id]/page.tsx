@@ -34,7 +34,11 @@ import {
 import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
 import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
-import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import {
+  canCreateStockEntry,
+  canCreateStockTransfer,
+} from "@/lib/auth/permissions";
 import { formatDate, formatNumber } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -58,6 +62,9 @@ export default function WarehouseDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const { user } = useAuth();
+  const canEnterStock = Boolean(user && canCreateStockEntry(user.role));
+  const canTransfer = Boolean(user && canCreateStockTransfer(user.role));
   const [warehouse, setWarehouse] = useState<Warehouse | null | undefined>(
     undefined
   );
@@ -137,25 +144,29 @@ export default function WarehouseDetailPage({
         title={warehouse.name}
         description={warehouse.description}
         actions={
-          <CanWrite resource="stock">
+          (canTransfer || canEnterStock) ? (
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => setTransferOpen(true)}
-              >
-                <ArrowRightLeft className="w-4 h-4 mr-2" />
-                Stok Aktar
-              </Button>
-              <Button
-                className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-                onClick={() => setFormOpen(true)}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Stok Girişi
-              </Button>
+              {canTransfer ? (
+                <Button
+                  variant="outline"
+                  className="rounded-2xl"
+                  onClick={() => setTransferOpen(true)}
+                >
+                  <ArrowRightLeft className="w-4 h-4 mr-2" />
+                  {user?.role === "PRODUCTION" ? "Depodan Talep" : "Stok Aktar"}
+                </Button>
+              ) : null}
+              {canEnterStock ? (
+                <Button
+                  className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                  onClick={() => setFormOpen(true)}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Stok Girişi
+                </Button>
+              ) : null}
             </div>
-          </CanWrite>
+          ) : null
         }
       />
 

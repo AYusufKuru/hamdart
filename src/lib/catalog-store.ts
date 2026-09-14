@@ -5,6 +5,8 @@ import type {
   FinishedProduct,
   Invoice,
   InvoiceLine,
+  DeliveryNote,
+  DeliveryNoteLine,
   LedgerEntry,
   BudgetRow,
 } from "@/data/catalog";
@@ -34,6 +36,14 @@ export async function fetchInvoices(): Promise<Invoice[]> {
 
 export async function fetchInvoiceLines(): Promise<InvoiceLine[]> {
   return apiGet<InvoiceLine[]>("/api/catalog/invoice-lines");
+}
+
+export async function fetchDeliveryNotes(): Promise<DeliveryNote[]> {
+  return apiGet<DeliveryNote[]>("/api/catalog/delivery-notes");
+}
+
+export async function fetchDeliveryNoteLines(): Promise<DeliveryNoteLine[]> {
+  return apiGet<DeliveryNoteLine[]>("/api/catalog/delivery-note-lines");
 }
 
 export async function fetchLedger(): Promise<LedgerEntry[]> {

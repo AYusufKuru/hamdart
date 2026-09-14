@@ -60,6 +60,27 @@ export interface InvoiceLine {
   lineTotal: number;
 }
 
+export interface DeliveryNote {
+  id: string;
+  noteNo: string;
+  party: string;
+  kind: string;
+  issueDate: string;
+  shipDate: string;
+  warehouse: string;
+  relatedOrderNo: string;
+  relatedInvoiceNo: string;
+  status: string;
+}
+
+export interface DeliveryNoteLine {
+  id: string;
+  noteNo: string;
+  description: string;
+  quantityLabel: string;
+  unit: string;
+}
+
 export interface LedgerEntry {
   id: string;
   date: string;

@@ -16,12 +16,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { type StockItem } from "@/data/mock";
-import { warehouseTypeLabels, type Warehouse } from "@/data/warehouses";
+import { type Warehouse } from "@/data/warehouses";
 import { getAllWarehouseStockItems, toDisplayStockItems } from "@/lib/stock-store";
 import { getWarehouses } from "@/lib/warehouse-store";
 import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
+import { ifAllowed } from "@/lib/api-client";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
-import { CanWrite } from "@/components/auth/can-write";
+import { useAuth } from "@/lib/auth/auth-context";
+import { canCreateStockEntry } from "@/lib/auth/permissions";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertTriangle, Filter, Package, Plus, Search, Snowflake } from "lucide-react";
@@ -35,6 +37,8 @@ const statusMap = {
 
 export default function StockPage() {
   const router = useRouter();
+  const { user, canWrite } = useAuth();
+  const canEnterStock = Boolean(user && canCreateStockEntry(user.role));
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "alert">("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
@@ -43,7 +47,11 @@ export default function StockPage() {
   const [formOpen, setFormOpen] = useState(false);
 
   const refresh = async () => {
-    await syncReplenishmentOrders();
+    await ifAllowed(
+      canWrite("raw_material_orders"),
+      () => syncReplenishmentOrders(),
+      []
+    );
     const [items, wh] = await Promise.all([
       getAllWarehouseStockItems(),
       getWarehouses(),
@@ -80,7 +88,7 @@ export default function StockPage() {
         title="Stok Durumu"
         description="Paketleme, üretim malzemeleri ve laboratuvar depolarındaki stoklar. Lab ürünleri ana depodan aktarılır; referans standartlar doğrudan lab girişlidir."
         actions={
-          <CanWrite resource="stock">
+          canEnterStock ? (
             <Button
               className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
               onClick={() => setFormOpen(true)}
@@ -88,7 +96,7 @@ export default function StockPage() {
               <Plus className="w-4 h-4 mr-2" />
               Stok Girişi
             </Button>
-          </CanWrite>
+          ) : null
         }
       />
 
@@ -130,7 +138,7 @@ export default function StockPage() {
               <TabsTrigger value="all">Tüm Depolar</TabsTrigger>
               {warehouses.map((wh) => (
                 <TabsTrigger key={wh.id} value={wh.id}>
-                  {warehouseTypeLabels[wh.type]}
+                  {wh.name}
                 </TabsTrigger>
               ))}
             </TabsList>

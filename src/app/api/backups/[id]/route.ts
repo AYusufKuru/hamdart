@@ -12,7 +12,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireSession(req, "admin:write");
+  const auth = await requireSession(req, "backups:write");
   if (!auth.ok) return auth.response;
   try {
     const { id } = await params;
@@ -29,7 +29,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireSession(req, "admin:write");
+  const auth = await requireSession(req, "backups:write");
   if (!auth.ok) return auth.response;
   try {
     const { id } = await params;

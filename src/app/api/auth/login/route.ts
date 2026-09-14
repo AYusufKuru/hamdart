@@ -41,7 +41,10 @@ export async function POST(req: NextRequest) {
 
     const user = result.user;
     if (!ROLES.includes(user.role as Role)) {
-      return jsonError("Kullanıcı rolü geçersiz", 500);
+      return jsonError(
+        "Hesap rolü geçersiz. Sistem yöneticisine başvurun.",
+        403
+      );
     }
 
     const token = await createSessionToken({

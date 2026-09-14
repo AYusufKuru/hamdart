@@ -12,7 +12,7 @@ export default function DashboardNotFound() {
         className="mt-8 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
         asChild
       >
-        <Link href="/dashboard">Dashboard’a dön</Link>
+        <Link href="/">Ana sayfaya dön</Link>
       </Button>
     </div>
   );

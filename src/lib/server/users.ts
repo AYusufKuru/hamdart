@@ -1,5 +1,12 @@
 import { prisma } from "@/lib/db";
-import { ROLES, type Role, type SessionUser } from "@/lib/auth/permissions";
+import {
+  ROLES,
+  canAssignRole,
+  canManageUser,
+  isSystemAdmin,
+  type Role,
+  type SessionUser,
+} from "@/lib/auth/permissions";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
 import { invalidateSessionCache } from "@/lib/auth/live-session";
 import { logAudit } from "@/lib/server/audit";
@@ -91,30 +98,39 @@ function normalizeRole(raw: unknown): Role {
   return raw as Role;
 }
 
-/** Sistemde en az bir aktif yönetici kalmasını garanti eder */
-async function assertNotLastActiveAdmin(
+function assertCanManageTarget(actor: SessionUser, targetRole: string): void {
+  if (!canManageUser(actor.role, targetRole)) {
+    throw new UserInputError("Bu kullanıcı üzerinde işlem yapamazsınız");
+  }
+}
+
+/** Sistemde en az bir aktif sistem yöneticisi kalmasını garanti eder */
+async function assertNotLastActiveSystemAdmin(
   userId: string,
   action: string
 ): Promise<void> {
   const target = await prisma.user.findUnique({ where: { id: userId } });
-  if (!target || target.role !== "ADMIN" || !target.active) return;
+  if (!target || target.role !== "SYSTEM_ADMIN" || !target.active) return;
 
-  const activeAdminCount = await prisma.user.count({
-    where: { role: "ADMIN", active: true },
+  const activeCount = await prisma.user.count({
+    where: { role: "SYSTEM_ADMIN", active: true },
   });
-  if (activeAdminCount <= 1) {
+  if (activeCount <= 1) {
     throw new UserInputError(
-      `Sistemdeki tek aktif yönetici ${action}. Önce başka bir yönetici hesabı oluşturun.`
+      `Sistemdeki tek aktif sistem yöneticisi ${action}. Önce başka bir sistem yöneticisi hesabı oluşturun.`
     );
   }
 }
 
-export async function listUsers(): Promise<UserRow[]> {
+export async function listUsers(actor: SessionUser): Promise<UserRow[]> {
   const rows = await prisma.user.findMany({
     select: SAFE_SELECT,
     orderBy: [{ active: "desc" }, { username: "asc" }],
   });
-  return rows.map(toRow);
+  const visible = isSystemAdmin(actor.role)
+    ? rows
+    : rows.filter((u) => u.role !== "SYSTEM_ADMIN");
+  return visible.map(toRow);
 }
 
 export async function createUser(
@@ -127,6 +143,9 @@ export async function createUser(
   const username = normalizeUsername(body.username);
   const name = normalizeName(body.name);
   const role = normalizeRole(body.role);
+  if (!canAssignRole(actor.role, role)) {
+    throw new UserInputError("Bu rolü atama yetkiniz yok");
+  }
   const password = typeof body.password === "string" ? body.password : "";
 
   const problem = validatePassword(password, { username, name });
@@ -177,6 +196,7 @@ export async function updateUser(
   if (!before) {
     throw new UserInputError("Kullanıcı bulunamadı");
   }
+  assertCanManageTarget(actor, before.role);
 
   const data: {
     name?: string;
@@ -194,12 +214,15 @@ export async function updateUser(
 
   if (body.role !== undefined) {
     const role = normalizeRole(body.role);
+    if (!canAssignRole(actor.role, role)) {
+      throw new UserInputError("Bu rolü atama yetkiniz yok");
+    }
     if (role !== before.role) {
       if (userId === actor.userId) {
         throw new UserInputError("Kendi rolünüzü değiştiremezsiniz");
       }
-      if (before.role === "ADMIN") {
-        await assertNotLastActiveAdmin(userId, "rolü değiştirilemez");
+      if (before.role === "SYSTEM_ADMIN") {
+        await assertNotLastActiveSystemAdmin(userId, "rolü değiştirilemez");
       }
     }
     data.role = role;
@@ -213,7 +236,7 @@ export async function updateUser(
       if (userId === actor.userId) {
         throw new UserInputError("Kendi hesabınızı kapatamazsınız");
       }
-      await assertNotLastActiveAdmin(userId, "kapatılamaz");
+      await assertNotLastActiveSystemAdmin(userId, "kapatılamaz");
     }
     data.active = body.active;
   }
@@ -299,7 +322,8 @@ export async function deleteUser(
   if (userId === actor.userId) {
     throw new UserInputError("Kendi hesabınızı silemezsiniz");
   }
-  await assertNotLastActiveAdmin(userId, "silinemez");
+  assertCanManageTarget(actor, target.role);
+  await assertNotLastActiveSystemAdmin(userId, "silinemez");
 
   await prisma.user.delete({ where: { id: userId } });
   invalidateSessionCache(userId);

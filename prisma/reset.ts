@@ -21,6 +21,8 @@ const DELETION_ORDER = [
   "user",
   "invoiceLine",
   "invoice",
+  "deliveryNoteLine",
+  "deliveryNote",
   "ledgerEntry",
   "budgetRow",
   "labSample",

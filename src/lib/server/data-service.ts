@@ -10,6 +10,8 @@ import type {
   FinishedProduct,
   Invoice,
   InvoiceLine,
+  DeliveryNote,
+  DeliveryNoteLine,
   LedgerEntry,
   BudgetRow,
 } from "@/data/catalog";
@@ -306,6 +308,34 @@ export async function dbCreateOrder(
     ipAddress: ctx.ip,
   });
   return order;
+}
+
+export async function dbUpdateOrderShipment(
+  id: string,
+  input: { status?: Order["status"]; warehouse?: string },
+  ctx: AuditCtx
+): Promise<Order> {
+  const before = await dbGetOrder(id);
+  if (!before) throw new Error("Sipariş bulunamadı");
+  const data: { status?: Order["status"]; warehouse?: string } = {};
+  if (input.status && input.status !== before.status) data.status = input.status;
+  if (input.warehouse && input.warehouse !== before.warehouse) {
+    data.warehouse = input.warehouse;
+  }
+  if (Object.keys(data).length === 0) return before;
+  const row = await prisma.order.update({ where: { id }, data });
+  const after = toOrder(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "Order",
+    entityId: id,
+    summary: `Sevkiyat güncellendi: ${after.orderNo}`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
 }
 
 // ─── Recipes ────────────────────────────────────────────────────────────────
@@ -1580,6 +1610,14 @@ export async function dbGetInvoiceLines(): Promise<InvoiceLine[]> {
     unitPrice: asNumber(row.unitPrice),
     lineTotal: asNumber(row.lineTotal),
   }));
+}
+
+export async function dbGetDeliveryNotes(): Promise<DeliveryNote[]> {
+  return prisma.deliveryNote.findMany();
+}
+
+export async function dbGetDeliveryNoteLines(): Promise<DeliveryNoteLine[]> {
+  return prisma.deliveryNoteLine.findMany();
 }
 
 export async function dbGetLedger(): Promise<LedgerEntry[]> {

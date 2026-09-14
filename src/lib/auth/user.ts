@@ -21,7 +21,7 @@ export function toAuthUser(session: {
     username: session.username,
     name: session.name,
     role: session.role,
-    roleLabel: ROLE_LABELS[session.role],
+    roleLabel: ROLE_LABELS[session.role] ?? session.role,
     mustChangePassword: session.mustChangePassword,
   };
 }

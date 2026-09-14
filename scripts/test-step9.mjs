@@ -5,7 +5,7 @@
 const BASE = process.argv[2] ?? "http://localhost:3000";
 const ADMIN_PASSWORD = process.env.ADMIN_TEST_PASSWORD ?? "YeniGuclu1Sifre";
 const ADMIN_INITIAL = process.env.ADMIN_INITIAL_PASSWORD ?? "YerelGelistirme1";
-const VIEWER_PASSWORD = process.env.DEV_TEST_PASSWORD ?? "GelistirmeTest1";
+const STOCK_PASSWORD = process.env.DEV_TEST_PASSWORD ?? "GelistirmeTest1";
 
 let jar = new Map();
 let pass = 0;
@@ -99,16 +99,13 @@ console.log("1) Oturumsuz / yetkisiz");
   );
 }
 
-await login("dev-izleyici", VIEWER_PASSWORD);
+await login("dev-stok", STOCK_PASSWORD);
 {
-  const denied = await call("POST", "/api/catalog/customers", { name: "Izleyici" });
-  check("izleyici POST customers -> 403", denied.status === 403, denied);
+  const denied = await call("POST", "/api/catalog/customers", { name: "Stok" });
+  check("stok POST customers -> 403", denied.status === 403, denied);
 
   const personnel = await call("GET", "/api/catalog/personnel");
-  const first = personnel.payload?.[0];
-  check("izleyici personel okur", personnel.status === 200, personnel.status);
-  check("maas masked null", !first || first.salary === null, first?.salary);
-  check("iban masked null", !first || first.iban === null, first?.iban);
+  check("stok personel okuyamaz -> 403", personnel.status === 403, personnel.status);
 }
 
 await login("admin", ADMIN_PASSWORD, ADMIN_INITIAL);

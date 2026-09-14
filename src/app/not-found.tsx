@@ -9,13 +9,13 @@ export default function NotFound() {
       </p>
       <h1 className="text-3xl font-black tracking-tight">Sayfa bulunamadı</h1>
       <p className="text-muted-foreground mt-2 max-w-md">
-        Bu adres sistemde yok. Dashboard’dan devam edebilirsiniz.
+        Bu adres sistemde yok. Ana sayfadan devam edebilirsiniz.
       </p>
       <Button
         className="mt-8 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
         asChild
       >
-        <Link href="/dashboard">Dashboard’a dön</Link>
+        <Link href="/">Ana sayfaya dön</Link>
       </Button>
     </div>
   );

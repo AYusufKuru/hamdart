@@ -13,7 +13,7 @@ import { csrfHeader } from "@/lib/auth/csrf-client";
 import { toast } from "sonner";
 
 function nextPathFromLocation(role?: AuthUser["role"]): string {
-  const fallback = role ? getFirstAllowedPath(role) : "/dashboard";
+  const fallback = role ? getFirstAllowedPath(role) : "/";
   if (typeof window === "undefined") return fallback;
   const next = new URLSearchParams(window.location.search).get("next");
   if (next === "/" || next === "/dashboard") return fallback;
@@ -67,7 +67,7 @@ export default function LoginPage() {
           username: payload.user.username,
           name: payload.user.name,
           role: payload.user.role,
-          roleLabel: ROLE_LABELS[payload.user.role],
+          roleLabel: ROLE_LABELS[payload.user.role] ?? payload.user.role,
           mustChangePassword: Boolean(payload.user.mustChangePassword),
         });
       }
