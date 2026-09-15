@@ -47,7 +47,7 @@ import {
   validatePassword,
 } from "@/lib/auth/password-rules";
 import { capitalizeWordsTr, formatDate } from "@/lib/utils";
-import { KeyRound, Trash2, UserPlus, Users } from "lucide-react";
+import { KeyRound, Pencil, Trash2, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 
 const EMPTY_FORM = {
@@ -70,6 +70,9 @@ export function UsersPanel() {
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordAgain, setNewPasswordAgain] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [editTarget, setEditTarget] = useState<UserRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -151,6 +154,35 @@ export function UsersPanel() {
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Güncellenemedi");
+    }
+  }
+
+  function openEditDialog(u: UserRow) {
+    if (!currentUser || !canManageUser(currentUser.role, u.role)) {
+      toast.error("Bu kullanıcıyı düzenleyemezsiniz");
+      return;
+    }
+    setEditTarget(u);
+    setEditName(u.name);
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editTarget) return;
+    if (!currentUser || !canManageUser(currentUser.role, editTarget.role)) {
+      toast.error("Bu kullanıcıyı düzenleyemezsiniz");
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateUser(editTarget.id, { name: capitalizeWordsTr(editName) });
+      toast.success(`${editTarget.username} güncellendi`);
+      setEditTarget(null);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Güncellenemedi");
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -364,7 +396,7 @@ export function UsersPanel() {
                     currentUser && canManageUser(currentUser.role, u.role)
                   );
                   const canEditRole = canManage && canActOnUser && !isSelf;
-                  const canResetPassword = canManage && canActOnUser;
+                  const canEditUser = canManage && canActOnUser;
                   const canDisableOrDelete =
                     canManage && canActOnUser && !isSelf;
                   return (
@@ -417,9 +449,21 @@ export function UsersPanel() {
                         {formatDate(u.createdAt.slice(0, 10))}
                       </TableCell>
                       <TableCell className="max-w-none overflow-visible text-right whitespace-nowrap">
-                        {canResetPassword || canDisableOrDelete ? (
+                        {canEditUser || canDisableOrDelete ? (
                           <div className="flex justify-end gap-2">
-                            {canResetPassword ? (
+                            {canEditUser ? (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg"
+                                onClick={() => openEditDialog(u)}
+                              >
+                                <Pencil className="w-3 h-3 mr-1" />
+                                Düzenle
+                              </Button>
+                            ) : null}
+                            {canEditUser ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -474,6 +518,60 @@ export function UsersPanel() {
           )}
         </CardContent>
       </Card>
+
+      <FormDialog
+        open={Boolean(editTarget)}
+        onOpenChange={(open) => {
+          if (!open && !editSaving) setEditTarget(null);
+        }}
+        icon={Pencil}
+        title="Kullanıcıyı düzenle"
+        description={
+          editTarget
+            ? `${editTarget.username} için görünen adı güncelleyin. Kullanıcı adı giriş içindir, değişmez.`
+            : undefined
+        }
+      >
+        <form onSubmit={(e) => void handleEdit(e)}>
+          <FormSheetBody>
+            <FormField label="Kullanıcı adı">
+              <Input
+                value={editTarget?.username ?? ""}
+                className="rounded-xl"
+                disabled
+              />
+            </FormField>
+            <FormField label="Ad soyad" htmlFor="edit-user-name" required>
+              <Input
+                id="edit-user-name"
+                value={editName}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const trailing = /\s+$/.test(value);
+                  const name = capitalizeWordsTr(value);
+                  setEditName(trailing && name ? `${name} ` : name);
+                }}
+                className="rounded-xl"
+                required
+              />
+            </FormField>
+          </FormSheetBody>
+          <FormSheetFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              disabled={editSaving}
+              onClick={() => setEditTarget(null)}
+            >
+              Vazgeç
+            </Button>
+            <Button type="submit" className="rounded-xl" disabled={editSaving}>
+              {editSaving ? "Kaydediliyor..." : "Kaydet"}
+            </Button>
+          </FormSheetFooter>
+        </form>
+      </FormDialog>
 
       <FormDialog
         open={Boolean(passwordTarget)}
