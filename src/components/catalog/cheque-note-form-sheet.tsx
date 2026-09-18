@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, ScrollText, Trash2 } from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,6 +21,13 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { SearchableSelect } from "@/components/shared/searchable-select";
+import {
+  ChequeInstallmentCountField,
+  ChequeInstallmentStep,
+  emptyChequePlan,
+  fillChequePlanStep,
+  type ChequePlanDraft,
+} from "@/components/catalog/cheque-plan-fields";
 import type { ChequeDirection, ChequeKind, ChequeNote, Customer, Supplier } from "@/data/catalog";
 import {
   createChequeNote,
@@ -29,15 +36,16 @@ import {
   updateChequeNote,
 } from "@/lib/catalog-store";
 import {
-  buildChequeInstallments,
   CHEQUE_DIRECTIONS,
   CHEQUE_KINDS,
+  CHEQUE_STATUSES,
+  normalizeChequeStatus,
+  parseChequeMoney,
 } from "@/lib/cheque-notes";
-import { formatNumber, plusMonthsIso, todayIso } from "@/lib/utils";
-
-type InstallmentDraft = { dueDate: string; amount: string; serialNo: string };
+import { formatNumber, todayIso } from "@/lib/utils";
 
 function emptyForm(row?: ChequeNote | null) {
+  const many = (row?.installments.length ?? 0) > 1;
   return {
     kind: (row?.kind ?? "cek") as ChequeKind,
     direction: (row?.direction ?? "received") as ChequeDirection,
@@ -46,15 +54,14 @@ function emptyForm(row?: ChequeNote | null) {
     bankName: row?.bankName ?? "",
     serialNo: row?.serialNo ?? "",
     notes: row?.notes ?? "",
-    count: row?.installments.length ? String(row.installments.length) : "4",
-    amountEach: row?.installments[0] ? String(row.installments[0].amount) : "100000",
-    firstDue: row?.installments[0]?.dueDate || plusMonthsIso(todayIso(), 1),
-    intervalMonths: "1",
-    installments: (row?.installments ?? []).map((item) => ({
-      dueDate: item.dueDate,
-      amount: String(item.amount),
-      serialNo: item.serialNo,
-    })) as InstallmentDraft[],
+    amount: row ? String(row.totalAmount) : "",
+    installmentCount: many ? String(row?.installments.length) : "none",
+    installments: many
+      ? (row?.installments ?? []).map((item) => ({
+          dueDate: item.dueDate,
+          amount: String(item.amount),
+        }))
+      : ([] as ChequePlanDraft[]),
   };
 }
 
@@ -70,6 +77,7 @@ export function ChequeNoteFormSheet({
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(emptyForm());
+  const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -77,6 +85,8 @@ export function ChequeNoteFormSheet({
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm(editing ?? null));
+    setStep(0);
+    setSaving(false);
     void Promise.all([
       fetchCustomers().catch(() => [] as Customer[]),
       fetchSuppliers().catch(() => [] as Supplier[]),
@@ -95,48 +105,51 @@ export function ChequeNoteFormSheet({
       .map((name) => ({ value: name, label: name }));
   }, [customers, suppliers, form.direction, form.party]);
 
-  const previewTotal = form.installments.reduce((sum, row) => sum + (Number(row.amount.replace(",", ".")) || 0), 0);
+  const totalAmount = parseChequeMoney(form.amount);
+  const installmentCount =
+    form.installmentCount === "none" ? 0 : Number(form.installmentCount) || 0;
+  const inWizard = installmentCount >= 2 && step > 0;
+  const wizardIndex = Math.max(0, step - 1);
+  const kindLabel = form.kind === "senet" ? "Senet" : "Çek";
 
-  function generate() {
-    const count = Number(form.count);
-    const amount = Number(String(form.amountEach).replace(",", "."));
-    const interval = Number(form.intervalMonths);
-    if (!(count >= 1) || !(amount > 0) || !(interval >= 1)) {
-      toast.error("Taksit sayısı, tutar ve ay aralığı girin");
-      return;
-    }
-    const rows = buildChequeInstallments({
-      firstDue: form.firstDue,
-      count,
-      amount,
-      intervalMonths: interval,
-      serialStart: form.serialNo,
-    });
+  function setInstallmentCount(value: string) {
+    const count = value === "none" ? 0 : Number(value) || 0;
     setForm((f) => ({
       ...f,
-      installments: rows.map((row) => ({
-        dueDate: row.dueDate,
-        amount: String(row.amount),
-        serialNo: row.serialNo,
-      })),
+      installmentCount: value,
+      installments: count >= 2 ? emptyChequePlan(count) : [],
     }));
+    setStep(0);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!form.party.trim()) {
-      toast.error("Cari seçin");
-      return;
-    }
-    const installments = form.installments
+  function currentInstallments() {
+    return form.installments
       .map((row) => ({
         dueDate: row.dueDate,
-        amount: Number(String(row.amount).replace(",", ".")),
-        serialNo: row.serialNo.trim(),
+        amount: parseChequeMoney(row.amount),
+        serialNo: form.serialNo.trim(),
       }))
       .filter((row) => row.dueDate && row.amount > 0);
+  }
+
+  async function save(installments: { dueDate: string; amount: number; serialNo: string }[]) {
+    if (!form.party.trim()) {
+      toast.error("Firma seçin");
+      return;
+    }
+    if (!(totalAmount > 0)) {
+      toast.error(`${kindLabel} tutarı girin`);
+      return;
+    }
     if (installments.length === 0) {
-      toast.error("En az bir vade girin veya planı oluşturun");
+      toast.error("Vade bilgisi eksik");
+      return;
+    }
+    const sum = installments.reduce((s, row) => s + row.amount, 0);
+    if (installmentCount >= 2 && Math.abs(sum - totalAmount) > 0.05) {
+      toast.error(
+        `Taksitler ${formatNumber(sum)} ₺, ${kindLabel.toLocaleLowerCase("tr")} tutarı ${formatNumber(totalAmount)} ₺ olmalı`
+      );
       return;
     }
     setSaving(true);
@@ -167,249 +180,309 @@ export function ChequeNoteFormSheet({
     }
   }
 
+  function handleHeaderSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.party.trim()) {
+      toast.error("Firma seçin");
+      return;
+    }
+    if (!(totalAmount > 0)) {
+      toast.error(`${kindLabel} tutarı girin`);
+      return;
+    }
+    if (locked) {
+      void save(currentInstallments());
+      return;
+    }
+    if (installmentCount < 2) {
+      void save([
+        {
+          dueDate: form.issueDate,
+          amount: totalAmount,
+          serialNo: form.serialNo.trim(),
+        },
+      ]);
+      return;
+    }
+    setForm((f) => ({
+      ...f,
+      installments: fillChequePlanStep(
+        f.installments.length === installmentCount ? f.installments : emptyChequePlan(installmentCount),
+        0,
+        totalAmount,
+        f.issueDate
+      ),
+    }));
+    setStep(1);
+  }
+
+  function handleStepNext() {
+    const row = form.installments[wizardIndex];
+    if (!row?.dueDate || !(parseChequeMoney(row.amount) > 0)) {
+      toast.error("Taksit tutarı ve vade tarihi girin");
+      return;
+    }
+    if (wizardIndex + 1 >= installmentCount) {
+      void save(currentInstallments());
+      return;
+    }
+    setForm((f) => ({
+      ...f,
+      installments: fillChequePlanStep(f.installments, wizardIndex + 1, totalAmount, f.issueDate),
+    }));
+    setStep(wizardIndex + 2);
+  }
+
   return (
     <FormDialog
       open={open}
       onOpenChange={onOpenChange}
       icon={ScrollText}
-      title={editing ? "Çek / senet düzenle" : "Yeni çek / senet"}
-      description="Örnek: 4 ay, ayda 100.000 ₺. Vadeler oluşturulur, fatura ödemesinde seçilir."
+      title={
+        inWizard
+          ? `${kindLabel} taksiti ${wizardIndex + 1} / ${installmentCount}`
+          : editing
+            ? "Çek / senet düzenle"
+            : `Yeni ${kindLabel.toLocaleLowerCase("tr")}`
+      }
       className="max-w-2xl"
+    >
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleHeaderSubmit}>
+        <FormSheetBody className="space-y-5">
+          {inWizard ? (
+            <ChequeInstallmentStep
+              index={wizardIndex}
+              count={installmentCount}
+              totalAmount={totalAmount}
+              previousAmounts={form.installments
+                .slice(0, wizardIndex)
+                .map((row) => parseChequeMoney(row.amount))}
+              row={form.installments[wizardIndex] ?? { dueDate: "", amount: "" }}
+              locked={locked}
+              onChange={(row) =>
+                setForm((f) => ({
+                  ...f,
+                  installments: f.installments.map((item, i) => (i === wizardIndex ? row : item)),
+                }))
+              }
+            />
+          ) : (
+            <>
+              <FormSection title="Belge">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Tür" required>
+                    <Select
+                      value={form.kind}
+                      onValueChange={(kind) => setForm((f) => ({ ...f, kind: kind as ChequeKind }))}
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHEQUE_KINDS.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                  <FormField label="Yön" required>
+                    <Select
+                      value={form.direction}
+                      onValueChange={(direction) =>
+                        setForm((f) => ({ ...f, direction: direction as ChequeDirection, party: "" }))
+                      }
+                    >
+                      <SelectTrigger className="bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CHEQUE_DIRECTIONS.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormField>
+                </div>
+                <FormField label="Firma" required>
+                  <SearchableSelect
+                    value={form.party}
+                    onValueChange={(party) => setForm((f) => ({ ...f, party }))}
+                    options={partyOptions}
+                    placeholder={form.direction === "given" ? "Tedarikçi" : "Müşteri"}
+                    allowCustom
+                  />
+                </FormField>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label="Banka" htmlFor="chn-bank" optional>
+                    <Input
+                      id="chn-bank"
+                      className="bg-white"
+                      value={form.bankName}
+                      onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
+                    />
+                  </FormField>
+                  <FormField
+                    label={form.kind === "senet" ? "Senet no" : "Çek no"}
+                    htmlFor="chn-serial"
+                    optional
+                  >
+                    <Input
+                      id="chn-serial"
+                      className="bg-white"
+                      value={form.serialNo}
+                      onChange={(e) => setForm((f) => ({ ...f, serialNo: e.target.value }))}
+                    />
+                  </FormField>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <FormField label={`${kindLabel} tutarı`} htmlFor="chn-amt" required>
+                    <Input
+                      id="chn-amt"
+                      type="text"
+                      inputMode="decimal"
+                      className="bg-white"
+                      disabled={locked}
+                      value={form.amount}
+                      onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                      placeholder="0"
+                    />
+                  </FormField>
+                  <FormField label="Düzenleme tarihi" htmlFor="chn-issue" required>
+                    <Input
+                      id="chn-issue"
+                      type="date"
+                      className="bg-white"
+                      value={form.issueDate}
+                      onChange={(e) => setForm((f) => ({ ...f, issueDate: e.target.value }))}
+                    />
+                  </FormField>
+                </div>
+                <ChequeInstallmentCountField
+                  value={form.installmentCount}
+                  onChange={setInstallmentCount}
+                  disabled={locked}
+                />
+              </FormSection>
+              <FormSection title="Not">
+                <FormField label="Açıklama" htmlFor="chn-note" optional>
+                  <Textarea
+                    id="chn-note"
+                    className="bg-white"
+                    value={form.notes}
+                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  />
+                </FormField>
+              </FormSection>
+              {locked ? (
+                <p className="text-xs text-muted-foreground">
+                  Faturaya bağlanmış vadeler kilitlidir.
+                </p>
+              ) : null}
+            </>
+          )}
+        </FormSheetBody>
+        <FormSheetFooter>
+          {inWizard ? (
+            <>
+              <Button type="button" variant="outline" onClick={() => setStep(step - 1)}>
+                Geri
+              </Button>
+              <Button type="button" disabled={saving} onClick={handleStepNext}>
+                {saving
+                  ? "Kaydediliyor…"
+                  : wizardIndex + 1 >= installmentCount
+                    ? "Kaydet"
+                    : "Sonraki taksit"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Vazgeç
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving
+                  ? "Kaydediliyor…"
+                  : installmentCount >= 2
+                    ? "Taksitlere geç"
+                    : "Kaydet"}
+              </Button>
+            </>
+          )}
+        </FormSheetFooter>
+      </form>
+    </FormDialog>
+  );
+}
+
+export function ChequeStatusDialog({
+  open,
+  onOpenChange,
+  note,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  note: ChequeNote | null;
+  onSaved?: () => void;
+}) {
+  const [status, setStatus] = useState<(typeof CHEQUE_STATUSES)[number]>("Bekliyor");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open || !note) return;
+    setStatus(normalizeChequeStatus(note.status));
+    setSaving(false);
+  }, [open, note]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!note) return;
+    setSaving(true);
+    try {
+      await updateChequeNote(note.id, { status });
+      toast.success("Durum güncellendi");
+      onOpenChange(false);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Durum güncellenemedi");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={ScrollText}
+      title="Çek / senet durumu"
+      description={note ? `${note.docNo} · ${note.party}` : undefined}
+      className="max-w-md"
     >
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
         <FormSheetBody className="space-y-5">
-          <FormSection title="Belge">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <FormField label="Tür" required>
-                <Select
-                  value={form.kind}
-                  onValueChange={(kind) => setForm((f) => ({ ...f, kind: kind as ChequeKind }))}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHEQUE_KINDS.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-              <FormField label="Yön" required>
-                <Select
-                  value={form.direction}
-                  onValueChange={(direction) =>
-                    setForm((f) => ({ ...f, direction: direction as ChequeDirection, party: "" }))
-                  }
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHEQUE_DIRECTIONS.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-            </div>
-            <FormField label="Cari" required>
-              <SearchableSelect
-                value={form.party}
-                onValueChange={(party) => setForm((f) => ({ ...f, party }))}
-                options={partyOptions}
-                placeholder={form.direction === "given" ? "Tedarikçi" : "Müşteri"}
-                allowCustom
-              />
-            </FormField>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <FormField label="Düzenleme tarihi" htmlFor="chn-issue" required>
-                <Input
-                  id="chn-issue"
-                  type="date"
-                  className="bg-white"
-                  value={form.issueDate}
-                  onChange={(e) => setForm((f) => ({ ...f, issueDate: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Banka" htmlFor="chn-bank" optional>
-                <Input
-                  id="chn-bank"
-                  className="bg-white"
-                  value={form.bankName}
-                  onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
-                />
-              </FormField>
-            </div>
-            <FormField label="İlk çek / senet no" htmlFor="chn-serial" optional>
-              <Input
-                id="chn-serial"
-                className="bg-white"
-                value={form.serialNo}
-                onChange={(e) => setForm((f) => ({ ...f, serialNo: e.target.value }))}
-              />
-            </FormField>
-          </FormSection>
-
-          <FormSection
-            title="Parçalı vade"
-            description="4 aylık 100.000 ₺ gibi eşit taksit üretin, sonra tarihleri elle düzeltin."
-          >
-            <div className="grid gap-3 sm:grid-cols-4">
-              <FormField label="Adet" htmlFor="chn-count">
-                <Input
-                  id="chn-count"
-                  type="number"
-                  min={1}
-                  max={24}
-                  className="bg-white"
-                  disabled={locked}
-                  value={form.count}
-                  onChange={(e) => setForm((f) => ({ ...f, count: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Taksit tutarı" htmlFor="chn-amt">
-                <Input
-                  id="chn-amt"
-                  type="number"
-                  min={0.01}
-                  step="0.01"
-                  className="bg-white"
-                  disabled={locked}
-                  value={form.amountEach}
-                  onChange={(e) => setForm((f) => ({ ...f, amountEach: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="İlk vade" htmlFor="chn-due">
-                <Input
-                  id="chn-due"
-                  type="date"
-                  className="bg-white"
-                  disabled={locked}
-                  value={form.firstDue}
-                  onChange={(e) => setForm((f) => ({ ...f, firstDue: e.target.value }))}
-                />
-              </FormField>
-              <FormField label="Aralık (ay)" htmlFor="chn-int">
-                <Input
-                  id="chn-int"
-                  type="number"
-                  min={1}
-                  max={12}
-                  className="bg-white"
-                  disabled={locked}
-                  value={form.intervalMonths}
-                  onChange={(e) => setForm((f) => ({ ...f, intervalMonths: e.target.value }))}
-                />
-              </FormField>
-            </div>
-            <Button type="button" variant="outline" onClick={generate} disabled={locked}>
-              Vadeleri oluştur
-            </Button>
-            <div className="space-y-2">
-              {form.installments.map((row, index) => (
-                <div key={`${row.dueDate}-${index}`} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
-                  <Input
-                    type="date"
-                    className="bg-white"
-                    disabled={locked}
-                    value={row.dueDate}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        installments: f.installments.map((item, i) =>
-                          i === index ? { ...item, dueDate: e.target.value } : item
-                        ),
-                      }))
-                    }
-                  />
-                  <Input
-                    type="number"
-                    min={0.01}
-                    step="0.01"
-                    className="bg-white"
-                    disabled={locked}
-                    value={row.amount}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        installments: f.installments.map((item, i) =>
-                          i === index ? { ...item, amount: e.target.value } : item
-                        ),
-                      }))
-                    }
-                  />
-                  <Input
-                    className="bg-white"
-                    placeholder="Belge no"
-                    disabled={locked}
-                    value={row.serialNo}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        installments: f.installments.map((item, i) =>
-                          i === index ? { ...item, serialNo: e.target.value } : item
-                        ),
-                      }))
-                    }
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    disabled={locked}
-                    onClick={() =>
-                      setForm((f) => ({
-                        ...f,
-                        installments: f.installments.filter((_, i) => i !== index),
-                      }))
-                    }
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              {!locked ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setForm((f) => ({
-                      ...f,
-                      installments: [
-                        ...f.installments,
-                        {
-                          dueDate: plusMonthsIso(f.firstDue || todayIso(), f.installments.length),
-                          amount: f.amountEach,
-                          serialNo: "",
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Vade ekle
-                </Button>
-              ) : (
-                <p className="text-xs text-muted-foreground">Faturaya bağlanmış vadeler kilitlidir.</p>
-              )}
-            </div>
-            <p className="text-sm font-medium">Toplam {formatNumber(previewTotal)} ₺</p>
-          </FormSection>
-
-          <FormSection title="Not" >
-            <FormField label="Açıklama" htmlFor="chn-note" optional>
-              <Textarea
-                id="chn-note"
-                className="bg-white"
-                value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              />
+          <FormSection title="Durum">
+            <FormField label="Durum" required>
+              <Select
+                value={status}
+                onValueChange={(value) => setStatus(value as (typeof CHEQUE_STATUSES)[number])}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CHEQUE_STATUSES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </FormField>
           </FormSection>
         </FormSheetBody>
@@ -417,8 +490,8 @@ export function ChequeNoteFormSheet({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Vazgeç
           </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Kaydediliyor…" : "Kaydet"}
+          <Button type="submit" disabled={saving || !note}>
+            {saving ? "Kaydediliyor…" : "Durumu kaydet"}
           </Button>
         </FormSheetFooter>
       </form>

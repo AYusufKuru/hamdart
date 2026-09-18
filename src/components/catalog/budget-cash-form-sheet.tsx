@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,13 +36,18 @@ import {
   BUDGET_INCOME_CATEGORIES,
   budgetDirectionLabel,
 } from "@/lib/budget-cash";
-import { buildChequeInstallments, chequeKindFromCategory } from "@/lib/cheque-notes";
+import { chequeKindFromCategory, parseChequeMoney } from "@/lib/cheque-notes";
 import { isPurchaseInvoice, isSalesInvoice } from "@/lib/reports";
 import { personnelDisplayName } from "@/lib/personnel";
-import { formatNumber, plusMonthsIso, todayIso } from "@/lib/utils";
+import { formatNumber, todayIso } from "@/lib/utils";
 import { sameParty } from "@/lib/party-account";
-
-type InstallmentDraft = { dueDate: string; amount: string; serialNo: string };
+import {
+  ChequeInstallmentCountField,
+  ChequeInstallmentStep,
+  emptyChequePlan,
+  fillChequePlanStep,
+  type ChequePlanDraft,
+} from "@/components/catalog/cheque-plan-fields";
 
 function emptyForm(row?: BudgetCashEntry | null) {
   return {
@@ -55,11 +60,8 @@ function emptyForm(row?: BudgetCashEntry | null) {
     invoiceNo: row?.invoiceNo ?? "",
     bankName: "",
     serialNo: "",
-    count: "4",
-    amountEach: "100000",
-    firstDue: plusMonthsIso(todayIso(), 1),
-    intervalMonths: "1",
-    installments: [] as InstallmentDraft[],
+    installmentCount: "none",
+    installments: [] as ChequePlanDraft[],
   };
 }
 
@@ -83,6 +85,7 @@ export function BudgetCashFormSheet({
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(emptyForm());
+  const [chequeStep, setChequeStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -92,6 +95,7 @@ export function BudgetCashFormSheet({
   useEffect(() => {
     if (!open) return;
     const base = emptyForm(editing ?? null);
+    setChequeStep(0);
     setForm({
       ...base,
       party: editing?.party || defaultParty || base.party,
@@ -146,59 +150,17 @@ export function BudgetCashFormSheet({
   }, [invoices, direction, form.invoiceNo, form.party]);
 
   const chequeKind = editing ? null : chequeKindFromCategory(form.category);
-  const chequeTotal = form.installments.reduce(
-    (sum, row) => sum + (Number(String(row.amount).replace(",", ".")) || 0),
-    0
-  );
+  const chequeAmount = parseChequeMoney(form.amount);
+  const chequeInstallmentCount =
+    form.installmentCount === "none" ? 0 : Number(form.installmentCount) || 0;
 
   function setCategory(category: string) {
-    const nextKind = chequeKindFromCategory(category);
-    setForm((f) => {
-      if (!nextKind) return { ...f, category };
-      const amount = Number(String(f.amountEach).replace(",", ".")) || 100000;
-      const count = Number(f.count) || 4;
-      const interval = Number(f.intervalMonths) || 1;
-      const rows = buildChequeInstallments({
-        firstDue: f.firstDue || plusMonthsIso(todayIso(), 1),
-        count,
-        amount,
-        intervalMonths: interval,
-        serialStart: f.serialNo,
-      });
-      return {
-        ...f,
-        category,
-        installments: rows.map((row) => ({
-          dueDate: row.dueDate,
-          amount: String(row.amount),
-          serialNo: row.serialNo,
-        })),
-      };
-    });
-  }
-
-  function generatePlan() {
-    const count = Number(form.count);
-    const amount = Number(String(form.amountEach).replace(",", "."));
-    const interval = Number(form.intervalMonths);
-    if (!(count >= 1) || !(amount > 0) || !(interval >= 1)) {
-      toast.error("Taksit sayısı, tutar ve ay aralığı girin");
-      return;
-    }
-    const rows = buildChequeInstallments({
-      firstDue: form.firstDue,
-      count,
-      amount,
-      intervalMonths: interval,
-      serialStart: form.serialNo,
-    });
+    setChequeStep(0);
     setForm((f) => ({
       ...f,
-      installments: rows.map((row) => ({
-        dueDate: row.dueDate,
-        amount: String(row.amount),
-        serialNo: row.serialNo,
-      })),
+      category,
+      installmentCount: chequeKindFromCategory(category) ? f.installmentCount : "none",
+      installments: chequeKindFromCategory(category) ? f.installments : [],
     }));
   }
 
@@ -213,18 +175,33 @@ export function BudgetCashFormSheet({
       return;
     }
     const chequeKindNow = editing ? null : chequeKindFromCategory(form.category);
-    const installments = form.installments
-      .map((row) => ({
-        dueDate: row.dueDate,
-        amount: Number(String(row.amount).replace(",", ".")),
-        serialNo: row.serialNo.trim(),
-      }))
-      .filter((row) => row.dueDate && row.amount > 0);
+    const installments =
+      chequeInstallmentCount >= 2
+        ? form.installments
+            .map((row) => ({
+              dueDate: row.dueDate,
+              amount: parseChequeMoney(row.amount),
+              serialNo: form.serialNo.trim(),
+            }))
+            .filter((row) => row.dueDate && row.amount > 0)
+        : chequeKindNow && chequeAmount > 0
+          ? [
+              {
+                dueDate: form.dueDate.trim() || form.date,
+                amount: chequeAmount,
+                serialNo: form.serialNo.trim(),
+              },
+            ]
+          : [];
     const amount = chequeKindNow
-      ? installments.reduce((sum, row) => sum + row.amount, 0)
-      : Number(String(form.amount).replace(",", "."));
+      ? chequeAmount || installments.reduce((sum, row) => sum + row.amount, 0)
+      : parseChequeMoney(form.amount);
+    if (chequeKindNow && chequeInstallmentCount >= 2 && installments.length !== chequeInstallmentCount) {
+      toast.error("Taksit tutarı ve vade tarihlerini adım adım tamamlayın");
+      return;
+    }
     if (chequeKindNow && installments.length === 0) {
-      toast.error("Vadeleri oluşturun");
+      toast.error(`${chequeKindNow === "senet" ? "Senet" : "Çek"} tutarı girin`);
       return;
     }
     if (!(amount > 0)) {
@@ -283,11 +260,6 @@ export function BudgetCashFormSheet({
       icon={income ? TrendingUp : TrendingDown}
       title={editing ? `${budgetDirectionLabel(direction)} düzenle` : `${budgetDirectionLabel(direction)} ekle`}
       className={chequeKind ? "max-w-2xl" : undefined}
-      description={
-        income
-          ? "Firma, tutar ve çeşit girin. Çek veya senet seçilince vade planı burada oluşturulur."
-          : "Kasadan çıkan tutarı kaydedin. Fiş veya fatura gelince ilişkilendirin."
-      }
     >
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
         <FormSheetBody className="space-y-5">
@@ -314,12 +286,7 @@ export function BudgetCashFormSheet({
                   placeholder="Çeşit"
                 />
               </FormField>
-              {chequeKind ? (
-                <FormField label="Toplam">
-                  <Input value={`${formatNumber(chequeTotal)} ₺`} readOnly />
-                </FormField>
-              ) : (
-              <FormField label="Miktar" required>
+              <FormField label={chequeKind ? `${chequeKind === "senet" ? "Senet" : "Çek"} tutarı` : "Miktar"} required>
                 <Input
                   type="text"
                   inputMode="decimal"
@@ -328,7 +295,6 @@ export function BudgetCashFormSheet({
                   placeholder="0"
                 />
               </FormField>
-              )}
               <FormField label="Tarih" required>
                 <Input
                   type="date"
@@ -389,10 +355,7 @@ export function BudgetCashFormSheet({
             </FormField>
           </FormSection>
           {chequeKind ? (
-            <FormSection
-              title="Parçalı vade"
-              description="Örnek: 4 ay, ayda 100.000 ₺. Vadeler takvimde görünür, fatura ödemesinde seçilir."
-            >
+            <FormSection title="Banka ve taksit">
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="Banka" optional>
                   <Input
@@ -400,126 +363,94 @@ export function BudgetCashFormSheet({
                     onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
                   />
                 </FormField>
-                <FormField label="İlk çek / senet no" optional>
+                <FormField label={chequeKind === "senet" ? "Senet no" : "Çek no"} optional>
                   <Input
                     value={form.serialNo}
                     onChange={(e) => setForm((f) => ({ ...f, serialNo: e.target.value }))}
                   />
                 </FormField>
-                <FormField label="Adet">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={24}
-                    value={form.count}
-                    onChange={(e) => setForm((f) => ({ ...f, count: e.target.value }))}
-                  />
-                </FormField>
-                <FormField label="Taksit tutarı">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    value={form.amountEach}
-                    onChange={(e) => setForm((f) => ({ ...f, amountEach: e.target.value }))}
-                  />
-                </FormField>
-                <FormField label="İlk vade">
-                  <Input
-                    type="date"
-                    value={form.firstDue}
-                    onChange={(e) => setForm((f) => ({ ...f, firstDue: e.target.value }))}
-                  />
-                </FormField>
-                <FormField label="Aralık (ay)">
-                  <Input
-                    type="number"
-                    min={1}
-                    max={12}
-                    value={form.intervalMonths}
-                    onChange={(e) => setForm((f) => ({ ...f, intervalMonths: e.target.value }))}
-                  />
-                </FormField>
-              </div>
-              <Button type="button" variant="outline" onClick={generatePlan}>
-                Vadeleri oluştur
-              </Button>
-              <div className="space-y-2">
-                {form.installments.map((row, index) => (
-                  <div key={`${row.dueDate}-${index}`} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
-                    <Input
-                      type="date"
-                      value={row.dueDate}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          installments: f.installments.map((item, i) =>
-                            i === index ? { ...item, dueDate: e.target.value } : item
-                          ),
-                        }))
-                      }
-                    />
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={row.amount}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          installments: f.installments.map((item, i) =>
-                            i === index ? { ...item, amount: e.target.value } : item
-                          ),
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder="Belge no"
-                      value={row.serialNo}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          installments: f.installments.map((item, i) =>
-                            i === index ? { ...item, serialNo: e.target.value } : item
-                          ),
-                        }))
-                      }
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          installments: f.installments.filter((_, i) => i !== index),
-                        }))
-                      }
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
+                <ChequeInstallmentCountField
+                  value={form.installmentCount}
+                  onChange={(value) => {
+                    const count = value === "none" ? 0 : Number(value) || 0;
+                    setChequeStep(0);
                     setForm((f) => ({
                       ...f,
-                      installments: [
-                        ...f.installments,
-                        {
-                          dueDate: plusMonthsIso(f.firstDue || todayIso(), f.installments.length),
-                          amount: f.amountEach,
-                          serialNo: "",
-                        },
-                      ],
-                    }))
-                  }
-                >
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Vade ekle
-                </Button>
+                      installmentCount: value,
+                      installments:
+                        count >= 2
+                          ? fillChequePlanStep(
+                              emptyChequePlan(count),
+                              0,
+                              parseChequeMoney(f.amount),
+                              f.date
+                            )
+                          : [],
+                    }));
+                  }}
+                />
               </div>
+              {chequeInstallmentCount >= 2 ? (
+                <div className="space-y-3">
+                  <ChequeInstallmentStep
+                    index={chequeStep}
+                    count={chequeInstallmentCount}
+                    totalAmount={chequeAmount}
+                    previousAmounts={form.installments
+                      .slice(0, chequeStep)
+                      .map((row) => parseChequeMoney(row.amount))}
+                    row={form.installments[chequeStep] ?? { dueDate: "", amount: "" }}
+                    onChange={(row) =>
+                      setForm((f) => ({
+                        ...f,
+                        installments: (f.installments.length === chequeInstallmentCount
+                          ? f.installments
+                          : emptyChequePlan(chequeInstallmentCount)
+                        ).map((item, i) => (i === chequeStep ? row : item)),
+                      }))
+                    }
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={chequeStep <= 0}
+                      onClick={() => setChequeStep((n) => Math.max(0, n - 1))}
+                    >
+                      Geri
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        const current = form.installments[chequeStep];
+                        if (!current?.dueDate || !(parseChequeMoney(current.amount) > 0)) {
+                          toast.error("Taksit tutarı ve vade tarihi girin");
+                          return;
+                        }
+                        if (chequeStep + 1 >= chequeInstallmentCount) {
+                          toast.success("Taksitler tamam. Kaydedebilirsiniz.");
+                          return;
+                        }
+                        setForm((f) => ({
+                          ...f,
+                          installments: fillChequePlanStep(
+                            f.installments.length === chequeInstallmentCount
+                              ? f.installments
+                              : emptyChequePlan(chequeInstallmentCount),
+                            chequeStep + 1,
+                            parseChequeMoney(f.amount),
+                            f.date
+                          ),
+                        }));
+                        setChequeStep((n) => n + 1);
+                      }}
+                    >
+                      {chequeStep + 1 >= chequeInstallmentCount ? "Taksitler tamam" : "Sonraki taksit"}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </FormSection>
           ) : null}
         </FormSheetBody>

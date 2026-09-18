@@ -671,6 +671,14 @@ const chequeInstallmentInputSchema = z.object({
   serialNo: optionalText(80).default(""),
 });
 
+const CHEQUE_STATUS_VALUES = [
+  "Bekliyor",
+  "Onaylandı",
+  "Alındı",
+  "Karşılıksız",
+  "İptal",
+] as const;
+
 export const chequeNoteCreateSchema = z.object({
   kind: z.enum(["cek", "senet"]),
   direction: z.enum(["received", "given"]),
@@ -679,6 +687,7 @@ export const chequeNoteCreateSchema = z.object({
   bankName: optionalText(120).default(""),
   serialNo: optionalText(80).default(""),
   currency: optionalText(10).default("TRY"),
+  status: z.enum(CHEQUE_STATUS_VALUES).optional(),
   notes: optionalText(2000).default(""),
   relatedInvoiceNo: optionalText(80).default(""),
   installments: z
@@ -687,7 +696,13 @@ export const chequeNoteCreateSchema = z.object({
     .max(24, "En fazla 24 vade olabilir"),
 });
 
-export const chequeNoteUpdateSchema = chequeNoteCreateSchema.partial();
+export const chequeNoteUpdateSchema = chequeNoteCreateSchema.partial().extend({
+  installments: z
+    .array(chequeInstallmentInputSchema)
+    .min(1, "En az bir vade girin")
+    .max(24, "En fazla 24 vade olabilir")
+    .optional(),
+});
 
 export const documentSettingsUpdateSchema = z.object({
   companyName: text(160),

@@ -8,7 +8,7 @@ import type {
 } from "@/data/catalog";
 import { prisma } from "@/lib/db";
 import { FieldError } from "@/lib/server/fields";
-import { nextChequeDocNo, rollupChequeStatus } from "@/lib/cheque-notes";
+import { nextChequeDocNo, normalizeChequeStatus } from "@/lib/cheque-notes";
 import { todayIso } from "@/lib/utils";
 
 function asNumber(value: unknown): number {
@@ -49,11 +49,7 @@ function toInstallment(row: NoteRow): ChequeNoteInstallment {
 function toNote(row: NoteRow, installments: ChequeNoteInstallment[]): ChequeNote {
   const kind: ChequeKind = row.kind === "senet" ? "senet" : "cek";
   const direction: ChequeDirection = row.direction === "given" ? "given" : "received";
-  const stored = String(row.status ?? "");
-  const status: ChequeInstrumentStatus =
-    stored === "İptal" || stored === "Karşılıksız"
-      ? stored
-      : rollupChequeStatus(installments);
+  const status = normalizeChequeStatus(String(row.status ?? ""));
   const createdAt =
     row.createdAt instanceof Date
       ? row.createdAt.toISOString()
@@ -162,6 +158,7 @@ export type ChequeNoteWriteInput = {
   serialNo?: string;
   currency?: string;
   notes?: string;
+  status?: ChequeInstrumentStatus;
   relatedInvoiceNo?: string;
   installments: Array<{ dueDate: string; amount: number; serialNo?: string }>;
 };
@@ -186,15 +183,6 @@ async function existingDocNos() {
   return rows.map((row) => row.docNo);
 }
 
-async function refreshNoteStatus(id: string) {
-  const note = await getChequeNote(id);
-  if (!note) return;
-  const status = rollupChequeStatus(note.installments);
-  await prisma.$executeRaw`
-    UPDATE "ChequeNote" SET "status" = ${status} WHERE "id" = ${id}
-  `;
-}
-
 export async function createChequeNote(
   input: ChequeNoteWriteInput,
   createdBy: string
@@ -210,7 +198,7 @@ export async function createChequeNote(
     ) VALUES (
       ${id}, ${docNo}, ${input.kind}, ${input.direction}, ${input.party.trim()}, ${input.issueDate},
       ${input.bankName?.trim() ?? ""}, ${input.serialNo?.trim() ?? ""}, ${totalAmount},
-      ${input.currency?.trim() || "TRY"}, 'Portföy', ${input.notes?.trim() ?? ""},
+      ${input.currency?.trim() || "TRY"}, ${normalizeChequeStatus(input.status ?? "Bekliyor")}, ${input.notes?.trim() ?? ""},
       ${input.relatedInvoiceNo?.trim() ?? ""}, CURRENT_TIMESTAMP, ${createdBy}
     )
   `;
@@ -245,6 +233,7 @@ export async function updateChequeNote(
   const notes = input.notes !== undefined ? input.notes.trim() : existing.notes;
   const relatedInvoiceNo =
     input.relatedInvoiceNo !== undefined ? input.relatedInvoiceNo.trim() : existing.relatedInvoiceNo;
+  const status = input.status ? normalizeChequeStatus(input.status) : existing.status;
   let totalAmount = existing.totalAmount;
   if (input.installments) {
     if (used) throw new FieldError("Kullanılmış vadelerin tutarı değiştirilemez");
@@ -272,10 +261,10 @@ export async function updateChequeNote(
         "serialNo" = ${serialNo},
         "totalAmount" = ${totalAmount},
         "notes" = ${notes},
+        "status" = ${status},
         "relatedInvoiceNo" = ${relatedInvoiceNo}
     WHERE "id" = ${id}
   `;
-  await refreshNoteStatus(id);
   const updated = await getChequeNote(id);
   if (!updated) throw new FieldError("Kayıt güncellenemedi");
   return updated;
@@ -329,21 +318,15 @@ export async function applyInstallmentsToPayment(input: {
     const related = note.relatedInvoiceNo || input.invoiceNo;
     await prisma.$executeRaw`
       UPDATE "ChequeNote"
-      SET "status" = ${note.status},
-          "relatedInvoiceNo" = ${related}
+      SET "relatedInvoiceNo" = ${related}
       WHERE "id" = ${noteId}
     `;
-    await refreshNoteStatus(noteId);
   }
   return Math.round(total * 100) / 100;
 }
 
 export async function releaseInstallmentsByPayment(paymentEventId: string): Promise<void> {
   if (!paymentEventId) return;
-  const rows = await prisma.$queryRaw<Array<{ chequeNoteId: string }>>`
-    SELECT DISTINCT "chequeNoteId" FROM "ChequeNoteInstallment"
-    WHERE "paymentEventId" = ${paymentEventId}
-  `;
   await prisma.$executeRaw`
     UPDATE "ChequeNoteInstallment"
     SET "status" = 'Bekliyor',
@@ -352,7 +335,4 @@ export async function releaseInstallmentsByPayment(paymentEventId: string): Prom
         "paidAt" = ''
     WHERE "paymentEventId" = ${paymentEventId}
   `;
-  for (const row of rows) {
-    await refreshNoteStatus(String(row.chequeNoteId));
-  }
 }

@@ -144,7 +144,12 @@ export interface InvoiceEvent {
 
 export type ChequeKind = "cek" | "senet";
 export type ChequeDirection = "received" | "given";
-export type ChequeInstrumentStatus = "Portföy" | "Kısmi" | "Kapandı" | "Karşılıksız" | "İptal";
+export type ChequeInstrumentStatus =
+  | "Bekliyor"
+  | "Onaylandı"
+  | "Alındı"
+  | "Karşılıksız"
+  | "İptal";
 export type ChequeInstallmentStatus = "Bekliyor" | "Faturada" | "Karşılıksız";
 
 export interface ChequeNoteInstallment {

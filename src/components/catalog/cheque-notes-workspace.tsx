@@ -2,27 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ClipboardCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
-import { ChequeNoteFormSheet } from "@/components/catalog/cheque-note-form-sheet";
+import {
+  ChequeNoteFormSheet,
+  ChequeStatusDialog,
+} from "@/components/catalog/cheque-note-form-sheet";
 import type { ChequeNote } from "@/data/catalog";
 import { deleteChequeNote, fetchChequeNotes } from "@/lib/catalog-store";
 import {
   chequeDirectionLabel,
   chequeKindLabel,
+  chequeStatusVariant,
   flattenChequeInstallments,
+  normalizeChequeStatus,
 } from "@/lib/cheque-notes";
 import { formatDate, formatNumber } from "@/lib/utils";
-
-function statusVariant(status: string) {
-  if (status === "Kapandı" || status === "Faturada") return "success" as const;
-  if (status === "Karşılıksız" || status === "İptal") return "danger" as const;
-  if (status === "Kısmi") return "warning" as const;
-  return "info" as const;
-}
 
 export function ChequeNotesWorkspace({
   writable,
@@ -40,6 +39,7 @@ export function ChequeNotesWorkspace({
   const [directionFilter, setDirectionFilter] = useState<"all" | "received" | "given">("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ChequeNote | null>(null);
+  const [statusNote, setStatusNote] = useState<ChequeNote | null>(null);
 
   function setSheetOpen(next: boolean) {
     setOpen(next);
@@ -125,7 +125,11 @@ export function ChequeNotesWorkspace({
     {
       key: "status",
       header: "Durum",
-      render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={chequeStatusVariant(r.instrumentStatus)}>
+          {normalizeChequeStatus(r.instrumentStatus)}
+        </Badge>
+      ),
     },
     {
       key: "invoiceNo",
@@ -135,18 +139,33 @@ export function ChequeNotesWorkspace({
     {
       key: "actions",
       header: "",
-      className: "w-24",
+      className: "w-32",
       render: (r) => {
         const note = notes.find((item) => item.id === r.chequeNoteId);
         if (!writable || !note) return null;
         return (
-          <CatalogRowActions
-            onEdit={() => {
-              setEditing(note);
-              setOpen(true);
-            }}
-            onDelete={() => void handleDelete(note)}
-          />
+          <div className="flex justify-end gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              title="Durum güncelle"
+              onClick={(e) => {
+                e.stopPropagation();
+                setStatusNote(note);
+              }}
+            >
+              <ClipboardCheck className="h-4 w-4" />
+            </Button>
+            <CatalogRowActions
+              onEdit={() => {
+                setEditing(note);
+                setOpen(true);
+              }}
+              onDelete={() => void handleDelete(note)}
+            />
+          </div>
         );
       },
     },
@@ -200,7 +219,7 @@ export function ChequeNotesWorkspace({
             rows={rows}
             columns={columns}
             searchText={(r) =>
-              `${r.docNo} ${r.party} ${r.serialNo} ${r.invoiceNo} ${chequeKindLabel(r.kind)}`
+              `${r.docNo} ${r.party} ${r.serialNo} ${r.invoiceNo} ${chequeKindLabel(r.kind)} ${normalizeChequeStatus(r.instrumentStatus)}`
             }
             empty="Kayıtlı çek veya senet yok"
           />
@@ -211,6 +230,14 @@ export function ChequeNotesWorkspace({
         open={open}
         onOpenChange={setSheetOpen}
         editing={editing}
+        onSaved={() => void refresh()}
+      />
+      <ChequeStatusDialog
+        open={Boolean(statusNote)}
+        onOpenChange={(next) => {
+          if (!next) setStatusNote(null);
+        }}
+        note={statusNote}
         onSaved={() => void refresh()}
       />
     </div>

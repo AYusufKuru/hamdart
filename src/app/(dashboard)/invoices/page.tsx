@@ -188,7 +188,7 @@ function InvoicesPageContent() {
             title: filter === "cheque" ? "Çek / Senet" : "Faturalar",
             description:
               filter === "cheque"
-                ? "Alınan ve verilen çek/senetler. Yeni kayıt buradan eklenir, fatura ödemesinde portföyden seçilir."
+                ? "Alınan ve verilen çek / senetler."
                 : `${filterLabel} faturaları. Durum ve tahsilat bu sayfadan güncellenir.`,
           };
 

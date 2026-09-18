@@ -7,7 +7,7 @@ import type {
   ChequeNoteInstallment,
 } from "@/data/catalog";
 import { nextDocumentNo } from "@/lib/invoice-docs";
-import { plusMonthsIso } from "@/lib/utils";
+import { plusMonthsIso, todayIso } from "@/lib/utils";
 
 export const CHEQUE_KINDS: { value: ChequeKind; label: string }[] = [
   { value: "cek", label: "Çek" },
@@ -51,6 +51,35 @@ export function incrementSerial(start: string, offset: number) {
   return `${match[1]}${String(next).padStart(match[2].length, "0")}`;
 }
 
+export const CHEQUE_INSTALLMENT_COUNTS = [2, 3, 4, 5, 6, 8, 10, 12] as const;
+
+export function parseChequeMoney(value: string) {
+  const n = Number(String(value).replace(",", "."));
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+
+export function remainingChequeAmount(total: number, amounts: number[]) {
+  const spent = amounts.reduce((sum, n) => sum + (Number(n) || 0), 0);
+  return Math.round((total - spent) * 100) / 100;
+}
+
+export function suggestChequeInstallment(input: {
+  total: number;
+  previousAmounts: number[];
+  remainingCount: number;
+  previousDue?: string;
+  issueDate?: string;
+}) {
+  const remaining = remainingChequeAmount(input.total, input.previousAmounts);
+  const steps = Math.max(1, input.remainingCount);
+  const raw = remaining / steps;
+  const amount = Math.max(0, Math.round(raw * 100) / 100);
+  const dueDate = input.previousDue
+    ? plusMonthsIso(input.previousDue, 1)
+    : input.issueDate || todayIso();
+  return { amount, dueDate };
+}
+
 export function buildChequeInstallments(input: {
   firstDue: string;
   count: number;
@@ -73,15 +102,48 @@ export function buildChequeInstallments(input: {
   return rows;
 }
 
+export const CHEQUE_STATUSES = [
+  "Bekliyor",
+  "Onaylandı",
+  "Alındı",
+  "Karşılıksız",
+  "İptal",
+] as const;
+
+export function normalizeChequeStatus(status: string): ChequeInstrumentStatus {
+  switch (status) {
+    case "Onaylandı":
+    case "Kısmi":
+      return "Onaylandı";
+    case "Alındı":
+    case "Kapandı":
+      return "Alındı";
+    case "Karşılıksız":
+      return "Karşılıksız";
+    case "İptal":
+      return "İptal";
+    default:
+      return "Bekliyor";
+  }
+}
+
+export function chequeStatusVariant(status: string) {
+  const value = normalizeChequeStatus(status);
+  if (value === "Alındı") return "success" as const;
+  if (value === "Onaylandı") return "info" as const;
+  if (value === "Karşılıksız" || value === "İptal") return "danger" as const;
+  return "warning" as const;
+}
+
 export function rollupChequeStatus(
   installments: { status: string }[]
 ): ChequeInstrumentStatus {
-  if (installments.length === 0) return "Portföy";
+  if (installments.length === 0) return "Bekliyor";
   if (installments.every((row) => row.status === "Karşılıksız")) return "Karşılıksız";
   const used = installments.filter((row) => row.status === "Faturada").length;
-  if (used === 0) return "Portföy";
-  if (used >= installments.length) return "Kapandı";
-  return "Kısmi";
+  if (used === 0) return "Bekliyor";
+  if (used >= installments.length) return "Alındı";
+  return "Onaylandı";
 }
 
 export function paymentMethodForKind(kind: ChequeKind) {
