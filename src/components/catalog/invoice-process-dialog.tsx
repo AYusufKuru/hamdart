@@ -219,7 +219,6 @@ export function InvoiceProcessDialog({
                   onValueChange={(next) => {
                     setMethod(next);
                     setSelectedIds([]);
-                    setUseNewPlan(false);
                   }}
                 >
                   <SelectTrigger className="bg-white">
