@@ -1,4 +1,4 @@
-import type { Order } from "@/data/mock";
+import type { BatchMaterialUsage, Order } from "@/data/mock";
 import type { RawMaterial } from "@/data/raw-materials";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
 
@@ -30,6 +30,55 @@ export interface RecipeTotals {
   totalRevenue: number | null;
   profit: number | null;
   marginPercent: number | null;
+}
+
+export function matchNameKey(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[İIıi]/g, "i")
+    .toLocaleLowerCase("tr");
+}
+
+export function findRecipeByProductName(
+  recipes: Recipe[],
+  product: string
+): Recipe | undefined {
+  const key = matchNameKey(product);
+  const matches = recipes.filter(
+    (r) => matchNameKey(r.productName) === key
+  );
+  return matches.find((r) => r.status === "saved") ?? matches[0];
+}
+
+export function estimateRecipeMaterials(
+  recipe: Recipe,
+  outputQuantity: number,
+  materials?: RawMaterial[]
+): BatchMaterialUsage[] {
+  const merged = new Map<string, BatchMaterialUsage>();
+  for (const line of recipe.lines) {
+    const material = materials?.find((m) => m.id === line.materialId);
+    const materialName = (material?.name ?? line.materialName ?? "").trim();
+    if (!materialName) continue;
+    const unit = (line.unit || material?.unit || "").trim();
+    const estimated = line.quantityPerUnit * outputQuantity;
+    if (!(estimated > 0)) continue;
+    const key = `${matchNameKey(materialName)}|${matchNameKey(unit)}`;
+    const prev = merged.get(key);
+    if (prev) {
+      prev.estimated += estimated;
+    } else {
+      merged.set(key, {
+        materialId: line.materialId,
+        materialName,
+        unit,
+        estimated,
+        actual: null,
+      });
+    }
+  }
+  return [...merged.values()];
 }
 
 export function getLastOrderUnitPrice(

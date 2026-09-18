@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,19 +20,24 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { type BatchStatus, type ProductionBatch, type ProductionLine } from "@/data/mock";
-import { capitalizeWordsTr, plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
+import { capitalizeWordsTr, formatNumber, plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
 import {
   BATCH_STATUS_OPTIONS,
   BATCH_UNITS,
   createProductionBatch,
   getAllProductionBatches,
   getAllProductionLines,
-  getKnownProducts,
   lineHasActiveBatch,
   nextBatchNo,
   queuedBatchesForLine,
   suggestUnit,
 } from "@/lib/production-store";
+import { getAllRecipes } from "@/lib/recipe-store";
+import {
+  estimateRecipeMaterials,
+  findRecipeByProductName,
+} from "@/lib/recipe-calculations";
+import type { Recipe } from "@/data/recipes";
 
 const LINE_STATUS_LABEL: Record<string, string> = {
   active: "Aktif",
@@ -98,6 +103,7 @@ export function BatchFormSheet({
   const [lines, setLines] = useState<ProductionLine[]>([]);
   const [batches, setBatches] = useState<ProductionBatch[]>([]);
   const [products, setProducts] = useState<string[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(() => emptyForm([]));
 
@@ -105,17 +111,24 @@ export function BatchFormSheet({
     if (!open) return;
     setSaving(false);
     void (async () => {
-      const [allLines, productList, allBatches] = await Promise.all([
+      const [allLines, recipeList, allBatches] = await Promise.all([
         getAllProductionLines(),
-        getKnownProducts(),
+        getAllRecipes(),
         getAllProductionBatches(),
       ]);
+      const recipeProducts = selectItemValues(
+        recipeList.map((r) => r.productName)
+      );
       setLines(allLines);
-      setProducts(selectItemValues(productList));
+      setRecipes(recipeList);
+      setProducts(recipeProducts);
       setBatches(allBatches);
       const formData = emptyForm(allLines);
       if (formData.line) {
         formData.batchNo = await nextBatchNo(formData.line);
+      }
+      if (!recipeProducts.includes(formData.product.trim())) {
+        formData.product = "";
       }
       setForm(formData);
     })();
@@ -126,27 +139,35 @@ export function BatchFormSheet({
   const lineQueue = queuedBatchesForLine(batches, form.line);
   const willQueue =
     form.status === "queued" || (form.status === "in_progress" && lineBusy);
-  const productOptions = useMemo(() => {
-    const base = selectItemValues(products);
-    const current = form.product.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.product, products]);
+  const productOptions = products;
+  const qtyPreview = parseFloat(form.quantity.replace(",", "."));
+  const selectedRecipe = findRecipeByProductName(recipes, form.product);
+  const estimatedMaterials =
+    selectedRecipe && Number.isFinite(qtyPreview) && qtyPreview > 0
+      ? estimateRecipeMaterials(selectedRecipe, qtyPreview)
+      : [];
   const statusMeta =
     BATCH_STATUS_META.find((s) => s.value === form.status) ?? BATCH_STATUS_META[1];
 
   function applyLine(lineName: string) {
     const line = lines.find((l) => l.name === lineName);
-    const product =
-      line?.product && line.product !== "-" ? line.product : form.product;
+    const lineProduct =
+      line?.product && line.product !== "-" ? line.product : "";
     void nextBatchNo(lineName).then((batchNo) =>
-      setForm((f) => ({
-        ...f,
-        line: lineName,
-        product,
-        batchNo,
-        unit: suggestUnit(product, lineName),
-      }))
+      setForm((f) => {
+        const product = products.includes(lineProduct)
+          ? lineProduct
+          : products.includes(f.product)
+            ? f.product
+            : "";
+        return {
+          ...f,
+          line: lineName,
+          product,
+          batchNo,
+          unit: suggestUnit(product, lineName),
+        };
+      })
     );
   }
 
@@ -158,6 +179,10 @@ export function BatchFormSheet({
 
     if (!form.product.trim() || !form.line) {
       toast.error("Ürün ve hat zorunludur");
+      return;
+    }
+    if (!products.includes(form.product.trim())) {
+      toast.error("Ürün, kayıtlı bir reçeteden seçilmelidir");
       return;
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -281,7 +306,7 @@ export function BatchFormSheet({
 
           <FormSection
             title="Ürün ve miktar"
-            description="Batch no hatta göre üretilir; gerekirse düzenleyebilirsiniz. Tablet: BT · şurup: SR · enjeksiyon: INJ · kapsül: CAP."
+            description="Ürün listesi reçetelerden gelir. Batch no hatta göre üretilir; gerekirse düzenleyebilirsiniz."
           >
             <FormField label="Batch no" htmlFor="batch-no" required>
               <Input
@@ -295,45 +320,34 @@ export function BatchFormSheet({
               />
             </FormField>
             <FormField label="Ürün" htmlFor="batch-product" required>
-              {productOptions.length > 0 ? (
-                <Select
-                  value={form.product || undefined}
-                  onValueChange={(product) =>
-                    setForm((f) => ({
-                      ...f,
-                      product,
-                      unit: suggestUnit(product, f.line),
-                    }))
-                  }
-                >
-                  <SelectTrigger id="batch-product" className="bg-white">
-                    <SelectValue placeholder="Ürün seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {productOptions.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  id="batch-product"
-                  className="bg-white"
-                  required
-                  placeholder="Örn. Hepanorm 30 Tablet"
-                  value={form.product}
-                  onChange={(e) => {
-                    const product = e.target.value;
-                    setForm((f) => ({
-                      ...f,
-                      product,
-                      unit: suggestUnit(product, f.line),
-                    }));
-                  }}
-                />
-              )}
+              <Select
+                value={form.product || undefined}
+                onValueChange={(product) =>
+                  setForm((f) => ({
+                    ...f,
+                    product,
+                    unit: suggestUnit(product, f.line),
+                  }))
+                }
+                disabled={productOptions.length === 0}
+              >
+                <SelectTrigger id="batch-product" className="bg-white">
+                  <SelectValue
+                    placeholder={
+                      productOptions.length > 0
+                        ? "Reçetedeki ürünü seçin"
+                        : "Önce reçete ekleyin"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {productOptions.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </FormField>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <FormField label="Miktar" htmlFor="batch-qty" required>
@@ -370,6 +384,32 @@ export function BatchFormSheet({
                 </Select>
               </FormField>
             </div>
+            {form.product && Number.isFinite(qtyPreview) && qtyPreview > 0 ? (
+              <div className="rounded-xl border bg-slate-50 px-3 py-3">
+                <p className="mb-2 text-[12px] font-semibold text-foreground">
+                  Tahmini hammadde (reçete × {formatNumber(qtyPreview)} {form.unit})
+                </p>
+                {estimatedMaterials.length > 0 ? (
+                  <ul className="space-y-1 text-[13px]">
+                    {estimatedMaterials.map((line) => (
+                      <li
+                        key={`${line.materialName}-${line.unit}`}
+                        className="flex justify-between gap-3"
+                      >
+                        <span>{line.materialName}</span>
+                        <span className="font-mono font-semibold">
+                          {formatNumber(line.estimated)} {line.unit}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    Bu reçetede miktarlı hammadde satırı yok.
+                  </p>
+                )}
+              </div>
+            ) : null}
           </FormSection>
 
           <FormSection

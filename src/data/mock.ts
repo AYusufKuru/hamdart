@@ -44,6 +44,16 @@ export interface ProductionBatch {
   endDate: string;
   yield: number;
   qcScore: number;
+  materialUsage?: BatchMaterialUsage[];
+}
+
+/** Reçete hammaddesi: tahmini (reçete × adet) ve KK gerçekleşen miktar */
+export interface BatchMaterialUsage {
+  materialId: string;
+  materialName: string;
+  unit: string;
+  estimated: number;
+  actual: number | null;
 }
 
 export interface StockItem {
@@ -87,6 +97,22 @@ export interface Order {
   warehouse: string;
   value: number;
   recipeNo?: string;
+  batchNo?: string;
+  destination?: string;
+  shipmentNote?: string;
+}
+
+export interface LabExperimentMaterialUsage {
+  id: string;
+  stockItemId: string;
+  materialName: string;
+  sku?: string;
+  lotNo: string;
+  quantity: number;
+  unit: string;
+  reason: string;
+  addedAt: string;
+  kind: "initial" | "extra";
 }
 
 export interface LabExperiment {
@@ -101,7 +127,15 @@ export interface LabExperiment {
   progress: number;
   samples: number;
   priority: "normal" | "high";
+  productName?: string;
+  recipeCode?: string;
+  materialUsages?: LabExperimentMaterialUsage[];
+  recipeId?: string;
+  completionNote?: string;
 }
+
+export type LabSampleSourceKind = "material" | "product";
+export type LabSampleDisposition = "open" | "returned" | "scrap";
 
 export interface LabSample {
   id: string;
@@ -113,6 +147,11 @@ export interface LabSample {
   receivedDate: string;
   analyst: string;
   result?: string;
+  quantity?: number;
+  unit?: string;
+  stockItemId?: string;
+  sourceKind?: LabSampleSourceKind;
+  disposition?: LabSampleDisposition;
 }
 
 export const dashboardStats: DashboardStats = {

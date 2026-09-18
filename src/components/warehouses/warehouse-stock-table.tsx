@@ -82,7 +82,12 @@ export function WarehouseStockTable({
         category === "all" || item.category === category;
       const matchesStatus =
         statusFilter === "all" || item.status === statusFilter;
-      return matchesSearch && matchesCategory && matchesStatus;
+      return (
+        item.quantity > 0 &&
+        matchesSearch &&
+        matchesCategory &&
+        matchesStatus
+      );
     });
   }, [items, search, category, statusFilter]);
 

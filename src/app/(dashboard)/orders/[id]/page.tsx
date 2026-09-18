@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { toast } from "sonner";
@@ -9,21 +9,12 @@ import { RecipeEditor } from "@/components/recipes/recipe-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { Order } from "@/data/mock";
-import type { Warehouse } from "@/data/warehouses";
 import { getOrder, updateOrderShipment } from "@/lib/order-store";
-import { getWarehouses } from "@/lib/warehouse-store";
 import type { Recipe } from "@/data/recipes";
 import { getRecipeForOrder } from "@/lib/recipe-store";
 import { formatDate, formatNumber } from "@/lib/utils";
-import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   SHIPMENT_STATUSES,
@@ -32,6 +23,7 @@ import {
   nextShipmentStatus,
 } from "@/lib/auth/permissions";
 import { ArrowLeft, ClipboardList, Truck } from "lucide-react";
+import { ShipOutDialog } from "@/components/orders/ship-out-dialog";
 
 const statusMap = {
   pending: { label: "Bekliyor", variant: "warning" as const },
@@ -44,7 +36,7 @@ const statusMap = {
 
 const shipmentLabels: Record<(typeof SHIPMENT_STATUSES)[number], string> = {
   picking: "Toplamayı başlat",
-  shipped: "Sevkiyatı tamamla",
+  shipped: "Sevke çıkar",
   delivered: "Teslim edildi işaretle",
 };
 
@@ -57,10 +49,10 @@ export default function OrderDetailPage({
   const { user, canRead, canWrite } = useAuth();
   const [order, setOrder] = useState<Order | undefined>();
   const [recipe, setRecipe] = useState<Recipe | null>(null);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [warehouseName, setWarehouseName] = useState("");
+  const [shipmentNote, setShipmentNote] = useState("");
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [shipOpen, setShipOpen] = useState(false);
   const showRecipe = canRead("recipes");
   const canShip = Boolean(user && canWrite("orders"));
   const stockOnly = Boolean(user && isStockRole(user.role));
@@ -68,18 +60,14 @@ export default function OrderDetailPage({
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [found, wh] = await Promise.all([
-        getOrder(id),
-        ifAllowed(canRead("warehouses"), () => getWarehouses(), [] as Warehouse[]),
-      ]);
+      const found = await getOrder(id);
       if (cancelled) return;
       setOrder(found);
-      setWarehouses(wh);
       if (!found) {
         setReady(true);
         return;
       }
-      setWarehouseName(found.warehouse);
+      setShipmentNote(found.shipmentNote ?? "");
       if (showRecipe) {
         const existing = await getRecipeForOrder(found);
         if (!cancelled) setRecipe(existing ?? null);
@@ -89,15 +77,7 @@ export default function OrderDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [id, showRecipe, canRead]);
-
-  const warehouseOptions = useMemo(() => {
-    const names = warehouses.map((w) => w.name).filter(Boolean);
-    if (warehouseName && !names.includes(warehouseName)) {
-      return [warehouseName, ...names];
-    }
-    return names;
-  }, [warehouses, warehouseName]);
+  }, [id, showRecipe]);
 
   if (ready && !order) notFound();
 
@@ -107,22 +87,32 @@ export default function OrderDetailPage({
 
   const status = statusMap[order.status] ?? statusMap.pending;
   const unitPrice = order.quantity > 0 ? order.value / order.quantity : 0;
+  const readyToShip =
+    order.status === "pending" ||
+    order.status === "confirmed" ||
+    order.status === "picking";
   const shipmentActions = stockOnly
-    ? [nextShipmentStatus(order.status)].filter(
-        (next): next is (typeof SHIPMENT_STATUSES)[number] => Boolean(next)
-      )
+    ? order.batchNo && readyToShip
+      ? (["shipped"] as const)
+      : ([nextShipmentStatus(order.status)].filter(
+          (next): next is (typeof SHIPMENT_STATUSES)[number] => Boolean(next)
+        ) as (typeof SHIPMENT_STATUSES)[number][])
     : [...SHIPMENT_STATUSES];
 
   async function handleShipment(next: (typeof SHIPMENT_STATUSES)[number]) {
     if (!order || !user || !canSetOrderStatus(user.role, next)) return;
+    if (next === "shipped") {
+      setShipOpen(true);
+      return;
+    }
     setSaving(true);
     try {
       const updated = await updateOrderShipment(order.id, {
         status: next,
-        warehouse: warehouseName || undefined,
+        shipmentNote: shipmentNote.trim(),
       });
       setOrder(updated);
-      setWarehouseName(updated.warehouse);
+      setShipmentNote(updated.shipmentNote ?? "");
       toast.success(statusMap[next].label);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sevkiyat güncellenemedi");
@@ -131,18 +121,18 @@ export default function OrderDetailPage({
     }
   }
 
-  async function handleWarehouseSave() {
-    if (!order || !warehouseName.trim()) return;
+  async function handleNoteSave() {
+    if (!order) return;
     setSaving(true);
     try {
       const updated = await updateOrderShipment(order.id, {
-        warehouse: warehouseName.trim(),
+        shipmentNote: shipmentNote.trim(),
       });
       setOrder(updated);
-      setWarehouseName(updated.warehouse);
-      toast.success("Sevkiyat deposu kaydedildi");
+      setShipmentNote(updated.shipmentNote ?? "");
+      toast.success("Sevkiyat notu kaydedildi");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Depo kaydedilemedi");
+      toast.error(err instanceof Error ? err.message : "Not kaydedilemedi");
     } finally {
       setSaving(false);
     }
@@ -189,8 +179,10 @@ export default function OrderDetailPage({
             },
             { label: "Sipariş Tarihi", value: formatDate(order.orderDate) },
             { label: "Teslimat", value: formatDate(order.deliveryDate) },
-            { label: "Depo", value: order.warehouse },
             { label: "Müşteri", value: order.customer },
+            { label: "Parti", value: order.batchNo ?? "—" },
+            { label: "Teslimat yeri", value: order.destination ?? "—" },
+            { label: "Sevkiyat notu", value: order.shipmentNote ?? "—" },
           ].map((item) => (
             <div key={item.label}>
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
@@ -214,32 +206,25 @@ export default function OrderDetailPage({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-2">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-                  Sevk deposu
+                  Sevkiyat notu
                 </p>
-                <Select
-                  value={warehouseName}
-                  onValueChange={setWarehouseName}
+                <Textarea
+                  value={shipmentNote}
                   disabled={saving}
-                >
-                  <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="Depo seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {warehouseOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="Müşteri, irsaliye, plaka veya teslim notu"
+                  onChange={(e) => setShipmentNote(e.target.value)}
+                />
               </div>
               <Button
                 variant="outline"
                 className="rounded-xl"
-                disabled={saving || warehouseName === order.warehouse}
-                onClick={() => void handleWarehouseSave()}
+                disabled={
+                  saving ||
+                  shipmentNote.trim() === (order.shipmentNote ?? "").trim()
+                }
+                onClick={() => void handleNoteSave()}
               >
-                Depoyu kaydet
+                Notu kaydet
               </Button>
             </div>
             {shipmentActions.length > 0 ? (
@@ -278,6 +263,16 @@ export default function OrderDetailPage({
           />
         </>
       )}
+      <ShipOutDialog
+        open={shipOpen}
+        order={order}
+        onOpenChange={setShipOpen}
+        onShipped={(updated) => {
+          setOrder(updated);
+          setShipmentNote(updated.shipmentNote ?? "");
+          setShipOpen(false);
+        }}
+      />
     </div>
   );
 }

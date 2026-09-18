@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { TestTube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -20,112 +19,111 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import type { LabSample } from "@/data/mock";
+import type { LabSampleSourceKind } from "@/data/mock";
 import {
   createLabSample,
-  getLabAnalysts,
-  getSampleTypes,
+  getLabPeople,
   nextSampleNo,
-  SAMPLE_STATUSES,
-  SAMPLE_TYPES,
 } from "@/lib/lab-store";
-import { getAllProductionBatches } from "@/lib/production-store";
-import { getOrderProducts } from "@/lib/order-store";
-import { selectItemValues, todayIso } from "@/lib/utils";
+import { getAllWarehouseStockItems } from "@/lib/stock-store";
+import { getWarehouseName } from "@/data/warehouses";
+import { ifAllowed } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth/auth-context";
+import { formatNumber, selectItemValues, todayIso } from "@/lib/utils";
+import { PersonField } from "@/components/rd-lab/person-field";
+import type { WarehouseStockItem } from "@/data/warehouses";
+
+function isMamul(item: WarehouseStockItem) {
+  return item.category.trim().toLocaleLowerCase("tr").replace(/[İIıi]/g, "i") ===
+    "mamul";
+}
 
 function emptyForm() {
   return {
     sampleNo: "",
-    product: "",
-    batchNo: "",
-    type: "Üretim Numunesi",
-    status: "received" as LabSample["status"],
-    receivedDate: todayIso(),
+    sourceKind: "product" as LabSampleSourceKind,
+    stockItemId: "",
+    quantity: "1",
     analyst: "",
-    result: "",
+    receivedDate: todayIso(),
   };
-}
-
-interface SampleFormSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated?: () => void;
 }
 
 export function SampleFormSheet({
   open,
   onOpenChange,
   onCreated,
-}: SampleFormSheetProps) {
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated?: () => void;
+}) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
-  const [products, setProducts] = useState<string[]>([]);
-  const [batches, setBatches] = useState<string[]>([]);
-  const [types, setTypes] = useState<string[]>([...SAMPLE_TYPES]);
   const [analysts, setAnalysts] = useState<string[]>([]);
+  const [stockItems, setStockItems] = useState<WarehouseStockItem[]>([]);
+  const { canRead } = useAuth();
 
-  const productOptions = useMemo(() => {
-    const base = selectItemValues(products);
-    const current = form.product.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.product, products]);
+  const analystOptions = useMemo(
+    () => selectItemValues(analysts),
+    [analysts]
+  );
 
-  const batchOptions = useMemo(() => {
-    const base = selectItemValues(batches);
-    const current = form.batchNo.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.batchNo, batches]);
+  const stockOptions = useMemo(() => {
+    return stockItems
+      .filter((item) => item.quantity > 0)
+      .filter((item) =>
+        form.sourceKind === "product" ? isMamul(item) : !isMamul(item)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }, [stockItems, form.sourceKind]);
 
-  const analystOptions = useMemo(() => {
-    const base = selectItemValues(analysts);
-    const current = form.analyst.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.analyst, analysts]);
+  const selected = stockOptions.find((item) => item.id === form.stockItemId);
 
   useEffect(() => {
     if (!open) return;
     setSaving(false);
     setForm(emptyForm());
     void (async () => {
-      const [batchList, orderProducts, sampleNo] = await Promise.all([
-        getAllProductionBatches(),
-        getOrderProducts(),
+      const [sampleNo, stock, people] = await Promise.all([
         nextSampleNo(),
+        ifAllowed(
+          canRead("stock"),
+          () => getAllWarehouseStockItems(),
+          [] as WarehouseStockItem[]
+        ),
+        getLabPeople("analyst"),
       ]);
-      setBatches(selectItemValues(batchList.map((b) => b.batchNo)));
-      setProducts(
-        selectItemValues(
-          [...new Set([...orderProducts, ...batchList.map((b) => b.product)])]
-        ).sort((a, b) => a.localeCompare(b, "tr"))
-      );
-      const [typeList, analystList] = await Promise.all([
-        getSampleTypes(),
-        getLabAnalysts(),
-      ]);
-      setTypes(selectItemValues(typeList));
-      setAnalysts(selectItemValues(analystList));
+      setStockItems(stock);
+      setAnalysts(selectItemValues(people));
       setForm((f) => ({ ...f, sampleNo }));
     })();
-  }, [open]);
+  }, [open, canRead]);
 
-  function applyBatch(batchNo: string) {
-    void getAllProductionBatches().then((batchList) => {
-      const match = batchList.find((b) => b.batchNo === batchNo);
-      setForm((f) => ({
-        ...f,
-        batchNo,
-        product: match?.product ?? f.product,
-      }));
-    });
+  function applyStock(stockItemId: string) {
+    const item = stockOptions.find((s) => s.id === stockItemId);
+    setForm((f) => ({
+      ...f,
+      stockItemId,
+      quantity: item && (!f.quantity || f.quantity === "1") ? "1" : f.quantity,
+    }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.product.trim() || !form.batchNo.trim() || !form.analyst.trim()) {
-      toast.error("Ürün, batch ve analist zorunludur");
+    if (!form.stockItemId || !form.analyst.trim()) {
+      toast.error("Stok kalemi ve analist zorunludur");
+      return;
+    }
+    const quantity = parseFloat(form.quantity.replace(",", "."));
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      toast.error("Numune miktarını girin");
+      return;
+    }
+    if (selected && quantity > selected.quantity) {
+      toast.error(
+        `En fazla ${formatNumber(selected.quantity)} ${selected.unit} alınabilir`
+      );
       return;
     }
 
@@ -133,16 +131,17 @@ export function SampleFormSheet({
     try {
       const created = await createLabSample({
         sampleNo: form.sampleNo,
-        product: form.product,
-        batchNo: form.batchNo,
-        type: form.type,
-        status: form.status,
+        sourceKind: form.sourceKind,
+        stockItemId: form.stockItemId,
+        quantity,
+        unit: selected?.unit,
         receivedDate: form.receivedDate,
         analyst: form.analyst,
-        result: form.result || undefined,
+        status: "testing",
       });
-
-      toast.success(`${created.sampleNo} kaydedildi`);
+      toast.success(
+        `${created.sampleNo} başlatıldı — stoktan ${formatNumber(quantity)} ${created.unit ?? ""} düşüldü`
+      );
       onOpenChange(false);
       onCreated?.();
     } catch (err) {
@@ -158,12 +157,12 @@ export function SampleFormSheet({
       onOpenChange={onOpenChange}
       icon={TestTube}
       title="Numune kaydı"
-      description="Numune no otomatik üretilir. Batch seçilince ürün dolar."
+      description="Hammadde veya mamul seçin, miktarı alın; stoktan düşülür. Test bitince iade veya ıskarta edilir."
       className="max-w-2xl"
     >
       <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
         <FormSheetBody className="space-y-5">
-          <FormSection title="Numune kimliği">
+          <FormSection title="Kaynak">
             <FormField label="Numune no" htmlFor="smp-no" required>
               <Input
                 id="smp-no"
@@ -175,137 +174,111 @@ export function SampleFormSheet({
                 }
               />
             </FormField>
-            <FormField label="Batch" required hint="Üretimdeki batch numaraları.">
-              {batchOptions.length > 0 ? (
+            <FormField label="Kaynak türü" required>
+              <Select
+                value={form.sourceKind}
+                onValueChange={(sourceKind) =>
+                  setForm((f) => ({
+                    ...f,
+                    sourceKind: sourceKind as LabSampleSourceKind,
+                    stockItemId: "",
+                  }))
+                }
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="product">Mamul ürün</SelectItem>
+                  <SelectItem value="material">Hammadde</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField
+              label={form.sourceKind === "product" ? "Mamul stok" : "Hammadde stok"}
+              required
+              hint={
+                form.sourceKind === "product"
+                  ? "Üretilmiş mamul stoğundan numune alınır."
+                  : "Depodaki hammaddeden numune alınır."
+              }
+            >
+              {stockOptions.length > 0 ? (
                 <Select
-                  value={form.batchNo || undefined}
-                  onValueChange={applyBatch}
+                  value={form.stockItemId || undefined}
+                  onValueChange={applyStock}
                 >
-                  <SelectTrigger className="bg-white font-mono">
-                    <SelectValue placeholder="Batch seçin" />
+                  <SelectTrigger className="bg-white">
+                    <SelectValue
+                      placeholder={
+                        form.sourceKind === "product"
+                          ? "Mamul seçin"
+                          : "Hammadde seçin"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {batchOptions.map((b) => (
-                      <SelectItem key={b} value={b}>
-                        {b}
+                    {stockOptions.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name} · {item.lotNo} · {getWarehouseName(item.warehouseId)}{" "}
+                        ({formatNumber(item.quantity)} {item.unit})
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               ) : (
-                <Input
-                  required
-                  className="bg-white font-mono"
-                  placeholder="Örn: BT-2026-0847"
-                  value={form.batchNo}
-                  onChange={(e) => applyBatch(e.target.value)}
-                />
+                <p className="text-sm text-amber-700">
+                  {form.sourceKind === "product"
+                    ? "Mamul stoğunda numune alınacak ürün yok."
+                    : "Hammadde stoğunda numune alınacak kalem yok."}
+                </p>
               )}
             </FormField>
-            <FormField label="Ürün" htmlFor="smp-product" required>
-              {productOptions.length > 0 ? (
-                <Select
-                  value={form.product || undefined}
-                  onValueChange={(product) => setForm((f) => ({ ...f, product }))}
-                >
-                  <SelectTrigger id="smp-product" className="bg-white">
-                    <SelectValue placeholder="Ürün seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {productOptions.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField
+                label="Alınacak miktar"
+                htmlFor="smp-qty"
+                required
+                hint={
+                  selected
+                    ? `Stokta ${formatNumber(selected.quantity)} ${selected.unit}`
+                    : "Test için stoktan düşülecek adet."
+                }
+              >
                 <Input
-                  id="smp-product"
+                  id="smp-qty"
+                  type="number"
+                  min={0.0001}
+                  step="any"
                   required
                   className="bg-white"
-                  placeholder="Örn: Hepanorm 30 Tablet"
-                  value={form.product}
+                  value={form.quantity}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, product: e.target.value }))
+                    setForm((f) => ({ ...f, quantity: e.target.value }))
                   }
                 />
-              )}
-            </FormField>
+              </FormField>
+              <FormField label="Birim">
+                <Input
+                  className="bg-white"
+                  value={selected?.unit ?? ""}
+                  readOnly
+                  placeholder="Stok birimi"
+                />
+              </FormField>
+            </div>
           </FormSection>
 
           <FormSection title="Analiz">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Tip" required>
-                <Select
-                  value={form.type}
-                  onValueChange={(type) => setForm((f) => ({ ...f, type }))}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {types.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {t}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-              <FormField label="Durum" required>
-                <Select
-                  value={form.status}
-                  onValueChange={(status) =>
-                    setForm((f) => ({
-                      ...f,
-                      status: status as LabSample["status"],
-                    }))
-                  }
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SAMPLE_STATUSES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-            </div>
-            <FormField label="Analist" htmlFor="smp-analyst" required>
-              {analystOptions.length > 0 ? (
-                <Select
-                  value={form.analyst || undefined}
-                  onValueChange={(analyst) => setForm((f) => ({ ...f, analyst }))}
-                >
-                  <SelectTrigger id="smp-analyst" className="bg-white">
-                    <SelectValue placeholder="Analist seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {analystOptions.map((a) => (
-                      <SelectItem key={a} value={a}>
-                        {a}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  id="smp-analyst"
-                  required
-                  className="bg-white"
-                  placeholder="Örn: BEYZANUR EKEN"
-                  value={form.analyst}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, analyst: e.target.value }))
-                  }
-                />
-              )}
-            </FormField>
+            <PersonField
+              id="smp-analyst"
+              label="Analist"
+              value={form.analyst}
+              options={analystOptions}
+              onChange={(analyst) => setForm((f) => ({ ...f, analyst }))}
+              placeholder="Analist seçin"
+              emptyHint="Analist departmanında çalışan yok. Personel ekranından ekleyin."
+            />
             <FormField label="Alınma tarihi" htmlFor="smp-date" required>
               <Input
                 id="smp-date"
@@ -315,22 +288,6 @@ export function SampleFormSheet({
                 value={form.receivedDate}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, receivedDate: e.target.value }))
-                }
-              />
-            </FormField>
-            <FormField
-              label="Sonuç"
-              htmlFor="smp-result"
-              optional
-              hint="Onay/red için açıklama. Yeni kayıtta boş bırakılabilir."
-            >
-              <Textarea
-                id="smp-result"
-                className="bg-white"
-                placeholder="Örn: Spesifikasyon dahilinde"
-                value={form.result}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, result: e.target.value }))
                 }
               />
             </FormField>
@@ -351,7 +308,7 @@ export function SampleFormSheet({
             disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            {saving ? "Kaydediliyor…" : "Numuneyi kaydet"}
+            {saving ? "Kaydediliyor…" : "Numuneyi başlat"}
           </Button>
         </FormSheetFooter>
       </form>

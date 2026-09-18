@@ -1,4 +1,5 @@
-import type { Order, OrderStatus, ProductionBatch, ProductionLine, ProductionLineStatus, LabExperiment, LabSample } from "@/data/mock";
+import type { Prisma } from "@prisma/client";
+import type { BatchMaterialUsage, Order, OrderStatus, ProductionBatch, ProductionLine, ProductionLineStatus, LabExperiment, LabExperimentMaterialUsage, LabSample } from "@/data/mock";
 import type { Recipe, RecipeExtra, RecipeLine } from "@/data/recipes";
 import type { RawMaterialOrder, RawMaterialOrderSource, RawMaterialOrderStatus } from "@/data/raw-material-orders";
 import type { RawMaterial } from "@/data/raw-materials";
@@ -16,14 +17,21 @@ import type {
   BudgetRow,
 } from "@/data/catalog";
 import type { StockTransfer, Warehouse } from "@/data/warehouses";
-import { WAREHOUSE_IDS } from "@/data/warehouses";
+import { WAREHOUSE_IDS, getWarehouseName } from "@/data/warehouses";
 import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
-import { plusYearsIso, todayIso, parseLocalDate } from "@/lib/utils";
+import { plusYearsIso, todayIso, parseLocalDate, selectItemValues, plusDaysIso } from "@/lib/utils";
+import { personnelDisplayName, matchesLabPersonnelDepartment, type LabPersonRole } from "@/lib/personnel";
 import type { CreateRecipeInput } from "@/lib/recipe-store";
 import type { CreateRawMaterialInput } from "@/lib/raw-material-store";
 import type { CreateStockInput } from "@/lib/stock-store";
 import type { CreateBatchInput } from "@/lib/production-store";
+import {
+  estimateRecipeMaterials,
+  findRecipeByProductName,
+  matchNameKey,
+} from "@/lib/recipe-calculations";
+import { isUnsetShipmentCustomer, PRODUCTION_SHIPMENT_CUSTOMER } from "@/lib/shipment";
 import type { CreateExperimentInput, CreateSampleInput } from "@/lib/lab-store";
 import type { RawMaterialOrderAction } from "@/lib/raw-material-order-flow";
 import {
@@ -227,6 +235,9 @@ function toOrder(row: {
   warehouse: string;
   value: unknown;
   recipeNo: string | null;
+  batchNo?: string | null;
+  destination?: string | null;
+  shipmentNote?: string | null;
 }): Order {
   return {
     id: row.id,
@@ -242,7 +253,118 @@ function toOrder(row: {
     warehouse: row.warehouse,
     value: asNumber(row.value),
     recipeNo: row.recipeNo ?? undefined,
+    batchNo: row.batchNo ?? undefined,
+    destination: row.destination ?? undefined,
+    shipmentNote: row.shipmentNote ?? undefined,
   };
+}
+
+async function nextSalesOrderNo(): Promise<string> {
+  const rows = await prisma.order.findMany({ select: { orderNo: true } });
+  const year = new Date().getFullYear();
+  let max = 0;
+  for (const o of rows) {
+    const match = o.orderNo.match(/SIP-\d+-(\d+)/);
+    if (match) max = Math.max(max, parseInt(match[1], 10));
+  }
+  return `SIP-${year}-${String(max + 1).padStart(4, "0")}`;
+}
+
+async function defaultShipmentWarehouseName(): Promise<string> {
+  const packaging = await prisma.warehouse.findFirst({
+    where: { type: "packaging" },
+    orderBy: { name: "asc" },
+  });
+  if (packaging?.name) return packaging.name;
+  return getWarehouseName(WAREHOUSE_IDS.packaging);
+}
+
+async function enqueueShipmentForCompletedBatch(
+  batch: ProductionBatch,
+  ctx: AuditCtx
+): Promise<Order> {
+  const existing = await prisma.order.findFirst({
+    where: { batchNo: batch.batchNo },
+  });
+  if (existing) return toOrder(existing);
+
+  const openOrders = await prisma.order.findMany({
+    where: {
+      batchNo: null,
+      status: { in: ["pending", "confirmed"] },
+    },
+    orderBy: { orderDate: "asc" },
+  });
+  const productKey = batch.product.trim().toLocaleLowerCase("tr");
+  const match = openOrders.find(
+    (o) => o.product.trim().toLocaleLowerCase("tr") === productKey
+  );
+
+  if (match) {
+    const before = toOrder(match);
+    const row = await prisma.order.update({
+      where: { id: match.id },
+      data: {
+        batchNo: batch.batchNo,
+        status: match.status === "pending" ? "confirmed" : match.status,
+      },
+    });
+    const after = toOrder(row);
+    await logAudit({
+      actor: ctx.actor,
+      action: "UPDATE",
+      entityType: "Order",
+      entityId: after.id,
+      summary: `Parti sevkiyata bağlandı: ${batch.batchNo} → ${after.orderNo}`,
+      before,
+      after,
+      ipAddress: ctx.ip,
+    });
+    return after;
+  }
+
+  const order: Order = {
+    id: `o-svk-${batch.id}`,
+    orderNo: await nextSalesOrderNo(),
+    customer: PRODUCTION_SHIPMENT_CUSTOMER,
+    product: batch.product,
+    quantity: batch.quantity,
+    unit: batch.unit,
+    status: "confirmed",
+    orderDate: todayIso(),
+    deliveryDate: todayIso(),
+    priority: "normal",
+    warehouse: await defaultShipmentWarehouseName(),
+    value: 0,
+    batchNo: batch.batchNo,
+  };
+  await prisma.order.create({
+    data: {
+      id: order.id,
+      orderNo: order.orderNo,
+      customer: order.customer,
+      product: order.product,
+      quantity: order.quantity,
+      unit: order.unit,
+      status: order.status,
+      orderDate: order.orderDate,
+      deliveryDate: order.deliveryDate,
+      priority: order.priority,
+      warehouse: order.warehouse,
+      value: order.value,
+      batchNo: batch.batchNo,
+    },
+  });
+  await logAudit({
+    actor: ctx.actor,
+    action: "CREATE",
+    entityType: "Order",
+    entityId: order.id,
+    summary: `Sevkiyat oluştu (KK onay): ${order.orderNo} · ${batch.batchNo}`,
+    after: order,
+    ipAddress: ctx.ip,
+  });
+  return order;
 }
 
 export async function dbGetAllOrders(): Promise<Order[]> {
@@ -276,16 +398,9 @@ export async function dbCreateOrder(
     throw new FieldError("Teslimat tarihi sipariş tarihinden önce olamaz");
   }
 
-  const all = await dbGetAllOrders();
-  const year = new Date().getFullYear();
-  let max = 0;
-  for (const o of all) {
-    const match = o.orderNo.match(/SIP-\d+-(\d+)/);
-    if (match) max = Math.max(max, parseInt(match[1], 10));
-  }
   const order: Order = {
     id: `o-${Date.now()}`,
-    orderNo: `SIP-${year}-${String(max + 1).padStart(4, "0")}`,
+    orderNo: await nextSalesOrderNo(),
     customer,
     product,
     quantity,
@@ -310,28 +425,338 @@ export async function dbCreateOrder(
   return order;
 }
 
+function stockNorm(value: string): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[İIıi]/g, "i")
+    .toLocaleLowerCase("tr");
+}
+
+function matchesShipmentProduct(
+  item: { name: string; sku: string },
+  product: string
+): boolean {
+  const key = stockNorm(product);
+  return stockNorm(item.name) === key || stockNorm(item.sku) === key;
+}
+
+async function deductStockForShipment(
+  tx: Prisma.TransactionClient,
+  order: {
+    product: string;
+    quantity: number;
+    unit: string;
+    warehouse: string;
+    batchNo?: string;
+    stockItemId?: string;
+    kind?: "finished" | "material";
+  }
+): Promise<void> {
+  const needed = order.quantity;
+  if (!(needed > 0)) return;
+
+  const warehouses = await tx.warehouse.findMany({
+    select: { id: true, name: true },
+  });
+  const warehouseKey = stockNorm(order.warehouse);
+  const preferredWarehouseId = warehouses.find(
+    (w) => w.id === order.warehouse || stockNorm(w.name) === warehouseKey
+  )?.id;
+
+  const all = await tx.warehouseStockItem.findMany({
+    where: { quantity: { gt: 0 } },
+  });
+
+  let items = all.filter((item) => matchesShipmentProduct(item, order.product));
+  if (order.stockItemId) {
+    const selected =
+      all.find((item) => item.id === order.stockItemId) ??
+      (await tx.warehouseStockItem.findUnique({
+        where: { id: order.stockItemId },
+      }));
+    if (!selected) throw new FieldError("Stok kalemi bulunamadı");
+    if (selected.quantity <= 0) {
+      throw new FieldError("Seçilen stok kaleminde miktar yok");
+    }
+    const selectedName = stockNorm(selected.name);
+    const selectedSku = stockNorm(selected.sku);
+    items = all.filter(
+      (item) =>
+        item.id === selected.id ||
+        stockNorm(item.name) === selectedName ||
+        (selectedSku && stockNorm(item.sku) === selectedSku)
+    );
+    if (!items.some((item) => item.id === selected.id)) {
+      items = [selected, ...items];
+    }
+  }
+
+  if (order.kind !== "material") {
+    items = items.filter((item) => stockNorm(item.category) === "mamul");
+  }
+
+  if (items.length === 0) {
+    throw new FieldError(
+      order.kind === "material"
+        ? `Stokta bu ürün yok: ${order.product}`
+        : `Hazır mamul stoku yok: ${order.product}`
+    );
+  }
+
+  const available = items.reduce((sum, item) => sum + item.quantity, 0);
+  if (available + 1e-9 < needed) {
+    throw new FieldError(
+      `Yetersiz stok: ${order.product} için ${available} ${order.unit} var, ${needed} ${order.unit} gerekli`
+    );
+  }
+
+  const lotKey = order.batchNo ? stockNorm(order.batchNo) : "";
+  const unitKey = stockNorm(order.unit);
+  const preferredItemId = order.stockItemId ?? "";
+  items.sort((a, b) => {
+    const rank = (item: (typeof items)[number]) => {
+      const preferred = item.id === preferredItemId ? 0 : 1;
+      const warehouse =
+        item.warehouseId === preferredWarehouseId
+          ? 0
+          : item.warehouseId === WAREHOUSE_IDS.production
+            ? 1
+            : 2;
+      const lot = lotKey && stockNorm(item.lotNo) === lotKey ? 0 : 1;
+      const unit = stockNorm(item.unit) === unitKey ? 0 : 1;
+      const catKey = stockNorm(item.category);
+      const category =
+        order.kind === "material"
+          ? catKey === "mamul"
+            ? 2
+            : catKey.includes("ham") || catKey.includes("eksipiyan")
+              ? 0
+              : 1
+          : catKey === "mamul"
+            ? 0
+            : 1;
+      return [preferred, warehouse, lot, unit, category] as const;
+    };
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let i = 0; i < ra.length; i++) {
+      if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    }
+    const da = a.expiryDate
+      ? parseLocalDate(a.expiryDate).getTime()
+      : Number.POSITIVE_INFINITY;
+    const db = b.expiryDate
+      ? parseLocalDate(b.expiryDate).getTime()
+      : Number.POSITIVE_INFINITY;
+    return da - db;
+  });
+
+  let remaining = needed;
+  for (const item of items) {
+    if (remaining <= 1e-9) break;
+    const take = Math.min(item.quantity, remaining);
+    if (!(take > 0)) continue;
+    const nextQty = item.quantity - take;
+    await tx.warehouseStockItem.update({
+      where: { id: item.id },
+      data: {
+        quantity: nextQty,
+        status: deriveStockStatus(nextQty, item.minStock, item.expiryDate),
+      },
+    });
+    remaining -= take;
+  }
+
+  if (remaining > 1e-9) {
+    throw new FieldError(
+      `Yetersiz stok: ${order.product} için sevk miktarı karşılanamadı`
+    );
+  }
+}
+
 export async function dbUpdateOrderShipment(
   id: string,
-  input: { status?: Order["status"]; warehouse?: string },
+  input: {
+    status?: Order["status"];
+    warehouse?: string;
+    customer?: string;
+    destination?: string;
+    shipmentNote?: string;
+    stockItemId?: string;
+    quantity?: number;
+  },
   ctx: AuditCtx
 ): Promise<Order> {
-  const before = await dbGetOrder(id);
-  if (!before) throw new Error("Sipariş bulunamadı");
-  const data: { status?: Order["status"]; warehouse?: string } = {};
+  const raw = await prisma.order.findUnique({ where: { id } });
+  if (!raw) throw new Error("Sipariş bulunamadı");
+  const before = toOrder(raw);
+  const data: {
+    status?: Order["status"];
+    warehouse?: string;
+    customer?: string;
+    destination?: string | null;
+    shipmentNote?: string | null;
+    quantity?: number;
+    stockDeducted?: boolean;
+  } = {};
   if (input.status && input.status !== before.status) data.status = input.status;
   if (input.warehouse && input.warehouse !== before.warehouse) {
     data.warehouse = input.warehouse;
   }
+  if (input.customer && input.customer !== before.customer) {
+    data.customer = input.customer;
+  }
+  if (input.destination !== undefined && input.destination !== before.destination) {
+    data.destination = input.destination;
+  }
+  if (input.shipmentNote !== undefined) {
+    const note = input.shipmentNote.trim() || null;
+    if (note !== (before.shipmentNote ?? null)) data.shipmentNote = note;
+  }
+
+  const nextStatus = data.status ?? before.status;
+  const becomingShipped =
+    nextStatus === "shipped" && before.status !== "shipped";
+  if (nextStatus === "shipped") {
+    const customer = (data.customer ?? before.customer).trim();
+    const destination = (data.destination ?? before.destination ?? "").trim();
+    if (isUnsetShipmentCustomer(customer) || !destination) {
+      throw new FieldError("Sevk için müşteri ve teslimat yeri gerekli");
+    }
+    data.customer = customer;
+    data.destination = destination;
+  }
+
+  const shipQty =
+    input.quantity !== undefined && input.quantity > 0
+      ? input.quantity
+      : before.quantity;
+  if (becomingShipped) {
+    if (!(shipQty > 0)) throw new FieldError("Sevk miktarı pozitif olmalıdır");
+    if (shipQty > before.quantity) {
+      throw new FieldError(
+        `En fazla ${before.quantity} ${before.unit} sevk edilebilir`
+      );
+    }
+    if (shipQty !== before.quantity) data.quantity = shipQty;
+  }
+
+  const shouldDeduct = becomingShipped && !raw.stockDeducted;
+  if (shouldDeduct) data.stockDeducted = true;
+
   if (Object.keys(data).length === 0) return before;
-  const row = await prisma.order.update({ where: { id }, data });
+  const row = await prisma.$transaction(async (tx) => {
+    if (shouldDeduct) {
+      await deductStockForShipment(tx, {
+        product: before.product,
+        quantity: shipQty,
+        unit: before.unit,
+        warehouse: data.warehouse ?? before.warehouse,
+        batchNo: before.batchNo,
+        stockItemId: input.stockItemId?.trim() || undefined,
+      });
+    }
+    return tx.order.update({ where: { id }, data });
+  });
   const after = toOrder(row);
   await logAudit({
     actor: ctx.actor,
     action: "UPDATE",
     entityType: "Order",
     entityId: id,
-    summary: `Sevkiyat güncellendi: ${after.orderNo}`,
+    summary:
+      after.status === "shipped" && after.destination
+        ? shouldDeduct
+          ? `Sevke çıktı: ${after.orderNo} → ${after.customer} (${after.destination}) · stoktan ${shipQty} ${before.unit} düşüldü`
+          : `Sevke çıktı: ${after.orderNo} → ${after.customer} (${after.destination})`
+        : `Sevkiyat güncellendi: ${after.orderNo}`,
     before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
+export async function dbCreateShipment(
+  input: {
+    customer: string;
+    destination: string;
+    stockItemId: string;
+    quantity: number;
+    warehouse?: string;
+    shipmentNote?: string;
+  },
+  ctx: AuditCtx
+): Promise<Order> {
+  const customer = input.customer.trim();
+  const destination = input.destination.trim();
+  if (isUnsetShipmentCustomer(customer) || !destination) {
+    throw new FieldError("Sevk için müşteri ve teslimat yeri gerekli");
+  }
+  const quantity = input.quantity;
+  if (!(quantity > 0)) throw new FieldError("Sevk miktarı pozitif olmalıdır");
+
+  const stockItem = await prisma.warehouseStockItem.findUnique({
+    where: { id: input.stockItemId.trim() },
+  });
+  if (!stockItem) throw new FieldError("Mamul stok kalemi bulunamadı");
+  if (stockNorm(stockItem.category) !== "mamul") {
+    throw new FieldError("Sadece mamul ürün sevk edilebilir");
+  }
+  if (quantity > stockItem.quantity) {
+    throw new FieldError(
+      `Yetersiz stok: ${stockItem.quantity} ${stockItem.unit} kaldı`
+    );
+  }
+
+  const warehouse =
+    input.warehouse?.trim() ||
+    getWarehouseName(stockItem.warehouseId) ||
+    (await defaultShipmentWarehouseName());
+  const today = todayIso();
+  const orderId = `o-${Date.now()}`;
+  const orderNo = await nextSalesOrderNo();
+
+  const row = await prisma.$transaction(async (tx) => {
+    await deductStockForShipment(tx, {
+      product: stockItem.name,
+      quantity,
+      unit: stockItem.unit,
+      warehouse,
+      batchNo: stockItem.lotNo,
+      stockItemId: stockItem.id,
+      kind: "finished",
+    });
+    return tx.order.create({
+      data: {
+        id: orderId,
+        orderNo,
+        customer,
+        product: stockItem.name,
+        quantity,
+        unit: stockItem.unit,
+        status: "shipped",
+        orderDate: today,
+        deliveryDate: today,
+        priority: "normal",
+        warehouse,
+        value: 0,
+        batchNo: stockItem.lotNo || null,
+        destination,
+        shipmentNote: input.shipmentNote?.trim() || null,
+        stockDeducted: true,
+      },
+    });
+  });
+
+  const after = toOrder(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "CREATE",
+    entityType: "Order",
+    entityId: after.id,
+    summary: `Yeni sevk: ${after.orderNo} · ${after.product} · ${quantity} ${after.unit} → ${after.customer}`,
     after,
     ipAddress: ctx.ip,
   });
@@ -398,9 +823,23 @@ export async function dbUpdateRecipe(
     asString(body.productCode, "productCode", { optional: true, max: 80 }) ??
     existing.productCode ??
     "";
+  const code =
+    asString(body.code, "code", { optional: true, max: 40 }) ??
+    existing.code ??
+    "";
   const status =
     asEnum(body.status, RECIPE_STATUSES, "status", { optional: true }) ??
     existing.status;
+
+  if (code) {
+    const clash = await prisma.recipe.findFirst({
+      where: {
+        id: { not: id },
+        code: { equals: code, mode: "insensitive" },
+      },
+    });
+    if (clash) throw new FieldError("Bu reçete kodu zaten kayıtlı");
+  }
 
   let lines = existing.lines;
   if (body.lines !== undefined) {
@@ -421,12 +860,30 @@ export async function dbUpdateRecipe(
     extras = normalizeRecipeExtras(body.extras);
   }
 
+  const catalog = await dbGetAllRawMaterials();
+  lines = lines.map((l) => {
+    const materialName = (l.materialName ?? "").trim();
+    const found =
+      catalog.find((m) => m.id === l.materialId) ??
+      catalog.find(
+        (m) =>
+          m.name.trim().toLocaleLowerCase("tr") ===
+          materialName.toLocaleLowerCase("tr")
+      );
+    return {
+      materialId: found?.id ?? l.materialId ?? "",
+      materialName: found?.name ?? materialName,
+      unit: l.unit?.trim() || found?.unit || "mg",
+      quantityPerUnit: l.quantityPerUnit,
+    };
+  });
+
   const recipe: Recipe = {
     id: existing.id,
-    code: existing.code,
+    code,
     productCode,
     orderId: existing.orderId,
-    productName,
+    productName: productName.trim(),
     createdAt: existing.createdAt,
     createdBy: existing.createdBy,
     lines,
@@ -682,20 +1139,50 @@ function deriveStockStatus(
   return "normal";
 }
 
-export async function dbCreateStockEntry(
+async function upsertWarehouseStockItem(
+  db: Prisma.TransactionClient | typeof prisma,
   input: CreateStockInput,
-  ctx: AuditCtx
-): Promise<WarehouseStockItem> {
+  idPrefix = "ws-manual"
+): Promise<{ item: WarehouseStockItem; created: boolean; added: number }> {
+  const sku = input.sku.trim();
+  const name = input.name.trim();
+  const lotNo = input.lotNo.trim();
+  const existing = await db.warehouseStockItem.findFirst({
+    where: {
+      warehouseId: input.warehouseId,
+      sku,
+      lotNo,
+    },
+  });
+  if (existing) {
+    const quantity = existing.quantity + input.quantity;
+    const minStock = Math.max(existing.minStock, input.minStock);
+    const expiryDate = input.expiryDate || existing.expiryDate;
+    const row = await db.warehouseStockItem.update({
+      where: { id: existing.id },
+      data: {
+        name,
+        category: input.category,
+        quantity,
+        unit: input.unit,
+        minStock,
+        expiryDate,
+        status: deriveStockStatus(quantity, minStock, expiryDate),
+      },
+    });
+    return { item: toStockItem(row), created: false, added: input.quantity };
+  }
+
   const item: WarehouseStockItem = {
-    id: `ws-manual-${Date.now()}`,
-    sku: input.sku.trim(),
-    name: input.name.trim(),
+    id: `${idPrefix}-${Date.now()}`,
+    sku,
+    name,
     category: input.category,
     warehouseId: input.warehouseId,
     quantity: input.quantity,
     unit: input.unit,
     minStock: input.minStock,
-    lotNo: input.lotNo.trim(),
+    lotNo,
     expiryDate: input.expiryDate,
     status:
       input.status ??
@@ -705,7 +1192,7 @@ export async function dbCreateStockEntry(
     replenishFromWarehouseId: input.replenishFromWarehouseId,
     labTargetQuantity: input.labTargetQuantity,
   };
-  await prisma.warehouseStockItem.create({
+  await db.warehouseStockItem.create({
     data: {
       ...item,
       maxStock: null,
@@ -715,16 +1202,58 @@ export async function dbCreateStockEntry(
       labDirectEntry: item.labDirectEntry ?? false,
     },
   });
+  return { item, created: true, added: input.quantity };
+}
+
+export async function dbCreateStockEntry(
+  input: CreateStockInput,
+  ctx: AuditCtx
+): Promise<WarehouseStockItem> {
+  const { item, created, added } = await upsertWarehouseStockItem(prisma, input);
   await logAudit({
     actor: ctx.actor,
-    action: "CREATE",
+    action: created ? "CREATE" : "UPDATE",
     entityType: "WarehouseStockItem",
     entityId: item.id,
-    summary: `Stok girişi: ${item.name} (${item.quantity} ${item.unit})`,
+    summary: created
+      ? `Stok girişi: ${item.name} (${item.quantity} ${item.unit})`
+      : `Stok girişi (lot birleştirildi): ${item.name} +${added} ${item.unit} → ${item.quantity} ${item.unit}`,
     after: item,
     ipAddress: ctx.ip,
   });
   return item;
+}
+
+async function addProducedGoodsStock(
+  tx: Prisma.TransactionClient,
+  batch: ProductionBatch
+): Promise<void> {
+  if (!(batch.quantity > 0)) return;
+  const catalog = await tx.finishedProduct.findMany();
+  const catalogHit = catalog.find(
+    (p) => matchNameKey(p.name) === matchNameKey(batch.product)
+  );
+  const recipes = await dbGetAllRecipes();
+  const recipe = findRecipeByProductName(recipes, batch.product);
+  const sku =
+    catalogHit?.sku?.trim() ||
+    recipe?.productCode?.trim() ||
+    `MML-${batch.product.trim().replace(/\s+/g, "-")}`;
+  await upsertWarehouseStockItem(
+    tx,
+    {
+      sku,
+      name: batch.product.trim(),
+      category: "Mamul",
+      warehouseId: WAREHOUSE_IDS.production,
+      quantity: batch.quantity,
+      unit: batch.unit,
+      minStock: catalogHit?.minStock ?? 0,
+      lotNo: batch.batchNo,
+      expiryDate: catalogHit?.expiryDate || plusYearsIso(2),
+    },
+    `ws-mml-${batch.id}`
+  );
 }
 
 // ─── Raw Material Orders ────────────────────────────────────────────────────
@@ -1050,6 +1579,35 @@ export async function dbApplyRawMaterialOrderAction(
 
 // ─── Production ─────────────────────────────────────────────────────────────
 
+function parseMaterialUsage(json: string | null | undefined): BatchMaterialUsage[] | undefined {
+  if (!json) return undefined;
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    const rows: BatchMaterialUsage[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const materialName = String(rec.materialName ?? "").trim();
+      if (!materialName) continue;
+      const actualRaw = rec.actual;
+      rows.push({
+        materialId: String(rec.materialId ?? ""),
+        materialName,
+        unit: String(rec.unit ?? ""),
+        estimated: asNumber(rec.estimated),
+        actual:
+          actualRaw === null || actualRaw === undefined || actualRaw === ""
+            ? null
+            : asNumber(actualRaw),
+      });
+    }
+    return rows;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapProductionBatch(row: {
   id: string;
   batchNo: string;
@@ -1063,6 +1621,7 @@ function mapProductionBatch(row: {
   endDate: string;
   yield: number;
   qcScore: number;
+  materialUsage?: string | null;
 }): ProductionBatch {
   return {
     id: row.id,
@@ -1077,6 +1636,7 @@ function mapProductionBatch(row: {
     endDate: row.endDate,
     yield: asNumber(row.yield),
     qcScore: asNumber(row.qcScore),
+    materialUsage: parseMaterialUsage(row.materialUsage),
   };
 }
 
@@ -1271,6 +1831,62 @@ export async function dbNextBatchNo(lineName: string): Promise<string> {
   return `${prefix}-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
+async function buildBatchMaterialUsage(
+  product: string,
+  quantity: number
+): Promise<BatchMaterialUsage[]> {
+  const recipes = await dbGetAllRecipes();
+  const recipe = findRecipeByProductName(recipes, product);
+  if (!recipe) {
+    throw new FieldError("Bu ürün için reçete yok");
+  }
+  const materials = await dbGetAllRawMaterials();
+  return estimateRecipeMaterials(recipe, quantity, materials);
+}
+
+function applyQcActuals(
+  estimated: BatchMaterialUsage[],
+  actuals: BatchMaterialUsage[] | undefined
+): BatchMaterialUsage[] {
+  if (estimated.length === 0) return [];
+  if (!actuals?.length) {
+    throw new FieldError("KK için gerçekleşen hammadde miktarlarını girin");
+  }
+  return estimated.map((est) => {
+    const hit =
+      actuals.find(
+        (a) =>
+          matchNameKey(a.materialName) === matchNameKey(est.materialName) &&
+          matchNameKey(a.unit) === matchNameKey(est.unit)
+      ) ??
+      actuals.find(
+        (a) => matchNameKey(a.materialName) === matchNameKey(est.materialName)
+      );
+    if (!hit || hit.actual === null || !Number.isFinite(hit.actual) || hit.actual < 0) {
+      throw new FieldError(`Gerçekleşen miktar girin: ${est.materialName}`);
+    }
+    return { ...est, actual: hit.actual };
+  });
+}
+
+async function deductBatchMaterials(
+  tx: Prisma.TransactionClient,
+  usage: BatchMaterialUsage[]
+): Promise<void> {
+  const warehouse = getWarehouseName(WAREHOUSE_IDS.production);
+  for (const line of usage) {
+    const qty = line.actual ?? 0;
+    if (!(qty > 0)) continue;
+    await deductStockForShipment(tx, {
+      product: line.materialName,
+      quantity: qty,
+      unit: line.unit,
+      warehouse,
+      kind: "material",
+    });
+  }
+}
+
 export async function dbCreateProductionBatch(
   input: CreateBatchInput,
   ctx: AuditCtx
@@ -1289,6 +1905,11 @@ export async function dbCreateProductionBatch(
     queuePosition = await nextQueuePosition(input.line);
   }
 
+  const materialUsage = await buildBatchMaterialUsage(
+    input.product.trim(),
+    input.quantity
+  );
+
   const batch: ProductionBatch = {
     id: `b-${Date.now()}`,
     batchNo,
@@ -1302,6 +1923,7 @@ export async function dbCreateProductionBatch(
     endDate: input.endDate,
     yield: input.yield,
     qcScore: input.qcScore,
+    materialUsage,
   };
   await prisma.productionBatch.create({
     data: {
@@ -1317,6 +1939,7 @@ export async function dbCreateProductionBatch(
       endDate: batch.endDate,
       yield: batch.yield,
       qcScore: batch.qcScore,
+      materialUsage: JSON.stringify(materialUsage),
     },
   });
 
@@ -1336,6 +1959,12 @@ export async function dbCreateProductionBatch(
     after: batch,
     ipAddress: ctx.ip,
   });
+  if (batch.status === "completed") {
+    await prisma.$transaction(async (tx) => {
+      await addProducedGoodsStock(tx, batch);
+    });
+    await enqueueShipmentForCompletedBatch(batch, ctx);
+  }
   return batch;
 }
 
@@ -1343,12 +1972,68 @@ const FINISHED_BATCH_STATUSES = new Set(["qc_pending", "completed", "rejected"])
 
 export async function dbUpdateProductionBatch(
   id: string,
-  input: { action?: "complete_and_next" | "start_next"; patch?: { status?: ProductionBatch["status"] } },
+  input: {
+    action?: "complete_and_next" | "start_next" | "approve_qc" | "reject_qc";
+    patch?: { status?: ProductionBatch["status"] };
+    materialUsage?: BatchMaterialUsage[];
+  },
   ctx: AuditCtx
 ): Promise<ProductionBatch> {
   const beforeRow = await prisma.productionBatch.findUnique({ where: { id } });
   if (!beforeRow) throw new FieldError("Parti bulunamadı");
   const before = mapProductionBatch(beforeRow);
+
+  if (input.action === "approve_qc" || input.action === "reject_qc") {
+    if (before.status !== "qc_pending") {
+      throw new FieldError(
+        "Yalnızca KK bekleyen parti onaylanabilir veya reddedilebilir"
+      );
+    }
+    const status = input.action === "approve_qc" ? "completed" : "rejected";
+    let usage = before.materialUsage;
+    if (input.action === "approve_qc") {
+      if (!usage?.length) {
+        try {
+          usage = await buildBatchMaterialUsage(before.product, before.quantity);
+        } catch {
+          usage = [];
+        }
+      }
+      usage = applyQcActuals(usage, input.materialUsage);
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      if (input.action === "approve_qc") {
+        if (usage?.length) await deductBatchMaterials(tx, usage);
+        await addProducedGoodsStock(tx, before);
+      }
+      return tx.productionBatch.update({
+        where: { id },
+        data: {
+          status,
+          queuePosition: null,
+          materialUsage: usage ? JSON.stringify(usage) : beforeRow.materialUsage,
+        },
+      });
+    });
+    const mapped = mapProductionBatch(updated);
+    await logAudit({
+      actor: ctx.actor,
+      action: "UPDATE",
+      entityType: "ProductionBatch",
+      entityId: id,
+      summary:
+        input.action === "approve_qc"
+          ? `KK onaylandı: ${mapped.batchNo}`
+          : `KK reddedildi: ${mapped.batchNo}`,
+      before,
+      after: mapped,
+      ipAddress: ctx.ip,
+    });
+    if (input.action === "approve_qc") {
+      await enqueueShipmentForCompletedBatch(mapped, ctx);
+    }
+    return mapped;
+  }
 
   if (input.action === "start_next") {
     if (await lineHasActiveBatch(before.line)) {
@@ -1445,26 +2130,130 @@ export async function dbUpdateProductionBatch(
     after: mapped,
     ipAddress: ctx.ip,
   });
+  if (nextStatus === "completed") {
+    await enqueueShipmentForCompletedBatch(mapped, ctx);
+  }
   return mapped;
 }
 
 // ─── Lab ────────────────────────────────────────────────────────────────────
 
+function parseExperimentUsages(raw: string | null | undefined): LabExperimentMaterialUsage[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as LabExperimentMaterialUsage[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function toLabExperiment(row: {
+  id: string;
+  code: string;
+  title: string;
+  researcher: string;
+  department: string;
+  status: string;
+  startDate: string;
+  dueDate: string;
+  progress: number;
+  samples: number;
+  priority: string;
+  productName?: string | null;
+  recipeCode?: string | null;
+  materialUsages?: string | null;
+  recipeId?: string | null;
+  completionNote?: string | null;
+}): LabExperiment {
+  return {
+    id: row.id,
+    code: row.code,
+    title: row.title,
+    researcher: row.researcher,
+    department: row.department,
+    status: row.status as LabExperiment["status"],
+    startDate: row.startDate,
+    dueDate: row.dueDate,
+    progress: row.progress,
+    samples: row.samples,
+    priority: row.priority as LabExperiment["priority"],
+    productName: row.productName || row.title,
+    recipeCode: row.recipeCode || undefined,
+    materialUsages: parseExperimentUsages(row.materialUsages),
+    recipeId: row.recipeId ?? undefined,
+    completionNote: row.completionNote ?? undefined,
+  };
+}
+
 export async function dbGetAllLabExperiments(): Promise<LabExperiment[]> {
   const rows = await prisma.labExperiment.findMany({
     orderBy: { startDate: "desc" },
   });
-  return rows as LabExperiment[];
+  return rows.map(toLabExperiment);
+}
+
+export async function dbGetLabExperiment(
+  id: string
+): Promise<LabExperiment | undefined> {
+  const row = await prisma.labExperiment.findUnique({ where: { id } });
+  return row ? toLabExperiment(row) : undefined;
 }
 
 export async function dbGetAllLabSamples(): Promise<LabSample[]> {
   const rows = await prisma.labSample.findMany({
     orderBy: { receivedDate: "desc" },
   });
-  return rows.map((r) => ({
-    ...r,
+  return rows.map((r) => toLabSample(r));
+}
+
+function toLabSample(r: {
+  id: string;
+  sampleNo: string;
+  product: string;
+  batchNo: string;
+  type: string;
+  status: string;
+  receivedDate: string;
+  analyst: string;
+  result: string | null;
+  quantity: number | null;
+  unit: string | null;
+  stockItemId: string | null;
+  sourceKind?: string | null;
+  disposition?: string | null;
+}): LabSample {
+  return {
+    id: r.id,
+    sampleNo: r.sampleNo,
+    product: r.product,
+    batchNo: r.batchNo,
+    type: r.type,
+    status: r.status as LabSample["status"],
+    receivedDate: r.receivedDate,
+    analyst: r.analyst,
     result: r.result ?? undefined,
-  })) as LabSample[];
+    quantity: r.quantity ?? undefined,
+    unit: r.unit ?? undefined,
+    stockItemId: r.stockItemId ?? undefined,
+    sourceKind: r.sourceKind === "material" ? "material" : "product",
+    disposition:
+      r.disposition === "returned" || r.disposition === "scrap"
+        ? r.disposition
+        : "open",
+  };
+}
+
+export async function dbGetLabPeople(role: LabPersonRole): Promise<string[]> {
+  const personnel = await prisma.personnel.findMany({
+    select: { firstName: true, lastName: true, department: true },
+    orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+  });
+  return selectItemValues(
+    personnel
+      .filter((p) => matchesLabPersonnelDepartment(p.department, role))
+      .map((p) => personnelDisplayName(p))
+  ).sort((a, b) => a.localeCompare(b, "tr"));
 }
 
 export async function dbNextExperimentCode(): Promise<string> {
@@ -1496,30 +2285,258 @@ export async function dbCreateLabExperiment(
   if (all.some((e) => e.code.toLowerCase() === code.toLowerCase())) {
     throw new Error("Bu deney kodu zaten kayıtlı");
   }
-  const experiment: LabExperiment = {
-    id: `e-${Date.now()}`,
-    code,
-    title: input.title.trim(),
-    researcher: input.researcher.trim(),
-    department: input.department,
-    status: input.status,
-    startDate: input.startDate,
-    dueDate: input.dueDate,
-    progress: input.progress,
-    samples: input.samples,
-    priority: input.priority,
-  };
-  await prisma.labExperiment.create({ data: experiment });
+  const productName = input.productName.trim();
+  const recipeCode = input.recipeCode.trim();
+  if (!productName || !recipeCode) {
+    throw new FieldError("Ürün adı ve reçete kodu zorunludur");
+  }
+  if (!input.materials?.length) {
+    throw new FieldError("En az bir hammadde seçin");
+  }
+
+  const startDate = input.startDate || todayIso();
+  const dueDate = input.dueDate || plusDaysIso(45);
+  const usages: LabExperimentMaterialUsage[] = [];
+  const stockById = new Map<string, number>();
+
+  for (const line of input.materials) {
+    const qty = line.quantity;
+    if (!(qty > 0)) continue;
+    const prev = stockById.get(line.stockItemId) ?? 0;
+    stockById.set(line.stockItemId, prev + qty);
+  }
+  if (stockById.size === 0) {
+    throw new FieldError("En az bir hammadde miktarı girin");
+  }
+
+  const experimentId = `e-${Date.now()}`;
+  await prisma.$transaction(async (tx) => {
+    for (const [stockItemId, quantity] of stockById) {
+      const item = await tx.warehouseStockItem.findUnique({
+        where: { id: stockItemId },
+      });
+      if (!item) throw new FieldError("Stok kalemi bulunamadı");
+      if (isMamulStockCategory(item.category)) {
+        throw new FieldError("Deney için hammadde stoku seçin");
+      }
+      if (quantity > item.quantity) {
+        throw new FieldError(
+          `Yetersiz stok: ${item.name} · ${item.quantity} ${item.unit} kaldı`
+        );
+      }
+      const remaining = item.quantity - quantity;
+      await tx.warehouseStockItem.update({
+        where: { id: item.id },
+        data: {
+          quantity: remaining,
+          status: deriveStockStatus(remaining, item.minStock, item.expiryDate),
+        },
+      });
+      usages.push({
+        id: `emu-${Date.now()}-${usages.length}`,
+        stockItemId: item.id,
+        materialName: item.name,
+        sku: item.sku,
+        lotNo: item.lotNo,
+        quantity,
+        unit: item.unit,
+        reason: "Başlangıç formülasyonu",
+        addedAt: todayIso(),
+        kind: "initial",
+      });
+    }
+
+    await tx.labExperiment.create({
+      data: {
+        id: experimentId,
+        code,
+        title: productName,
+        researcher: input.researcher.trim(),
+        department: input.department?.trim() || "Ar-Ge",
+        status: "running",
+        startDate,
+        dueDate,
+        progress: 10,
+        samples: 0,
+        priority: input.priority ?? "normal",
+        productName,
+        recipeCode,
+        materialUsages: JSON.stringify(usages),
+      },
+    });
+  });
+
+  const experiment = await dbGetLabExperiment(experimentId);
+  if (!experiment) throw new Error("Deney oluşturulamadı");
   await logAudit({
     actor: ctx.actor,
     action: "CREATE",
     entityType: "LabExperiment",
     entityId: experiment.id,
-    summary: `Deney oluşturuldu: ${experiment.code}`,
+    summary: `Deney başlatıldı: ${experiment.code} · ${productName} / ${recipeCode} · ${usages.length} hammadde stoktan düşüldü`,
     after: experiment,
     ipAddress: ctx.ip,
   });
   return experiment;
+}
+
+export async function dbAddExperimentMaterial(
+  id: string,
+  input: { stockItemId: string; quantity: number; reason: string },
+  ctx: AuditCtx
+): Promise<LabExperiment> {
+  const raw = await prisma.labExperiment.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Deney bulunamadı");
+  const before = toLabExperiment(raw);
+  if (before.status === "approved") {
+    throw new FieldError("Tamamlanan deneye hammadde eklenemez");
+  }
+  const reason = input.reason.trim();
+  if (!reason) throw new FieldError("Ekleme sebebi zorunludur");
+  const quantity = input.quantity;
+  if (!(quantity > 0)) throw new FieldError("Miktar pozitif olmalıdır");
+
+  const row = await prisma.$transaction(async (tx) => {
+    const item = await tx.warehouseStockItem.findUnique({
+      where: { id: input.stockItemId.trim() },
+    });
+    if (!item) throw new FieldError("Stok kalemi bulunamadı");
+    if (isMamulStockCategory(item.category)) {
+      throw new FieldError("Hammadde stoku seçin");
+    }
+    if (quantity > item.quantity) {
+      throw new FieldError(
+        `Yetersiz stok: ${item.name} · ${item.quantity} ${item.unit} kaldı`
+      );
+    }
+    const remaining = item.quantity - quantity;
+    await tx.warehouseStockItem.update({
+      where: { id: item.id },
+      data: {
+        quantity: remaining,
+        status: deriveStockStatus(remaining, item.minStock, item.expiryDate),
+      },
+    });
+    const usages = [...(before.materialUsages ?? [])];
+    usages.push({
+      id: `emu-${Date.now()}`,
+      stockItemId: item.id,
+      materialName: item.name,
+      sku: item.sku,
+      lotNo: item.lotNo,
+      quantity,
+      unit: item.unit,
+      reason,
+      addedAt: todayIso(),
+      kind: "extra",
+    });
+    return tx.labExperiment.update({
+      where: { id },
+      data: {
+        materialUsages: JSON.stringify(usages),
+        status: before.status === "planning" ? "running" : before.status,
+        progress: Math.max(before.progress, 30),
+      },
+    });
+  });
+
+  const after = toLabExperiment(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabExperiment",
+    entityId: id,
+    summary: `Deneye hammadde eklendi: ${after.code} · ${input.quantity} (${reason})`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
+export async function dbCompleteLabExperiment(
+  id: string,
+  input: { completionNote?: string },
+  ctx: AuditCtx
+): Promise<LabExperiment> {
+  const raw = await prisma.labExperiment.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Deney bulunamadı");
+  const before = toLabExperiment(raw);
+  if (before.status === "approved" && before.recipeId) {
+    throw new FieldError("Bu deney zaten tamamlandı");
+  }
+  const usages = before.materialUsages ?? [];
+  if (usages.length === 0) {
+    throw new FieldError("Reçete oluşturmak için hammadde kullanımı yok");
+  }
+
+  const totals = new Map<
+    string,
+    { materialName: string; unit: string; quantity: number }
+  >();
+  for (const u of usages) {
+    const key = `${matchNameKey(u.materialName)}|${u.unit}`;
+    const prev = totals.get(key);
+    if (prev) prev.quantity += u.quantity;
+    else {
+      totals.set(key, {
+        materialName: u.materialName,
+        unit: u.unit,
+        quantity: u.quantity,
+      });
+    }
+  }
+
+  let recipeCode = before.recipeCode?.trim() || "";
+  const existingRecipes = await dbGetAllRecipes();
+  if (
+    !recipeCode ||
+    existingRecipes.some(
+      (r) => (r.code ?? "").toLowerCase() === recipeCode.toLowerCase()
+    )
+  ) {
+    recipeCode = await dbNextRecipeCode();
+  }
+
+  const recipe = await dbCreateRecipe(
+    {
+      code: recipeCode,
+      productName: before.productName || before.title,
+      lines: [...totals.values()].map((t) => ({
+        materialName: t.materialName,
+        unit: t.unit,
+        quantityPerUnit: t.quantity,
+      })),
+    },
+    ctx
+  );
+
+  const row = await prisma.labExperiment.update({
+    where: { id },
+    data: {
+      status: "approved",
+      progress: 100,
+      recipeId: recipe.id,
+      recipeCode: recipe.code ?? recipeCode,
+      completionNote: input.completionNote?.trim() || null,
+    },
+  });
+  const after = toLabExperiment(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabExperiment",
+    entityId: id,
+    summary: `Deney tamamlandı: ${after.code} → reçete ${recipe.code} oluşturuldu`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
+function isMamulStockCategory(category: string) {
+  return stockNorm(category) === "mamul";
 }
 
 export async function dbCreateLabSample(
@@ -1531,30 +2548,147 @@ export async function dbCreateLabSample(
   if (all.some((s) => s.sampleNo.toLowerCase() === sampleNo.toLowerCase())) {
     throw new Error("Bu numune numarası zaten kayıtlı");
   }
+  const quantity = input.quantity;
+  const stockItem = await prisma.warehouseStockItem.findUnique({
+    where: { id: input.stockItemId.trim() },
+  });
+  if (!stockItem) throw new FieldError("Stok kalemi bulunamadı");
+  const mamul = isMamulStockCategory(stockItem.category);
+  if (input.sourceKind === "product" && !mamul) {
+    throw new FieldError("Mamul stok kalemi seçin");
+  }
+  if (input.sourceKind === "material" && mamul) {
+    throw new FieldError("Hammadde stok kalemi seçin");
+  }
+  if (quantity > stockItem.quantity) {
+    throw new FieldError(
+      `Yetersiz stok: ${stockItem.quantity} ${stockItem.unit} kaldı`
+    );
+  }
+
   const sample: LabSample = {
     id: `ls-${Date.now()}`,
     sampleNo,
-    product: input.product.trim(),
-    batchNo: input.batchNo.trim(),
-    type: input.type,
-    status: input.status,
+    product: input.product?.trim() || stockItem.name,
+    batchNo: input.batchNo?.trim() || stockItem.lotNo,
+    type:
+      input.type?.trim() ||
+      (input.sourceKind === "material" ? "Hammadde Analizi" : "Üretim Numunesi"),
+    status: input.status ?? "testing",
     receivedDate: input.receivedDate,
     analyst: input.analyst.trim(),
     result: input.result?.trim() || undefined,
+    quantity,
+    unit: input.unit?.trim() || stockItem.unit,
+    stockItemId: stockItem.id,
+    sourceKind: input.sourceKind,
+    disposition: "open",
   };
-  await prisma.labSample.create({
-    data: { ...sample, result: sample.result ?? null },
+
+  await prisma.$transaction(async (tx) => {
+    await tx.labSample.create({
+      data: {
+        id: sample.id,
+        sampleNo: sample.sampleNo,
+        product: sample.product,
+        batchNo: sample.batchNo,
+        type: sample.type,
+        status: sample.status,
+        receivedDate: sample.receivedDate,
+        analyst: sample.analyst,
+        result: sample.result ?? null,
+        quantity: sample.quantity ?? null,
+        unit: sample.unit ?? null,
+        stockItemId: sample.stockItemId ?? null,
+        sourceKind: sample.sourceKind,
+        disposition: sample.disposition,
+      },
+    });
+    const remaining = stockItem.quantity - quantity;
+    await tx.warehouseStockItem.update({
+      where: { id: stockItem.id },
+      data: {
+        quantity: remaining,
+        status: deriveStockStatus(
+          remaining,
+          stockItem.minStock,
+          stockItem.expiryDate
+        ),
+      },
+    });
   });
+
   await logAudit({
     actor: ctx.actor,
     action: "CREATE",
     entityType: "LabSample",
     entityId: sample.id,
-    summary: `Numune oluşturuldu: ${sample.sampleNo}`,
+    summary: `Numune oluşturuldu: ${sample.sampleNo} · ${
+      input.sourceKind === "material" ? "hammadde" : "mamul"
+    } stoktan ${quantity} ${sample.unit} düşüldü (${stockItem.name})`,
     after: sample,
     ipAddress: ctx.ip,
   });
   return sample;
+}
+
+export async function dbCompleteLabSample(
+  id: string,
+  input: { disposition: "returned" | "scrap"; result?: string },
+  ctx: AuditCtx
+): Promise<LabSample> {
+  const raw = await prisma.labSample.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Numune bulunamadı");
+  const before = toLabSample(raw);
+  if (before.disposition && before.disposition !== "open") {
+    throw new FieldError("Bu numune zaten tamamlandı");
+  }
+  const quantity = before.quantity ?? 0;
+  const result = input.result?.trim() || before.result;
+
+  const row = await prisma.$transaction(async (tx) => {
+    if (input.disposition === "returned") {
+      if (!before.stockItemId || quantity <= 0) {
+        throw new FieldError("İade için stok kalemi ve miktar gerekli");
+      }
+      const item = await tx.warehouseStockItem.findUnique({
+        where: { id: before.stockItemId },
+      });
+      if (!item) throw new FieldError("İade stoğu bulunamadı");
+      const nextQty = item.quantity + quantity;
+      await tx.warehouseStockItem.update({
+        where: { id: item.id },
+        data: {
+          quantity: nextQty,
+          status: deriveStockStatus(nextQty, item.minStock, item.expiryDate),
+        },
+      });
+    }
+    return tx.labSample.update({
+      where: { id },
+      data: {
+        disposition: input.disposition,
+        status: input.disposition === "returned" ? "approved" : "rejected",
+        result: result ?? null,
+      },
+    });
+  });
+
+  const after = toLabSample(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabSample",
+    entityId: id,
+    summary:
+      input.disposition === "returned"
+        ? `Numune depoya iade: ${after.sampleNo} · ${quantity} ${after.unit ?? ""}`
+        : `Numune ıskarta: ${after.sampleNo} · ${quantity} ${after.unit ?? ""}`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
 }
 
 // ─── Catalog (read-only) ────────────────────────────────────────────────────
@@ -1592,7 +2726,24 @@ export async function dbGetPersonnel(): Promise<Personnel[]> {
 }
 
 export async function dbGetProducts(): Promise<FinishedProduct[]> {
-  return prisma.finishedProduct.findMany() as Promise<FinishedProduct[]>;
+  const rows = await prisma.warehouseStockItem.findMany({
+    orderBy: [{ name: "asc" }, { lotNo: "asc" }],
+  });
+  return rows
+    .filter((row) => matchNameKey(row.category) === "mamul" && row.quantity > 0)
+    .map((row) => ({
+      id: row.id,
+      sku: row.sku,
+      name: row.name,
+      unit: row.unit,
+      minStock: row.minStock,
+      maxStock: row.maxStock ?? 0,
+      lotNo: row.lotNo,
+      expiryDate: row.expiryDate,
+      quantity: row.quantity,
+      warehouse: getWarehouseName(row.warehouseId),
+      status: row.status,
+    }));
 }
 
 export async function dbGetInvoices(): Promise<Invoice[]> {

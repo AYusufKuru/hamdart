@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { ConflictError, FieldError } from "@/lib/server/fields";
+import { LAB_PERSONNEL_DEPARTMENTS } from "@/lib/personnel";
 import { capitalizeWordsTr } from "@/lib/utils";
 
 export type DepartmentRow = {
@@ -17,7 +18,17 @@ function toRow(row: { id: string; name: string; createdAt: Date }): DepartmentRo
   };
 }
 
+async function ensureLabPersonnelDepartments() {
+  for (const name of LAB_PERSONNEL_DEPARTMENTS) {
+    const exists = await prisma.department.findFirst({
+      where: { name: { equals: name, mode: "insensitive" } },
+    });
+    if (!exists) await prisma.department.create({ data: { name } });
+  }
+}
+
 export async function listDepartments(): Promise<DepartmentRow[]> {
+  await ensureLabPersonnelDepartments();
   const rows = await prisma.department.findMany({
     orderBy: { name: "asc" },
   });

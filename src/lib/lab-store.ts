@@ -1,5 +1,12 @@
-import type { ExperimentStatus, LabExperiment, LabSample } from "@/data/mock";
-import { apiGet, apiPost } from "@/lib/api-client";
+import type {
+  ExperimentStatus,
+  LabExperiment,
+  LabExperimentMaterialUsage,
+  LabSample,
+  LabSampleDisposition,
+  LabSampleSourceKind,
+} from "@/data/mock";
+import { apiGet, apiPatch, apiPost } from "@/lib/api-client";
 
 export const EXPERIMENT_STATUSES: { value: ExperimentStatus; label: string }[] =
   [
@@ -64,18 +71,10 @@ export async function nextSampleNo(): Promise<string> {
   return `SMP-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
-export async function getLabResearchers(): Promise<string[]> {
-  const experiments = await getAllLabExperiments();
-  return [...new Set(experiments.map((e) => e.researcher))].sort((a, b) =>
-    a.localeCompare(b, "tr")
-  );
-}
-
-export async function getLabAnalysts(): Promise<string[]> {
-  const samples = await getAllLabSamples();
-  return [...new Set(samples.map((s) => s.analyst))].sort((a, b) =>
-    a.localeCompare(b, "tr")
-  );
+export async function getLabPeople(
+  role: "analyst" | "researcher"
+): Promise<string[]> {
+  return apiGet<string[]>(`/api/lab/people?role=${role}`);
 }
 
 export async function getLabDepartments(): Promise<string[]> {
@@ -94,15 +93,14 @@ export async function getSampleTypes(): Promise<string[]> {
 
 export type CreateExperimentInput = {
   code?: string;
-  title: string;
+  productName: string;
+  recipeCode: string;
   researcher: string;
-  department: string;
-  status: ExperimentStatus;
-  startDate: string;
-  dueDate: string;
-  progress: number;
-  samples: number;
-  priority: LabExperiment["priority"];
+  department?: string;
+  startDate?: string;
+  dueDate?: string;
+  priority?: LabExperiment["priority"];
+  materials: { stockItemId: string; quantity: number }[];
 };
 
 export async function createLabExperiment(
@@ -111,15 +109,39 @@ export async function createLabExperiment(
   return apiPost<LabExperiment>("/api/lab/experiments", input);
 }
 
+export async function addExperimentMaterial(
+  id: string,
+  input: { stockItemId: string; quantity: number; reason: string }
+): Promise<LabExperiment> {
+  return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
+    action: "add_material",
+    ...input,
+  });
+}
+
+export async function completeLabExperiment(
+  id: string,
+  input?: { completionNote?: string }
+): Promise<LabExperiment> {
+  return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
+    action: "complete",
+    completionNote: input?.completionNote,
+  });
+}
+
 export type CreateSampleInput = {
   sampleNo?: string;
-  product: string;
-  batchNo: string;
-  type: string;
-  status: LabSample["status"];
+  product?: string;
+  batchNo?: string;
+  type?: string;
+  status?: LabSample["status"];
   receivedDate: string;
   analyst: string;
   result?: string;
+  quantity: number;
+  unit?: string;
+  stockItemId: string;
+  sourceKind: LabSampleSourceKind;
 };
 
 export async function createLabSample(
@@ -127,3 +149,12 @@ export async function createLabSample(
 ): Promise<LabSample> {
   return apiPost<LabSample>("/api/lab/samples", input);
 }
+
+export async function completeLabSample(
+  id: string,
+  input: { disposition: Exclude<LabSampleDisposition, "open">; result?: string }
+): Promise<LabSample> {
+  return apiPatch<LabSample>(`/api/lab/samples/${id}`, input);
+}
+
+export type { LabExperimentMaterialUsage };

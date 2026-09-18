@@ -13,6 +13,7 @@ import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { ConflictError, FieldError } from "@/lib/server/fields";
 import { capitalizeWordsTr } from "@/lib/utils";
+import { normalizePersonnelTitle } from "@/lib/personnel";
 
 type AuditCtx = { actor: string; ip?: string };
 
@@ -359,7 +360,7 @@ export async function dbCreatePersonnel(
     ...input,
     firstName: capitalizeWordsTr(input.firstName),
     lastName: capitalizeWordsTr(input.lastName),
-    title: capitalizeWordsTr(input.title),
+    title: normalizePersonnelTitle(input.title),
   };
   const row = await prisma.personnel.create({
     data: {
@@ -406,7 +407,7 @@ export async function dbUpdatePersonnel(
       ? { lastName: capitalizeWordsTr(input.lastName) }
       : {}),
     ...(input.title !== undefined
-      ? { title: capitalizeWordsTr(input.title) }
+      ? { title: normalizePersonnelTitle(input.title) }
       : {}),
   };
   const row = await prisma.personnel.update({ where: { id }, data });

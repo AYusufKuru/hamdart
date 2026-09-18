@@ -4,6 +4,8 @@ export const DEFAULT_DEPARTMENTS = [
   "Kalite Güvence",
   "Depo & Lojistik",
   "Ar-Ge",
+  "Analist",
+  "Araştırmacı",
   "Satın Alma",
   "Ticari",
   "İnsan Kaynakları",

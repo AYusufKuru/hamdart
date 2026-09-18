@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { type ProductionBatch, type ProductionLine } from "@/data/mock";
+import { type ProductionBatch, type ProductionLine, type BatchMaterialUsage } from "@/data/mock";
 import {
   getAllProductionBatches,
   getAllProductionLines,
@@ -25,19 +25,25 @@ import {
   updateProductionBatch,
 } from "@/lib/production-store";
 import { BatchFormSheet } from "@/components/factory/batch-form-sheet";
+import { FactoryHistoryPanel } from "@/components/factory/factory-history-panel";
 import { LineSettingsSheet } from "@/components/factory/line-settings-sheet";
+import { QcApproveDialog } from "@/components/factory/qc-approve-dialog";
+import { FormDialog } from "@/components/shared/form-sheet";
 import { CanWrite } from "@/components/auth/can-write";
 import { useAuth } from "@/lib/auth/auth-context";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import {
   AlertTriangle,
+  Check,
   Cog,
   Factory,
+  History,
   ListOrdered,
   Pause,
   Play,
   Settings,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -69,6 +75,11 @@ function FactoryPageContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsLineId, setSettingsLineId] = useState<string | undefined>();
   const [tab, setTab] = useState("lines");
+  const [qcBusyId, setQcBusyId] = useState<string | null>(null);
+  const [qcConfirm, setQcConfirm] = useState<{
+    batch: ProductionBatch;
+    action: "approve_qc" | "reject_qc";
+  } | null>(null);
 
   const refresh = async () => {
     const [lines, batches] = await Promise.all([
@@ -87,11 +98,34 @@ function FactoryPageContent() {
       toast.success(
         updated.status === "in_progress"
           ? `Sıradaki parti başladı: ${updated.batchNo}`
-          : `${updated.batchNo} bitirildi`
+          : `${updated.batchNo} KK bekliyor`
       );
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "İşlem başarısız");
+    }
+  }
+
+  async function confirmQc(usage?: BatchMaterialUsage[]) {
+    if (!qcConfirm) return;
+    const { batch, action } = qcConfirm;
+    setQcBusyId(batch.id);
+    try {
+      const updated = await updateProductionBatch(batch.id, {
+        action,
+        materialUsage: usage,
+      });
+      toast.success(
+        action === "approve_qc"
+          ? `${updated.batchNo} KK onaylandı — sevkiyata düştü, hammaddeler stoktan düşüldü`
+          : `${updated.batchNo} KK reddedildi`
+      );
+      setQcConfirm(null);
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "İşlem başarısız");
+    } finally {
+      setQcBusyId(null);
     }
   }
 
@@ -113,9 +147,16 @@ function FactoryPageContent() {
     if (nextTab === "batches") setTab("batches");
     if (nextTab === "lines") setTab("lines");
     if (nextTab === "queue") setTab("queue");
+    if (nextTab === "history") setTab("history");
   }, [searchParams]);
 
   const queuedCount = productionBatches.filter((b) => b.status === "queued").length;
+  const qcPendingCount = productionBatches.filter((b) => b.status === "qc_pending").length;
+  const batchesForTable = [...productionBatches].sort((a, b) => {
+    if (a.status === "qc_pending" && b.status !== "qc_pending") return -1;
+    if (b.status === "qc_pending" && a.status !== "qc_pending") return 1;
+    return 0;
+  });
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -126,6 +167,14 @@ function FactoryPageContent() {
         description="Üretim hatları, batch takibi, verimlilik ve GMP uyumlu operasyon yönetimi."
         actions={
           <>
+            <Button
+              variant="outline"
+              className="rounded-2xl"
+              onClick={() => setTab("history")}
+            >
+              <History className="w-4 h-4 mr-2" />
+              Üretim geçmişi
+            </Button>
             <CanWrite resource="factory">
               <Button
                 variant="outline"
@@ -178,6 +227,7 @@ function FactoryPageContent() {
           <TabsTrigger value="lines">Üretim Hatları</TabsTrigger>
           <TabsTrigger value="queue">Sıra</TabsTrigger>
           <TabsTrigger value="batches">Batch Takibi</TabsTrigger>
+          <TabsTrigger value="history">Üretim geçmişi</TabsTrigger>
         </TabsList>
 
         <TabsContent value="lines">
@@ -383,6 +433,14 @@ function FactoryPageContent() {
 
         <TabsContent value="batches">
           <Card className="glass-card border-none">
+            {qcPendingCount > 0 && (
+              <CardHeader className="pb-0">
+                <p className="text-sm font-medium text-amber-700">
+                  {qcPendingCount} parti KK bekliyor
+                  {canEditFactory ? " — onay veya red Batch Takibi'nden yapılır." : "."}
+                </p>
+              </CardHeader>
+            )}
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
@@ -395,13 +453,18 @@ function FactoryPageContent() {
                     <TableHead>Verim</TableHead>
                     <TableHead>KK Skoru</TableHead>
                     <TableHead>Tarih</TableHead>
+                    {canEditFactory ? <TableHead className="text-right">İşlem</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {productionBatches.map((batch) => {
+                  {batchesForTable.map((batch) => {
                     const status = batchStatusMap[batch.status] ?? batchStatusMap.planned;
+                    const qcBusy = qcBusyId === batch.id;
                     return (
-                      <TableRow key={batch.id}>
+                      <TableRow
+                        key={batch.id}
+                        className={cn(batch.status === "qc_pending" && "bg-amber-500/5")}
+                      >
                         <TableCell className="font-mono font-bold">{batch.batchNo}</TableCell>
                         <TableCell>{batch.product}</TableCell>
                         <TableCell className="text-muted-foreground">{batch.line}</TableCell>
@@ -444,6 +507,35 @@ function FactoryPageContent() {
                         <TableCell className="text-muted-foreground text-sm">
                           {formatDate(batch.startDate)} — {formatDate(batch.endDate)}
                         </TableCell>
+                        {canEditFactory ? (
+                          <TableCell className="text-right">
+                            {batch.status === "qc_pending" ? (
+                              <div className="flex flex-wrap justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  className="rounded-lg"
+                                  disabled={qcBusy}
+                                  onClick={() => setQcConfirm({ batch, action: "approve_qc" })}
+                                >
+                                  <Check className="w-3.5 h-3.5 mr-1" />
+                                  KK Onayla
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="rounded-lg"
+                                  disabled={qcBusy}
+                                  onClick={() => setQcConfirm({ batch, action: "reject_qc" })}
+                                >
+                                  <X className="w-3.5 h-3.5 mr-1" />
+                                  KK Reddet
+                                </Button>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                        ) : null}
                       </TableRow>
                     );
                   })}
@@ -456,6 +548,10 @@ function FactoryPageContent() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <FactoryHistoryPanel batches={productionBatches} />
         </TabsContent>
       </Tabs>
 
@@ -478,6 +574,51 @@ function FactoryPageContent() {
           setTab("lines");
         }}
       />
+      <QcApproveDialog
+        open={qcConfirm?.action === "approve_qc"}
+        batch={qcConfirm?.action === "approve_qc" ? qcConfirm.batch : null}
+        busy={!!qcBusyId}
+        onOpenChange={(open) => {
+          if (!open && !qcBusyId) setQcConfirm(null);
+        }}
+        onConfirm={(usage) => confirmQc(usage)}
+      />
+      <FormDialog
+        open={qcConfirm?.action === "reject_qc"}
+        onOpenChange={(open) => {
+          if (!open && !qcBusyId) setQcConfirm(null);
+        }}
+        title="KK Reddet"
+        description={qcConfirm?.batch.batchNo}
+        icon={X}
+        className="max-w-sm"
+      >
+        <div className="px-5 py-4">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Bu parti reddedilecek ve serbest bırakılmayacak.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-3">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl"
+            disabled={!!qcBusyId}
+            onClick={() => setQcConfirm(null)}
+          >
+            İptal
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            className="rounded-xl"
+            disabled={!!qcBusyId}
+            onClick={() => void confirmQc()}
+          >
+            Reddet
+          </Button>
+        </div>
+      </FormDialog>
     </div>
   );
 }

@@ -32,9 +32,32 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
 export async function updateOrderShipment(
   id: string,
-  patch: { status?: Order["status"]; warehouse?: string }
+  patch: {
+    status?: Order["status"];
+    warehouse?: string;
+    customer?: string;
+    destination?: string;
+    shipmentNote?: string;
+    stockItemId?: string;
+    quantity?: number;
+  }
 ): Promise<Order> {
   return apiPatch<Order>(`/api/orders/${id}`, patch);
+}
+
+export type CreateShipmentInput = {
+  customer: string;
+  destination: string;
+  stockItemId: string;
+  quantity: number;
+  warehouse?: string;
+  shipmentNote?: string;
+};
+
+export async function createShipment(
+  input: CreateShipmentInput
+): Promise<Order> {
+  return apiPost<Order>("/api/orders/ship", input);
 }
 
 export async function getOrderCustomers(): Promise<string[]> {

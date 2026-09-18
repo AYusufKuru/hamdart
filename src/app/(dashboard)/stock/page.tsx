@@ -56,7 +56,7 @@ export default function StockPage() {
       getAllWarehouseStockItems(),
       getWarehouses(),
     ]);
-    setStockItems(toDisplayStockItems(items));
+    setStockItems(toDisplayStockItems(items).filter((item) => item.quantity > 0));
     setWarehouses(wh);
   };
 

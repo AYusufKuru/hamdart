@@ -38,6 +38,9 @@ export interface FinishedProduct {
   maxStock: number;
   lotNo: string;
   expiryDate: string;
+  quantity?: number;
+  warehouse?: string;
+  status?: string;
 }
 
 export interface Invoice {

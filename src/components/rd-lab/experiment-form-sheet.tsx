@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Microscope } from "lucide-react";
+import { Microscope, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,89 +19,130 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import type { ExperimentStatus, LabExperiment } from "@/data/mock";
 import {
   createLabExperiment,
-  EXPERIMENT_STATUSES,
-  getLabDepartments,
-  getLabResearchers,
-  LAB_DEPARTMENTS,
+  getLabPeople,
   nextExperimentCode,
 } from "@/lib/lab-store";
-import { plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
+import { nextRecipeCode } from "@/lib/recipe-store";
+import { getAllWarehouseStockItems } from "@/lib/stock-store";
+import { getWarehouseName, type WarehouseStockItem } from "@/data/warehouses";
+import { ifAllowed } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth/auth-context";
+import { formatNumber, selectItemValues, todayIso } from "@/lib/utils";
+import { PersonField } from "@/components/rd-lab/person-field";
+
+function isMamul(item: WarehouseStockItem) {
+  return (
+    item.category.trim().toLocaleLowerCase("tr").replace(/[İIıi]/g, "i") ===
+    "mamul"
+  );
+}
+
+type MaterialLine = {
+  key: string;
+  stockItemId: string;
+  quantity: string;
+};
 
 function emptyForm() {
   return {
     code: "",
-    title: "",
+    productName: "",
+    recipeCode: "",
     researcher: "",
-    department: "Formülasyon",
-    status: "planning" as ExperimentStatus,
     startDate: todayIso(),
-    dueDate: plusDaysIso(45),
-    progress: "0",
-    samples: "0",
-    priority: "normal" as LabExperiment["priority"],
+    materials: [{ key: "m-0", stockItemId: "", quantity: "" }] as MaterialLine[],
   };
-}
-
-interface ExperimentFormSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated?: () => void;
 }
 
 export function ExperimentFormSheet({
   open,
   onOpenChange,
   onCreated,
-}: ExperimentFormSheetProps) {
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated?: () => void;
+}) {
+  const { canRead } = useAuth();
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [researchers, setResearchers] = useState<string[]>([]);
-  const [departments, setDepartments] = useState<string[]>([...LAB_DEPARTMENTS]);
+  const [stockItems, setStockItems] = useState<WarehouseStockItem[]>([]);
 
-  const researcherOptions = useMemo(() => {
-    const base = selectItemValues(researchers);
-    const current = form.researcher.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.researcher, researchers]);
+  const researcherOptions = useMemo(
+    () => selectItemValues(researchers),
+    [researchers]
+  );
+
+  const materialStock = useMemo(
+    () =>
+      stockItems
+        .filter((item) => item.quantity > 0 && !isMamul(item))
+        .sort((a, b) => a.name.localeCompare(b.name, "tr")),
+    [stockItems]
+  );
 
   useEffect(() => {
     if (!open) return;
     setSaving(false);
     setForm(emptyForm());
     void (async () => {
-      const [researcherList, departmentList, code] = await Promise.all([
-        getLabResearchers(),
-        getLabDepartments(),
+      const [people, stock, expCode, recCode] = await Promise.all([
+        getLabPeople("researcher"),
+        ifAllowed(
+          canRead("stock"),
+          () => getAllWarehouseStockItems(),
+          [] as WarehouseStockItem[]
+        ),
         nextExperimentCode(),
+        nextRecipeCode(),
       ]);
-      setResearchers(selectItemValues(researcherList));
-      setDepartments(selectItemValues(departmentList));
-      setForm((f) => ({ ...f, code }));
+      setResearchers(selectItemValues(people));
+      setStockItems(stock);
+      setForm((f) => ({ ...f, code: expCode, recipeCode: recCode }));
     })();
-  }, [open]);
+  }, [open, canRead]);
+
+  function updateLine(key: string, patch: Partial<MaterialLine>) {
+    setForm((f) => ({
+      ...f,
+      materials: f.materials.map((line) =>
+        line.key === key ? { ...line, ...patch } : line
+      ),
+    }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const progress = parseFloat(form.progress);
-    const samples = parseInt(form.samples, 10);
-    if (!form.title.trim() || !form.researcher.trim()) {
-      toast.error("Başlık ve araştırmacı zorunludur");
+    if (!form.productName.trim() || !form.recipeCode.trim()) {
+      toast.error("Ürün adı ve reçete kodu zorunludur");
       return;
     }
-    if (form.dueDate < form.startDate) {
-      toast.error("Bitiş tarihi başlangıçtan önce olamaz");
+    if (!form.researcher.trim()) {
+      toast.error("Araştırmacı seçin");
       return;
     }
-    if (!Number.isFinite(progress) || progress < 0 || progress > 100) {
-      toast.error("İlerleme 0–100 arasında olmalıdır");
-      return;
+    const materials: { stockItemId: string; quantity: number }[] = [];
+    for (const line of form.materials) {
+      if (!line.stockItemId) continue;
+      const quantity = parseFloat(line.quantity.replace(",", "."));
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        toast.error("Her hammadde için geçerli miktar girin");
+        return;
+      }
+      const item = materialStock.find((s) => s.id === line.stockItemId);
+      if (item && quantity > item.quantity) {
+        toast.error(
+          `${item.name}: en fazla ${formatNumber(item.quantity)} ${item.unit}`
+        );
+        return;
+      }
+      materials.push({ stockItemId: line.stockItemId, quantity });
     }
-    if (!Number.isFinite(samples) || samples < 0) {
-      toast.error("Numune sayısı 0 veya daha büyük olmalıdır");
+    if (materials.length === 0) {
+      toast.error("En az bir hammadde seçin");
       return;
     }
 
@@ -109,18 +150,15 @@ export function ExperimentFormSheet({
     try {
       const created = await createLabExperiment({
         code: form.code,
-        title: form.title,
+        productName: form.productName,
+        recipeCode: form.recipeCode,
         researcher: form.researcher,
-        department: form.department,
-        status: form.status,
         startDate: form.startDate,
-        dueDate: form.dueDate,
-        progress,
-        samples,
-        priority: form.priority,
+        materials,
       });
-
-      toast.success(`${created.code} oluşturuldu`);
+      toast.success(
+        `${created.code} başlatıldı — hammaddeler stoktan düşüldü`
+      );
       onOpenChange(false);
       onCreated?.();
     } catch (err) {
@@ -135,13 +173,13 @@ export function ExperimentFormSheet({
       open={open}
       onOpenChange={onOpenChange}
       icon={Microscope}
-      title="Yeni deney"
-      description="Kod otomatik üretilir. Karttaki departman, ilerleme ve numune sayısı burada girilir."
+      title="Yeni deney (reçete geliştirme)"
+      description="Ürün ve reçete bilgisini girin, deneme formülasyonu için hammaddeleri stoktan alın."
       className="max-w-2xl"
     >
       <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
         <FormSheetBody className="space-y-5">
-          <FormSection title="Deney bilgisi">
+          <FormSection title="Reçete bilgisi">
             <FormField label="Deney kodu" htmlFor="exp-code" required>
               <Input
                 id="exp-code"
@@ -151,171 +189,159 @@ export function ExperimentFormSheet({
                 onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
               />
             </FormField>
-            <FormField label="Başlık" htmlFor="exp-title" required>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Ürün adı" htmlFor="exp-product" required>
+                <Input
+                  id="exp-product"
+                  required
+                  className="bg-white"
+                  placeholder="Örn: DENEME-ÜRÜN-1"
+                  value={form.productName}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, productName: e.target.value }))
+                  }
+                />
+              </FormField>
+              <FormField label="Reçete kodu" htmlFor="exp-recipe" required>
+                <Input
+                  id="exp-recipe"
+                  required
+                  className="bg-white font-mono"
+                  placeholder="REC-001"
+                  value={form.recipeCode}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, recipeCode: e.target.value }))
+                  }
+                />
+              </FormField>
+            </div>
+            <PersonField
+              id="exp-researcher"
+              label="Araştırmacı"
+              value={form.researcher}
+              options={researcherOptions}
+              onChange={(researcher) => setForm((f) => ({ ...f, researcher }))}
+              placeholder="Araştırmacı seçin"
+              emptyHint="Araştırmacı departmanında çalışan yok. Personel ekranından ekleyin."
+            />
+            <FormField label="Başlangıç" htmlFor="exp-start" required>
               <Input
-                id="exp-title"
+                id="exp-start"
+                type="date"
                 required
                 className="bg-white"
-                placeholder="Örn: Hepanorm çözünme testi"
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                value={form.startDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, startDate: e.target.value }))
+                }
               />
             </FormField>
-            <FormField label="Araştırmacı" htmlFor="exp-researcher" required>
-              {researcherOptions.length > 0 ? (
-                <Select
-                  value={form.researcher || undefined}
-                  onValueChange={(researcher) =>
-                    setForm((f) => ({ ...f, researcher }))
-                  }
-                >
-                  <SelectTrigger id="exp-researcher" className="bg-white">
-                    <SelectValue placeholder="Araştırmacı seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {researcherOptions.map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {r}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  id="exp-researcher"
-                  required
-                  className="bg-white"
-                  placeholder="Örn: HİLAL ÇELİK"
-                  value={form.researcher}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, researcher: e.target.value }))
-                  }
-                />
-              )}
-            </FormField>
           </FormSection>
 
-          <FormSection title="Organizasyon">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Departman" required>
-                <Select
-                  value={form.department}
-                  onValueChange={(department) =>
-                    setForm((f) => ({ ...f, department }))
-                  }
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments.map((d) => (
-                      <SelectItem key={d} value={d}>
-                        {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FormField>
-              <FormField label="Öncelik" required>
-                <Select
-                  value={form.priority}
-                  onValueChange={(priority) =>
-                    setForm((f) => ({
-                      ...f,
-                      priority: priority as LabExperiment["priority"],
-                    }))
-                  }
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="high">Yüksek</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FormField>
+          <FormSection
+            title="Formülasyon hammaddeleri"
+            description="Seçilen miktarlar kayıtta stoktan düşülür."
+          >
+            <div className="space-y-3">
+              {form.materials.map((line, index) => {
+                const selected = materialStock.find(
+                  (s) => s.id === line.stockItemId
+                );
+                return (
+                  <div
+                    key={line.key}
+                    className="grid grid-cols-1 gap-2 rounded-xl border p-3 sm:grid-cols-[1fr_120px_40px]"
+                  >
+                    <FormField
+                      label={index === 0 ? "Hammadde" : undefined}
+                      required={index === 0}
+                    >
+                      <Select
+                        value={line.stockItemId || undefined}
+                        onValueChange={(stockItemId) =>
+                          updateLine(line.key, { stockItemId })
+                        }
+                      >
+                        <SelectTrigger className="bg-white">
+                          <SelectValue placeholder="Stoktan hammadde seçin" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {materialStock.map((item) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name} · {item.lotNo} ·{" "}
+                              {getWarehouseName(item.warehouseId)} (
+                              {formatNumber(item.quantity)} {item.unit})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormField>
+                    <FormField
+                      label={index === 0 ? "Miktar" : undefined}
+                      required={index === 0}
+                      hint={selected ? selected.unit : undefined}
+                    >
+                      <Input
+                        type="number"
+                        min={0.0001}
+                        step="any"
+                        className="bg-white"
+                        value={line.quantity}
+                        onChange={(e) =>
+                          updateLine(line.key, { quantity: e.target.value })
+                        }
+                      />
+                    </FormField>
+                    <div className={index === 0 ? "pt-7" : "pt-1"}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="rounded-xl"
+                        disabled={form.materials.length <= 1}
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            materials: f.materials.filter(
+                              (m) => m.key !== line.key
+                            ),
+                          }))
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <FormField label="Durum" required>
-              <Select
-                value={form.status}
-                onValueChange={(status) =>
-                  setForm((f) => ({ ...f, status: status as ExperimentStatus }))
+            {materialStock.length === 0 ? (
+              <p className="text-sm text-amber-700">
+                Hammadde stoğunda kullanılabilir kalem yok.
+              </p>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() =>
+                  setForm((f) => ({
+                    ...f,
+                    materials: [
+                      ...f.materials,
+                      {
+                        key: `m-${Date.now()}`,
+                        stockItemId: "",
+                        quantity: "",
+                      },
+                    ],
+                  }))
                 }
               >
-                <SelectTrigger className="bg-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {EXPERIMENT_STATUSES.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormField>
-          </FormSection>
-
-          <FormSection title="Takvim ve ilerleme">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Başlangıç" htmlFor="exp-start" required>
-                <Input
-                  id="exp-start"
-                  type="date"
-                  required
-                  className="bg-white"
-                  value={form.startDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, startDate: e.target.value }))
-                  }
-                />
-              </FormField>
-              <FormField label="Bitiş" htmlFor="exp-due" required>
-                <Input
-                  id="exp-due"
-                  type="date"
-                  required
-                  className="bg-white"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, dueDate: e.target.value }))
-                  }
-                />
-              </FormField>
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="İlerleme" htmlFor="exp-progress" hint="Karttaki ilerleme çubuğu (%).">
-                <div className="relative">
-                  <Input
-                    id="exp-progress"
-                    type="number"
-                    min={0}
-                    max={100}
-                    className="bg-white pr-8"
-                    value={form.progress}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, progress: e.target.value }))
-                    }
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
-                    %
-                  </span>
-                </div>
-              </FormField>
-              <FormField label="Numune sayısı" htmlFor="exp-samples" hint="Kartın altındaki numune adedi.">
-                <Input
-                  id="exp-samples"
-                  type="number"
-                  min={0}
-                  className="bg-white"
-                  value={form.samples}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, samples: e.target.value }))
-                  }
-                />
-              </FormField>
-            </div>
+                <Plus className="mr-2 h-4 w-4" />
+                Hammadde satırı
+              </Button>
+            )}
           </FormSection>
         </FormSheetBody>
 
@@ -333,7 +359,7 @@ export function ExperimentFormSheet({
             disabled={saving}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            {saving ? "Kaydediliyor…" : "Deneyi oluştur"}
+            {saving ? "Kaydediliyor…" : "Deneyi başlat"}
           </Button>
         </FormSheetFooter>
       </form>

@@ -40,6 +40,7 @@ const DELETION_ORDER = [
   "supplier",
   "personnel",
   "warehouse",
+  "department",
 ] as const;
 
 type ModelName = (typeof DELETION_ORDER)[number];

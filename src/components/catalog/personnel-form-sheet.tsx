@@ -19,8 +19,14 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
+import { DEFAULT_DEPARTMENTS } from "@/data/departments";
 import type { Personnel } from "@/data/catalog";
-import { createCatalog, fetchDepartments, updateCatalog } from "@/lib/catalog-store";
+import { createCatalog, fetchDepartments, fetchPersonnel, updateCatalog } from "@/lib/catalog-store";
+import {
+  LAB_WORKER_TITLE,
+  PERSONNEL_TITLE_OPTIONS,
+  normalizePersonnelTitle,
+} from "@/lib/personnel";
 import { capitalizeWordsTr, selectItemValues, todayIso } from "@/lib/utils";
 
 function emptyForm(row?: Personnel) {
@@ -70,19 +76,38 @@ export function PersonnelFormSheet({
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [departments, setDepartments] = useState<string[]>([]);
+  const [titles, setTitles] = useState<string[]>([...PERSONNEL_TITLE_OPTIONS]);
   const departmentOptions = useMemo(() => {
-    const base = selectItemValues(departments);
+    const base = selectItemValues([...DEFAULT_DEPARTMENTS, ...departments]);
     const current = form.department.trim();
     if (current && !base.includes(current)) return [current, ...base];
     return base;
   }, [form.department, departments]);
+  const titleOptions = useMemo(() => {
+    const base = selectItemValues([...PERSONNEL_TITLE_OPTIONS, ...titles]);
+    const current = form.title.trim();
+    if (current && !base.includes(current)) return [current, ...base];
+    return base;
+  }, [form.title, titles]);
 
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm(editing ?? undefined));
-    void fetchDepartments()
-      .then((rows) => setDepartments(selectItemValues(rows.map((r) => r.name))))
-      .catch(() => setDepartments([]));
+    void Promise.all([
+      fetchDepartments()
+        .then((rows) => setDepartments(selectItemValues(rows.map((r) => r.name))))
+        .catch(() => setDepartments([])),
+      fetchPersonnel()
+        .then((rows) =>
+          setTitles(
+            selectItemValues([
+              ...PERSONNEL_TITLE_OPTIONS,
+              ...rows.map((r) => r.title),
+            ])
+          )
+        )
+        .catch(() => setTitles([...PERSONNEL_TITLE_OPTIONS])),
+    ]);
   }, [open, editing]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -112,7 +137,7 @@ export function PersonnelFormSheet({
         firstName: capitalizeWordsTr(form.firstName),
         lastName: capitalizeWordsTr(form.lastName),
         department: form.department.trim(),
-        title: capitalizeWordsTr(form.title),
+        title: normalizePersonnelTitle(form.title),
         email: form.email.trim(),
         phone: form.phone.trim(),
         salary,
@@ -184,7 +209,7 @@ export function PersonnelFormSheet({
               label="Departman"
               htmlFor="per-dep"
               required
-              hint="Birimler Denetim & Yedek > Departmanlar ekranından yönetilir."
+              hint="Analist ve Araştırmacı laboratuvar kayıtlarında kullanılır. Diğer birimler Denetim & Yedek > Departmanlar ekranından yönetilir."
             >
               <Select
                 value={form.department || undefined}
@@ -205,12 +230,31 @@ export function PersonnelFormSheet({
               </Select>
             </FormField>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="Görev / unvan" htmlFor="per-title" required>
+              <FormField
+                label="Görev / unvan"
+                htmlFor="per-title"
+                required
+                hint="Görev unvanı. Laboratuvar seçimi departmana göre yapılır (Analist / Araştırmacı)."
+              >
+                <Select
+                  value={titleOptions.includes(form.title) ? form.title : undefined}
+                  onValueChange={(title) => setForm((f) => ({ ...f, title }))}
+                >
+                  <SelectTrigger id="per-title" className="bg-white">
+                    <SelectValue placeholder="Görev seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {titleOptions.map((title) => (
+                      <SelectItem key={title} value={title}>
+                        {title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Input
-                  id="per-title"
                   required
                   autoComplete="organization-title"
-                  placeholder="Üretim operatörü"
+                  placeholder={LAB_WORKER_TITLE}
                   value={form.title}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, title: e.target.value }))

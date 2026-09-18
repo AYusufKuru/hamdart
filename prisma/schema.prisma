@@ -23,6 +23,10 @@ model Order {
   warehouse    String
   value        Decimal @db.Decimal(18, 4)
   recipeNo     String?
+  batchNo      String? @unique
+  destination  String?
+  shipmentNote String?
+  stockDeducted Boolean @default(false)
 
   @@index([status])
   @@index([orderDate])
@@ -176,23 +180,29 @@ model ProductionBatch {
   endDate       String
   yield         Float
   qcScore       Float
+  materialUsage String?
 
   @@index([line, status])
   @@index([line, queuePosition])
 }
 
 model LabExperiment {
-  id         String @id
-  code       String @unique
-  title      String
-  researcher String
-  department String
-  status     String
-  startDate  String
-  dueDate    String
-  progress   Float
-  samples    Int
-  priority   String
+  id             String  @id
+  code           String  @unique
+  title          String
+  researcher     String
+  department     String
+  status         String
+  startDate      String
+  dueDate        String
+  progress       Float
+  samples        Int
+  priority       String
+  productName    String  @default("")
+  recipeCode     String  @default("")
+  materialUsages  String  @default("[]")
+  recipeId       String?
+  completionNote String?
 }
 
 model LabSample {
@@ -205,6 +215,11 @@ model LabSample {
   receivedDate String
   analyst      String
   result       String?
+  quantity     Float?
+  unit         String?
+  stockItemId  String?
+  sourceKind   String  @default("product")
+  disposition  String  @default("open")
 }
 
 model Customer {

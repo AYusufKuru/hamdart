@@ -32,16 +32,18 @@ import { CanWrite } from "@/components/auth/can-write";
 import { useAuth } from "@/lib/auth/auth-context";
 import { ifAllowed } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Plus } from "lucide-react";
+import { ClipboardList, Pencil, Plus } from "lucide-react";
 
 export default function RecipesPage() {
-  const { canRead } = useAuth();
+  const { canRead, canWrite } = useAuth();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [materials, setMaterials] = useState<RawMaterial[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Recipe | null>(null);
+  const canEdit = canWrite("recipes");
 
   const refresh = useCallback(async () => {
     const [recipeList, orderList, materialList] = await Promise.all([
@@ -71,6 +73,16 @@ export default function RecipesPage() {
     setSelectedId(recipeId);
     setDrawerOpen(true);
   }, []);
+
+  function openCreate() {
+    setEditing(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(recipe: Recipe) {
+    setEditing(recipe);
+    setFormOpen(true);
+  }
 
   const goToIndex = useCallback(
     (index: number) => {
@@ -103,7 +115,7 @@ export default function RecipesPage() {
           <CanWrite resource="recipes">
             <Button
               className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-              onClick={() => setFormOpen(true)}
+              onClick={openCreate}
             >
               <Plus className="w-4 h-4 mr-2" />
               Reçete Ekle
@@ -122,6 +134,7 @@ export default function RecipesPage() {
                 <TableHead>Ürün adı</TableHead>
                 <TableHead>Satır</TableHead>
                 <TableHead>Durum</TableHead>
+                {canEdit ? <TableHead className="text-right">İşlem</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -158,6 +171,22 @@ export default function RecipesPage() {
                         {recipe.status === "saved" ? "Kayıtlı" : "Taslak"}
                       </Badge>
                     </TableCell>
+                    {canEdit ? (
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-lg"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEdit(recipe);
+                          }}
+                        >
+                          <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                          Düzenle
+                        </Button>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 );
               })}
@@ -203,6 +232,11 @@ export default function RecipesPage() {
               total={recipes.length}
               onPrevious={() => goToIndex(selectedIndex - 1)}
               onNext={() => goToIndex(selectedIndex + 1)}
+              canEdit={canEdit}
+              onEdit={() => {
+                openEdit(selectedRecipe);
+                setDrawerOpen(false);
+              }}
             />
           )}
         </SheetContent>
@@ -210,8 +244,15 @@ export default function RecipesPage() {
 
       <RecipeFormSheet
         open={formOpen}
-        onOpenChange={setFormOpen}
-        onCreated={refresh}
+        onOpenChange={(open) => {
+          setFormOpen(open);
+          if (!open) setEditing(null);
+        }}
+        editing={editing}
+        onSaved={async (recipe) => {
+          await refresh();
+          setSelectedId(recipe.id);
+        }}
       />
     </div>
   );

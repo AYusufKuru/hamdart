@@ -113,6 +113,8 @@ const EXPERIMENT_STATUSES = [
 ] as const;
 
 const SAMPLE_STATUSES = ["received", "testing", "approved", "rejected"] as const;
+const SAMPLE_SOURCE_KINDS = ["material", "product"] as const;
+const SAMPLE_DISPOSITIONS = ["returned", "scrap"] as const;
 
 const EXPERIMENT_PRIORITIES = ["normal", "high"] as const;
 
@@ -197,10 +199,34 @@ export const orderShipmentSchema = z
   .object({
     status: z.enum(ORDER_STATUSES, { error: "Geçersiz sipariş durumu" }).optional(),
     warehouse: optionalText(80),
+    customer: optionalText(200),
+    destination: optionalText(MAX_NOTE),
+    shipmentNote: optionalText(MAX_NOTE),
+    stockItemId: optionalText(MAX_ID),
+    quantity: finiteNumber({ positive: true }).optional(),
   })
-  .refine((value) => value.status !== undefined || value.warehouse !== undefined, {
-    message: "Güncellenecek alan belirtilmedi",
-  });
+  .refine(
+    (value) =>
+      value.status !== undefined ||
+      value.warehouse !== undefined ||
+      value.customer !== undefined ||
+      value.destination !== undefined ||
+      value.shipmentNote !== undefined ||
+      value.stockItemId !== undefined ||
+      value.quantity !== undefined,
+    {
+      message: "Güncellenecek alan belirtilmedi",
+    }
+  );
+
+export const shipmentCreateSchema = z.object({
+  customer: text(200),
+  destination: text(MAX_NOTE),
+  stockItemId: text(MAX_ID),
+  quantity: finiteNumber({ positive: true }),
+  warehouse: optionalText(80),
+  shipmentNote: optionalText(MAX_NOTE),
+});
 
 const recipeLineSchema = z.object({
   materialId: optionalText(MAX_ID).default(""),
@@ -240,6 +266,7 @@ export const recipeCreateSchema = z.object({
 
 export const recipeUpdateSchema = z.object({
   id: text(MAX_ID),
+  code: optionalText(40),
   productName: optionalText(),
   productCode: optionalText(80),
   status: z.enum(RECIPE_STATUSES, { error: "Geçersiz reçete durumu" }).optional(),
@@ -328,11 +355,24 @@ export const batchCreateSchema = z.object({
 
 export const batchPatchSchema = z.object({
   id: text(MAX_ID),
-  action: z.enum(["complete_and_next", "start_next"]).optional(),
+  action: z
+    .enum(["complete_and_next", "start_next", "approve_qc", "reject_qc"])
+    .optional(),
   patch: z
     .object({
       status: z.enum(BATCH_STATUSES, { error: "Geçersiz parti durumu" }).optional(),
     })
+    .optional(),
+  materialUsage: z
+    .array(
+      z.object({
+        materialId: optionalText(MAX_ID).default(""),
+        materialName: text(),
+        unit: optionalText(40).default(""),
+        estimated: finiteNumber({ min: 0 }),
+        actual: finiteNumber({ min: 0 }),
+      })
+    )
     .optional(),
 });
 
@@ -365,30 +405,58 @@ export const stockCreateSchema = z.object({
 
 export const experimentCreateSchema = z.object({
   code: optionalText(40),
-  title: text(240),
+  productName: text(200),
+  recipeCode: text(80),
   researcher: text(120),
-  department: text(80),
-  status: z.enum(EXPERIMENT_STATUSES, { error: "Geçersiz deney durumu" }),
-  startDate: isoDate,
-  dueDate: isoDate,
-  progress: finiteNumber({ min: 0, max: 100 }),
-  samples: z
-    .number({ error: numberMsg })
-    .finite(finiteMsg)
-    .int("Tam sayı olmalıdır")
-    .min(0, "En az 0 olmalıdır")
-    .max(10000, "En fazla 10000 olmalıdır"),
-  priority: z.enum(EXPERIMENT_PRIORITIES, { error: "Geçersiz öncelik" }),
+  department: optionalText(80),
+  startDate: isoDate.optional(),
+  dueDate: isoDate.optional(),
+  priority: z
+    .enum(EXPERIMENT_PRIORITIES, { error: "Geçersiz öncelik" })
+    .optional(),
+  materials: z
+    .array(
+      z.object({
+        stockItemId: text(MAX_ID),
+        quantity: finiteNumber({ positive: true }),
+      })
+    )
+    .min(1, "En az bir hammadde seçin")
+    .max(MAX_ARRAY),
 });
+
+export const experimentPatchSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("add_material"),
+    stockItemId: text(MAX_ID),
+    quantity: finiteNumber({ positive: true }),
+    reason: text(MAX_NOTE),
+  }),
+  z.object({
+    action: z.literal("complete"),
+    completionNote: optionalText(MAX_NOTE),
+  }),
+]);
 
 export const sampleCreateSchema = z.object({
   sampleNo: optionalText(40),
-  product: text(),
-  batchNo: text(80),
-  type: text(80),
-  status: z.enum(SAMPLE_STATUSES, { error: "Geçersiz numune durumu" }),
+  product: optionalText(),
+  batchNo: optionalText(80),
+  type: optionalText(80),
+  status: z.enum(SAMPLE_STATUSES, { error: "Geçersiz numune durumu" }).optional(),
   receivedDate: isoDate,
   analyst: text(120),
+  result: optionalText(500),
+  quantity: finiteNumber({ positive: true }),
+  unit: optionalText(40),
+  stockItemId: text(MAX_ID),
+  sourceKind: z.enum(SAMPLE_SOURCE_KINDS, { error: "Hammadde veya mamul seçin" }),
+});
+
+export const sampleCompleteSchema = z.object({
+  disposition: z.enum(SAMPLE_DISPOSITIONS, {
+    error: "Depoya iade veya ıskarta seçin",
+  }),
   result: optionalText(500),
 });
 

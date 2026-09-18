@@ -49,7 +49,11 @@ export async function PATCH(req: NextRequest) {
     if (!parsed.ok) return parsed.response;
     const batch = await dbUpdateProductionBatch(
       parsed.data.id,
-      { action: parsed.data.action, patch: parsed.data.patch },
+      {
+        action: parsed.data.action,
+        patch: parsed.data.patch,
+        materialUsage: parsed.data.materialUsage,
+      },
       {
         actor: auth.session.name,
         ip: getIpFromRequest(req),

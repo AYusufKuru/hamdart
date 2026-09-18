@@ -7,6 +7,17 @@ export async function getAllRecipes(): Promise<Recipe[]> {
   return apiGet<Recipe[]>("/api/recipes");
 }
 
+export async function getRecipeProductNames(): Promise<string[]> {
+  const recipes = await getAllRecipes();
+  return [
+    ...new Set(
+      recipes
+        .map((r) => r.productName.trim())
+        .filter((name) => name && name !== "-")
+    ),
+  ].sort((a, b) => a.localeCompare(b, "tr"));
+}
+
 export async function getRecipeByOrderId(orderId: string): Promise<Recipe | undefined> {
   const recipe = await apiGet<Recipe | null>(
     `/api/recipes/lookup?orderId=${encodeURIComponent(orderId)}`
@@ -52,8 +63,21 @@ export type CreateRecipeInput = {
   createdBy?: string;
 };
 
+export type UpdateRecipeInput = {
+  id: string;
+  code?: string;
+  productCode?: string;
+  productName?: string;
+  status?: Recipe["status"];
+  lines?: { materialName: string; unit: string; quantityPerUnit: number; materialId?: string }[];
+};
+
 export async function createRecipe(input: CreateRecipeInput): Promise<Recipe> {
   return apiPost<Recipe>("/api/recipes", input);
+}
+
+export async function updateRecipe(input: UpdateRecipeInput): Promise<Recipe> {
+  return apiPut<Recipe>("/api/recipes", input);
 }
 
 export async function createEmptyRecipe(

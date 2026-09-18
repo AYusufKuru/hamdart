@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { formatDate, formatNumber } from "@/lib/utils";
-import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Pencil } from "lucide-react";
 
 interface RecipeDetailPanelProps {
   recipe: Recipe;
@@ -23,6 +23,8 @@ interface RecipeDetailPanelProps {
   total: number;
   onPrevious: () => void;
   onNext: () => void;
+  onEdit?: () => void;
+  canEdit?: boolean;
 }
 
 export function RecipeDetailPanel({
@@ -34,6 +36,8 @@ export function RecipeDetailPanel({
   total,
   onPrevious,
   onNext,
+  onEdit,
+  canEdit,
 }: RecipeDetailPanelProps) {
   const totals = order
     ? calculateRecipeTotals(
@@ -193,16 +197,22 @@ export function RecipeDetailPanel({
         </p>
       </div>
 
-      {order && (
-        <div className="px-6 py-4 border-t bg-muted/20">
+      <div className="space-y-2 px-6 py-4 border-t bg-muted/20">
+        {canEdit && onEdit ? (
+          <Button className="w-full rounded-xl" onClick={onEdit}>
+            <Pencil className="w-4 h-4 mr-2" />
+            Düzenle
+          </Button>
+        ) : null}
+        {order ? (
           <Button variant="outline" className="w-full rounded-xl" asChild>
             <Link href={`/orders/${order.id}`}>
               <ExternalLink className="w-4 h-4 mr-2" />
               Tam Düzenleme (Sipariş)
             </Link>
           </Button>
-        </div>
-      )}
+        ) : null}
+      </div>
     </div>
   );
 }

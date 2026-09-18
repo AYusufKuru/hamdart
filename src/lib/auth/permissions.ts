@@ -359,6 +359,9 @@ export function getApiPermission(
   if (pathname.startsWith("/api/lab/samples")) {
     return { kind: "require", permission: `lab:${suffix}` };
   }
+  if (pathname.startsWith("/api/lab/people")) {
+    return { kind: "require", permission: `lab:${suffix}` };
+  }
   if (pathname.startsWith("/api/audit")) {
     return { kind: "require", permission: "admin:read" };
   }

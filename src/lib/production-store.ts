@@ -1,4 +1,5 @@
 import type {
+  BatchMaterialUsage,
   BatchStatus,
   ProductionBatch,
   ProductionLine,
@@ -101,8 +102,9 @@ export async function createProductionBatch(
 export async function updateProductionBatch(
   id: string,
   body: {
-    action?: "complete_and_next" | "start_next";
+    action?: "complete_and_next" | "start_next" | "approve_qc" | "reject_qc";
     patch?: { status?: BatchStatus };
+    materialUsage?: BatchMaterialUsage[];
   }
 ): Promise<ProductionBatch> {
   return apiPatch<ProductionBatch>("/api/production/batches", { id, ...body });

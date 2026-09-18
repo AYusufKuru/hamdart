@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ClipboardList, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,9 +19,13 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
+import type { Recipe } from "@/data/recipes";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
-import { createRecipe, getAllRecipes, nextRecipeCode } from "@/lib/recipe-store";
-import { fetchProducts } from "@/lib/catalog-store";
+import {
+  createRecipe,
+  nextRecipeCode,
+  updateRecipe,
+} from "@/lib/recipe-store";
 import { capitalizeWordsTr, selectItemValues } from "@/lib/utils";
 
 const LINE_UNITS = ["mg", "g", "kg", "adet", "mL", "L"] as const;
@@ -37,34 +41,46 @@ function emptyForm() {
   };
 }
 
-interface RecipeFormSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated?: () => void;
+function formFromRecipe(recipe: Recipe) {
+  return {
+    code: recipe.code ?? "",
+    productCode: recipe.productCode ?? "",
+    productName: recipe.productName ?? "",
+    lines:
+      recipe.lines.length > 0
+        ? recipe.lines.map((l) => ({
+            materialName: l.materialName ?? "",
+            unit: l.unit || "mg",
+            quantity:
+              l.quantityPerUnit > 0 ? String(l.quantityPerUnit) : "",
+          }))
+        : [{ materialName: "", unit: "mg", quantity: "" }],
+  };
 }
 
 export function RecipeFormSheet({
   open,
   onOpenChange,
-  onCreated,
-}: RecipeFormSheetProps) {
+  editing,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  editing?: Recipe | null;
+  onSaved?: (recipe: Recipe) => void;
+}) {
   const [form, setForm] = useState(emptyForm);
   const [materials, setMaterials] = useState<{ name: string; unit: string }[]>(
     []
   );
-  const [productNames, setProductNames] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const isEdit = Boolean(editing);
 
   useEffect(() => {
     if (!open) return;
     setSaving(false);
-    setForm(emptyForm());
     void (async () => {
-      const [materialList, recipes, products] = await Promise.all([
-        getAllRawMaterials(),
-        getAllRecipes(),
-        fetchProducts(),
-      ]);
+      const materialList = await getAllRawMaterials();
       const byName = new Map<string, string>();
       for (const m of materialList) {
         if (m.name && !byName.has(m.name)) byName.set(m.name, m.unit);
@@ -75,27 +91,14 @@ export function RecipeFormSheet({
           .filter((m) => m.name.trim())
           .sort((a, b) => a.name.localeCompare(b.name, "tr"))
       );
-      setProductNames(
-        selectItemValues(
-          [
-            ...new Set([
-              ...recipes.map((r) => r.productName),
-              ...products.map((p) => p.name),
-            ]),
-          ]
-        ).sort((a, b) => a.localeCompare(b, "tr"))
-      );
-      const code = await nextRecipeCode();
-      setForm((f) => ({ ...f, code }));
+      if (editing) {
+        setForm(formFromRecipe(editing));
+      } else {
+        const code = await nextRecipeCode();
+        setForm({ ...emptyForm(), code });
+      }
     })();
-  }, [open]);
-
-  const productOptions = useMemo(() => {
-    const base = selectItemValues(productNames);
-    const current = form.productName.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.productName, productNames]);
+  }, [open, editing]);
 
   const validLineCount = form.lines.filter(
     (l) => l.materialName.trim() && parseFloat(l.quantity.replace(",", ".")) > 0
@@ -171,15 +174,28 @@ export function RecipeFormSheet({
 
     setSaving(true);
     try {
-      const created = await createRecipe({
-        code: form.code.trim(),
-        productCode: form.productCode.trim(),
-        productName: capitalizeWordsTr(form.productName),
-        lines: parsedLines,
-      });
-      toast.success(`${created.code || created.productName} kaydedildi`);
+      const saved = editing
+        ? await updateRecipe({
+            id: editing.id,
+            code: form.code.trim(),
+            productCode: form.productCode.trim(),
+            productName: capitalizeWordsTr(form.productName),
+            lines: parsedLines,
+            status: "saved",
+          })
+        : await createRecipe({
+            code: form.code.trim(),
+            productCode: form.productCode.trim(),
+            productName: capitalizeWordsTr(form.productName),
+            lines: parsedLines,
+          });
+      toast.success(
+        isEdit
+          ? `${saved.code || saved.productName} güncellendi`
+          : `${saved.code || saved.productName} kaydedildi`
+      );
       onOpenChange(false);
-      onCreated?.();
+      onSaved?.(saved);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Kayıt başarısız");
     } finally {
@@ -192,8 +208,12 @@ export function RecipeFormSheet({
       open={open}
       onOpenChange={onOpenChange}
       icon={ClipboardList}
-      title="Yeni reçete"
-      description="Reçete kodu otomatik gelir. Hammaddeler 1 birim çıktı başına miktar olarak kaydedilir."
+      title={isEdit ? "Reçeteyi düzenle" : "Yeni reçete"}
+      description={
+        isEdit
+          ? "Ürün bilgisi ve hammadde miktarlarını güncelleyin."
+          : "Reçete kodu otomatik gelir. Hammaddeler 1 birim çıktı başına miktar olarak kaydedilir."
+      }
       className="max-w-2xl"
     >
       <form
@@ -204,7 +224,7 @@ export function RecipeFormSheet({
         <FormSheetBody className="space-y-5">
           <FormSection
             title="Reçete bilgisi"
-            description="Ürün adı üretim ve sipariş kayıtlarıyla eşleşmeli."
+            description="Ürün adını yazın. Batch başlatırken bu ad listede çıkar."
           >
             <FormField label="Reçete kodu" htmlFor="rec-code" optional>
               <Input
@@ -228,36 +248,16 @@ export function RecipeFormSheet({
                 />
               </FormField>
               <FormField label="Ürün adı" htmlFor="rec-pname" required>
-                {productOptions.length > 0 ? (
-                  <Select
-                    value={form.productName || undefined}
-                    onValueChange={(productName) =>
-                      setForm((f) => ({ ...f, productName }))
-                    }
-                  >
-                    <SelectTrigger id="rec-pname" className="bg-white">
-                      <SelectValue placeholder="Ürün seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {productOptions.map((n) => (
-                        <SelectItem key={n} value={n}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    id="rec-pname"
-                    className="bg-white"
-                    required
-                    value={form.productName}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, productName: e.target.value }))
-                    }
-                    placeholder="Örn. Hepanorm 30 Tablet"
-                  />
-                )}
+                <Input
+                  id="rec-pname"
+                  className="bg-white"
+                  required
+                  value={form.productName}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, productName: e.target.value }))
+                  }
+                  placeholder="Örn. Hepanorm 30 Tablet"
+                />
               </FormField>
             </div>
           </FormSection>
@@ -383,7 +383,11 @@ export function RecipeFormSheet({
             disabled={saving || !form.productName.trim()}
             className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
           >
-            {saving ? "Kaydediliyor…" : "Reçeteyi kaydet"}
+            {saving
+              ? "Kaydediliyor…"
+              : isEdit
+                ? "Değişiklikleri kaydet"
+                : "Reçeteyi kaydet"}
           </Button>
         </FormSheetFooter>
       </form>
