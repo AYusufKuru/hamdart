@@ -165,10 +165,7 @@ export function QuotesWorkspace() {
         <CanWrite resource="invoices">
           <Button
             className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
-            onClick={() => {
-              setEditing(null);
-              setOpen(true);
-            }}
+            onClick={() => setOpen(true)}
           >
             <Plus className="w-4 h-4 mr-2" />
             Yeni fiyat teklifi

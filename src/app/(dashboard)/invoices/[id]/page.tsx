@@ -227,6 +227,7 @@ export default function InvoiceDetailPage({
   const paymentLabel = documentType === "purchase" ? "Ödeme kaydet" : "Ödeme al";
 
   async function handlePdf() {
+    if (!invoice) return;
     try {
       await downloadInvoicePdf(invoice, lines, settings);
     } catch (err) {
