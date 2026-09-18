@@ -8,7 +8,7 @@ import {
   jsonCaught,
   jsonOk,
   parseBody,
-  requireAdmin,
+  requireSession,
 } from "@/lib/server/api-utils";
 import { departmentUpdateSchema } from "@/lib/server/schemas";
 
@@ -16,7 +16,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireSession(req, "personnel:write");
   if (!auth.ok) return auth.response;
 
   try {
@@ -37,7 +37,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireSession(req, "personnel:write");
   if (!auth.ok) return auth.response;
 
   try {

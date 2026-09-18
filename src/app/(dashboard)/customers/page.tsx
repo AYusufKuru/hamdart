@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
@@ -11,6 +12,10 @@ import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
 import { CustomerFormSheet } from "@/components/catalog/customer-form-sheet";
+import {
+  PartyBalanceAmount,
+  PartyBalanceStatus,
+} from "@/components/catalog/party-balance-cell";
 import type { BudgetCashEntry, ChequeNote, Customer, Invoice } from "@/data/catalog";
 import {
   deleteCatalog,
@@ -21,12 +26,7 @@ import {
 } from "@/lib/catalog-store";
 import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
-import {
-  accountStatusLabel,
-  buildPartyAccountMap,
-  emptyPartyAccount,
-  partyKey,
-} from "@/lib/party-account";
+import { buildPartyAccountMap, emptyPartyAccount, partyKey } from "@/lib/party-account";
 
 export default function CustomersPage() {
   const router = useRouter();
@@ -60,7 +60,7 @@ export default function CustomersPage() {
     () =>
       buildPartyAccountMap(
         rows.map((row) => row.name),
-        { invoices, cash, cheques }
+        { role: "customer", invoices, cash, cheques }
       ),
     [rows, invoices, cash, cheques]
   );
@@ -86,7 +86,13 @@ export default function CustomersPage() {
       header: "Müşteri Adı",
       render: (r) => (
         <div>
-          <p className="font-medium">{r.name}</p>
+          <Link
+            href={`/customers/${encodeURIComponent(r.id)}`}
+            className="font-medium text-indigo-700 hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {r.name}
+          </Link>
           {r.active ? null : (
             <p className="text-xs text-muted-foreground">Pasif kart</p>
           )}
@@ -100,17 +106,19 @@ export default function CustomersPage() {
     {
       key: "balance",
       header: "Bakiye",
-      className: "text-right",
+      className: "w-32 max-w-none text-right",
       render: (r) => {
         const account = accounts.get(partyKey(r.name)) ?? emptyPartyAccount();
-        const label = accountStatusLabel(account.balance);
-        const className =
-          account.balance > 0.009
-            ? "font-semibold text-emerald-700"
-            : account.balance < -0.009
-              ? "font-semibold text-rose-700"
-              : "text-muted-foreground";
-        return <span className={className}>{label}</span>;
+        return <PartyBalanceAmount balance={account.balance} />;
+      },
+    },
+    {
+      key: "balanceStatus",
+      header: "Durum",
+      className: "w-24 max-w-none",
+      render: (r) => {
+        const account = accounts.get(partyKey(r.name)) ?? emptyPartyAccount();
+        return <PartyBalanceStatus balance={account.balance} />;
       },
     },
     ...(writable
@@ -162,7 +170,7 @@ export default function CustomersPage() {
             searchText={(r) =>
               `${r.name} ${r.contact} ${r.address} ${r.taxNo} ${r.email}`
             }
-            onRowClick={(r) => router.push(`/customers/${r.id}`)}
+            onRowClick={(r) => router.push(`/customers/${encodeURIComponent(r.id)}`)}
             empty="Henüz müşteri yok"
           />
         </CardContent>

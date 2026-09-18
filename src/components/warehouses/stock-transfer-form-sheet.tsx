@@ -21,6 +21,11 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import type { Warehouse, WarehouseStockItem } from "@/data/warehouses";
+import {
+  allowedTransferDestinations,
+  isFinishedWarehouseType,
+  needsIstanbulShipment,
+} from "@/data/warehouses";
 import { createStockTransfer } from "@/lib/warehouse-store";
 
 const REASON_OPTIONS = [
@@ -79,7 +84,10 @@ export function StockTransferFormSheet({
   );
 
   const source = sourceItems.find((item) => item.id === form.sourceItemId);
-  const destOptions = warehouses.filter((w) => w.id !== source?.warehouseId);
+  const sourceWarehouse = warehouses.find((w) => w.id === source?.warehouseId);
+  const finishedSource = isFinishedWarehouseType(sourceWarehouse?.type ?? "");
+  const destOptions = allowedTransferDestinations(sourceWarehouse, warehouses);
+  const istanbulDest = needsIstanbulShipment(form.toWarehouseId);
 
   useEffect(() => {
     if (!open) return;
@@ -108,10 +116,14 @@ export function StockTransferFormSheet({
         sourceItemId: form.sourceItemId,
         toWarehouseId: form.toWarehouseId,
         quantity,
-        reason: form.reason,
+        reason: finishedSource
+          ? istanbulDest
+            ? "istanbul_shipment"
+            : "finished_direct"
+          : form.reason,
         note: form.note.trim() || undefined,
       });
-      toast.success("Stok aktarıldı");
+      toast.success(istanbulDest ? "Stok ayrıldı, sevkiyat bekliyor" : "Stok aktarıldı");
       onOpenChange(false);
       onCreated?.();
     } catch (err) {
@@ -126,8 +138,12 @@ export function StockTransferFormSheet({
       open={open}
       onOpenChange={onOpenChange}
       icon={ArrowLeftRight}
-      title="Stok aktar"
-      description="Kaynak depodaki miktar düşer; hedef depoda aynı SKU ve lot varsa artar."
+      title={finishedSource ? "Mamul aktar" : "Stok aktar"}
+      description={
+        finishedSource
+          ? "Fabrika ve internet satışı arasında stok doğrudan geçer. İstanbul için stok ayrılır, sevkiyat onaylanınca yola çıkar."
+          : "Kaynak depodaki miktar düşer; hedef depoda aynı SKU ve lot varsa artar."
+      }
     >
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
         <FormSheetBody className="space-y-5">
@@ -195,6 +211,7 @@ export function StockTransferFormSheet({
                 onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))}
               />
             </FormField>
+            {finishedSource ? null : (
             <FormField label="Tür" required>
               <Select
                 value={form.reason}
@@ -217,6 +234,7 @@ export function StockTransferFormSheet({
                 </SelectContent>
               </Select>
             </FormField>
+            )}
           </FormSection>
 
           <FormSection title="Not" description="Opsiyonel açıklama.">
@@ -242,9 +260,13 @@ export function StockTransferFormSheet({
           <Button
             type="submit"
             disabled={saving || sourceItems.length === 0}
-            className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+            className="rounded-xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
           >
-            {saving ? "Aktarılıyor…" : "Aktar"}
+            {saving
+              ? "Kaydediliyor…"
+              : istanbulDest
+                ? "Stok ayır"
+                : "Aktar"}
           </Button>
         </FormSheetFooter>
       </form>

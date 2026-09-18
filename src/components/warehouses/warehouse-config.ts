@@ -1,4 +1,4 @@
-import { Beaker, Factory, Package } from "lucide-react";
+import { Beaker, Boxes, Factory, Package } from "lucide-react";
 import type { WarehouseType } from "@/data/warehouses";
 
 export const warehouseTypeConfig: Record<
@@ -27,5 +27,11 @@ export const warehouseTypeConfig: Record<
     color: "from-violet-500/10 to-purple-500/5",
     badge: "success",
     badgeClassName: "bg-violet-500/10 text-violet-600 border-violet-500/20",
+  },
+  finished: {
+    icon: Boxes,
+    color: "from-emerald-500/10 to-teal-500/5",
+    badge: "success",
+    badgeClassName: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
   },
 };

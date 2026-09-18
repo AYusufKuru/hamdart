@@ -20,13 +20,41 @@ function partyLocation(note: DeliveryNote) {
     .join(" / ");
 }
 
+function companyStack(settings: DocumentSettings) {
+  return [
+    { text: settings.legalTitle || settings.companyName, bold: true, fontSize: 9 },
+    { text: [settings.address, settings.district, settings.city].filter(Boolean).join(" / "), fontSize: 8 },
+    {
+      text: [
+        settings.taxOffice ? `VD: ${settings.taxOffice}` : "",
+        settings.taxNo ? `VN: ${settings.taxNo}` : "",
+      ]
+        .filter(Boolean)
+        .join("  "),
+      fontSize: 8,
+    },
+    { text: [settings.phone, settings.email].filter(Boolean).join("  ·  "), fontSize: 8 },
+  ];
+}
+
+function partyStack(note: DeliveryNote) {
+  return [
+    { text: note.party, bold: true, fontSize: 9 },
+    { text: partyLocation(note) || " ", fontSize: 8 },
+    { text: note.partyTaxNo ? `VKN / TCKN: ${note.partyTaxNo}` : " ", fontSize: 8 },
+  ];
+}
+
 export async function downloadDeliveryNotePdf(
   note: DeliveryNote,
   lines: DeliveryNoteLine[],
   settings: DocumentSettings
 ): Promise<void> {
   const pdfMake = await loadPdfMake();
-  const kindLabel = note.kind === "Alış" ? "MAL KABUL İRSALİYESİ" : "SEVK İRSALİYESİ";
+  const inbound = note.kind === "Alış";
+  const kindLabel = inbound ? "MAL KABUL İRSALİYESİ" : "SEVK İRSALİYESİ";
+  const senderStack = inbound ? partyStack(note) : companyStack(settings);
+  const receiverStack = inbound ? companyStack(settings) : partyStack(note);
 
   const doc: Record<string, unknown> = {
     pageSize: "A4",
@@ -49,25 +77,7 @@ export async function downloadDeliveryNotePdf(
               widths: ["*"],
               body: [
                 [{ text: "GÖNDERİCİ", bold: true, fontSize: 8, fillColor: "#e8eef5", margin: [4, 4, 4, 2] }],
-                [
-                  {
-                    stack: [
-                      { text: settings.legalTitle || settings.companyName, bold: true, fontSize: 9 },
-                      { text: [settings.address, settings.district, settings.city].filter(Boolean).join(" / "), fontSize: 8 },
-                      {
-                        text: [
-                          settings.taxOffice ? `VD: ${settings.taxOffice}` : "",
-                          settings.taxNo ? `VN: ${settings.taxNo}` : "",
-                        ]
-                          .filter(Boolean)
-                          .join("  "),
-                        fontSize: 8,
-                      },
-                      { text: [settings.phone, settings.email].filter(Boolean).join("  ·  "), fontSize: 8 },
-                    ],
-                    margin: [4, 2, 4, 6],
-                  },
-                ],
+                [{ stack: senderStack, margin: [4, 2, 4, 6] }],
               ],
             },
             layout: "noBorders",
@@ -79,16 +89,7 @@ export async function downloadDeliveryNotePdf(
               widths: ["*"],
               body: [
                 [{ text: "ALICI", bold: true, fontSize: 8, fillColor: "#e8eef5", margin: [4, 4, 4, 2] }],
-                [
-                  {
-                    stack: [
-                      { text: note.party, bold: true, fontSize: 9 },
-                      { text: partyLocation(note) || " ", fontSize: 8 },
-                      { text: note.partyTaxNo ? `VKN / TCKN: ${note.partyTaxNo}` : " ", fontSize: 8 },
-                    ],
-                    margin: [4, 2, 4, 6],
-                  },
-                ],
+                [{ stack: receiverStack, margin: [4, 2, 4, 6] }],
               ],
             },
             layout: "noBorders",
@@ -107,32 +108,37 @@ export async function downloadDeliveryNotePdf(
               cell(dateTimeLabel(note.issueDate, note.issueTime)),
             ],
             [
-              cell("Sevk tarihi"),
+              cell(inbound ? "Teslim tarihi" : "Sevk tarihi"),
               cell(dateTimeLabel(note.shipDate, note.shipTime)),
               cell("Depo"),
               cell(note.warehouse),
             ],
             [
-              cell("İrsaliye adresi"),
+              cell(inbound ? "Teslim adresi" : "İrsaliye adresi"),
               cell(note.dispatchAddress || note.warehouse),
-              cell("Gönderim şekli"),
+              cell(inbound ? "Getirim şekli" : "Gönderim şekli"),
               cell(note.shipMethod),
             ],
             [
-              cell("Sipariş no"),
+              cell(inbound ? "Talep no" : "Sipariş no"),
               cell(note.relatedOrderNo),
-              cell("Sipariş tarihi"),
+              cell(inbound ? "Talep tarihi" : "Sipariş tarihi"),
               cell(note.relatedOrderDate ? formatDate(note.relatedOrderDate) : ""),
             ],
             [cell("Fatura no"), cell(note.relatedInvoiceNo), cell("Ambalaj / koli"), cell(note.packages)],
-            [cell("Şoför"), cell(note.driverName), cell("TC kimlik"), cell(note.driverNationalId)],
+            [
+              cell(inbound ? "Getirici" : "Şoför"),
+              cell(note.driverName),
+              cell("TC kimlik"),
+              cell(note.driverNationalId),
+            ],
             [cell("Plaka"), cell(note.plateNo), cell("Dorse plaka"), cell(note.trailerPlate)],
             [cell("Menşei"), cell(note.plateOrigin, { colSpan: 3 }), {}, {}],
           ],
         },
         layout: "lightHorizontalLines",
       },
-      { text: "Sevk edilen mallar", style: "section", margin: [0, 6, 0, 6] },
+      { text: inbound ? "Teslim alınan mallar" : "Sevk edilen mallar", style: "section", margin: [0, 6, 0, 6] },
       {
         table: {
           headerRows: 1,
@@ -158,7 +164,9 @@ export async function downloadDeliveryNotePdf(
         ? { text: `Açıklama: ${note.notes}`, fontSize: 8, margin: [0, 10, 0, 0] }
         : { text: "" },
       {
-        text: "İşbu sevk irsaliyesi 213 sayılı VUK hükümlerine göre düzenlenmiştir. Fatura yerine geçmez.",
+        text: inbound
+          ? "İşbu mal kabul irsaliyesi 213 sayılı VUK hükümlerine göre düzenlenmiştir. Fatura yerine geçmez."
+          : "İşbu sevk irsaliyesi 213 sayılı VUK hükümlerine göre düzenlenmiştir. Fatura yerine geçmez.",
         fontSize: 8,
         italics: true,
         margin: [0, 12, 0, 0],

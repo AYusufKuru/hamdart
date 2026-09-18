@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { FileDown, Plus } from "lucide-react";
+import { FileDown, Plus, ClipboardCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
-import { QuoteFormSheet } from "@/components/catalog/quote-form-sheet";
+import { QuoteFormSheet, QuoteStatusDialog } from "@/components/catalog/quote-form-sheet";
 import type { DocumentSettings, Invoice, InvoiceLine } from "@/data/catalog";
 import {
   deleteCatalog,
@@ -20,13 +20,14 @@ import {
 import { EMPTY_DOCUMENT_SETTINGS } from "@/lib/document-company";
 import { useAuth } from "@/lib/auth/auth-context";
 import { downloadQuotePdf } from "@/lib/quote-pdf";
-import { documentTypeFromKind } from "@/lib/invoice-docs";
+import { documentTypeFromKind, normalizeQuoteStatus } from "@/lib/invoice-docs";
 import { formatDate, formatNumber } from "@/lib/utils";
 
 function statusVariant(status: string) {
-  if (status === "Kabul edildi") return "success" as const;
-  if (status === "Reddedildi") return "danger" as const;
-  if (status === "Gönderildi") return "info" as const;
+  const value = normalizeQuoteStatus(status);
+  if (value === "Kabul edildi") return "success" as const;
+  if (value === "Reddedildi") return "danger" as const;
+  if (value === "Gönderildi") return "info" as const;
   return "warning" as const;
 }
 
@@ -38,7 +39,7 @@ export function QuotesWorkspace() {
   const [settings, setSettings] = useState<DocumentSettings>(EMPTY_DOCUMENT_SETTINGS);
   const [selected, setSelected] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Invoice | null>(null);
+  const [statusQuote, setStatusQuote] = useState<Invoice | null>(null);
 
   const refresh = useCallback(async () => {
     const [inv, lines, company] = await Promise.all([
@@ -112,12 +113,14 @@ export function QuotesWorkspace() {
     {
       key: "status",
       header: "Durum",
-      render: (r) => <Badge variant={statusVariant(r.status)}>{r.status}</Badge>,
+      render: (r) => (
+        <Badge variant={statusVariant(r.status)}>{normalizeQuoteStatus(r.status)}</Badge>
+      ),
     },
     {
       key: "actions",
       header: "",
-      className: "w-32",
+      className: "w-36",
       render: (r) => (
         <div className="flex justify-end gap-1">
           <Button
@@ -134,13 +137,22 @@ export function QuotesWorkspace() {
             <FileDown className="h-4 w-4" />
           </Button>
           {writable ? (
-            <CatalogRowActions
-              onEdit={() => {
-                setEditing(r);
-                setOpen(true);
-              }}
-              onDelete={() => void handleDelete(r)}
-            />
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="Durum güncelle"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setStatusQuote(r);
+                }}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+              </Button>
+              <CatalogRowActions onDelete={() => void handleDelete(r)} />
+            </>
           ) : null}
         </div>
       ),
@@ -180,7 +192,24 @@ export function QuotesWorkspace() {
 
       <Card className="glass-card border-none">
         <CardContent className="p-6 space-y-4">
-          <p className="text-sm font-bold">Seçili teklif kalemleri</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-bold">Seçili teklif kalemleri</p>
+            {writable && selected ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  const row = quotes.find((item) => item.invoiceNo === selected);
+                  if (row) setStatusQuote(row);
+                }}
+              >
+                <ClipboardCheck className="mr-1.5 h-4 w-4" />
+                Durum güncelle
+              </Button>
+            ) : null}
+          </div>
           {quotes.length === 0 ? (
             <p className="text-sm text-muted-foreground">Kalemleri görmek için teklif oluşturun.</p>
           ) : (
@@ -227,10 +256,14 @@ export function QuotesWorkspace() {
       <QuoteFormSheet
         open={open}
         onOpenChange={setOpen}
-        editing={editing}
-        editingLines={
-          editing ? quoteLines.filter((l) => l.invoiceNo === editing.invoiceNo) : []
-        }
+        onSaved={() => void refresh()}
+      />
+      <QuoteStatusDialog
+        open={Boolean(statusQuote)}
+        onOpenChange={(next) => {
+          if (!next) setStatusQuote(null);
+        }}
+        quote={statusQuote}
         onSaved={() => void refresh()}
       />
     </div>

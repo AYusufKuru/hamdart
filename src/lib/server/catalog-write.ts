@@ -26,7 +26,7 @@ import {
   documentTypeFromKind,
   documentTypeMeta,
   isConfirmedDocument,
-  normalizeInvoiceStatus,
+  storedInvoiceStatus,
 } from "@/lib/invoice-docs";
 
 type AuditCtx = { actor: string; ip?: string };
@@ -762,7 +762,7 @@ function invoiceHeaderFromInput(input: InvoiceWriteInput, lines: Omit<InvoiceLin
   const documentType = documentTypeFromKind(input.kind ?? "", input.documentType);
   const meta = documentTypeMeta(documentType);
   const kind = input.kind?.trim() || meta.kind;
-  const status = normalizeInvoiceStatus(input.status.trim());
+  const status = storedInvoiceStatus(input.status.trim(), documentType);
   const subtotal = input.subtotal ?? lines.reduce((s, l) => s + l.lineNet, 0);
   const totalVat = input.totalVat ?? lines.reduce((s, l) => s + l.vatAmount, 0);
   const amount =
@@ -856,6 +856,34 @@ export async function dbUpdateInvoice(
 ): Promise<Invoice> {
   const before = await prisma.invoice.findUnique({ where: { id } });
   if (!before) throw new FieldError("Fatura bulunamadı");
+  if (documentTypeFromKind(before.kind, before.documentType) === "quote") {
+    const keys = Object.keys(input).filter(
+      (key) => (input as Record<string, unknown>)[key] !== undefined
+    );
+    if (keys.some((key) => key !== "status")) {
+      throw new FieldError(
+        "Fiyat teklifi oluşturulduktan sonra yalnızca durum güncellenebilir"
+      );
+    }
+    if (!input.status?.trim()) throw new FieldError("Durum zorunludur");
+    const status = storedInvoiceStatus(input.status, "quote");
+    const row = await prisma.invoice.update({
+      where: { id },
+      data: { status },
+    });
+    const mapped = toInvoice(row);
+    await logAudit({
+      actor: ctx.actor,
+      action: "UPDATE",
+      entityType: "Invoice",
+      entityId: id,
+      summary: `Teklif durumu güncellendi: ${mapped.invoiceNo} → ${status}`,
+      before: toInvoice(before),
+      after: mapped,
+      ipAddress: ctx.ip,
+    });
+    return mapped;
+  }
   const invoiceNo = input.invoiceNo?.trim() ?? before.invoiceNo;
   if (invoiceNo !== before.invoiceNo) {
     const clash = await prisma.invoice.findUnique({ where: { invoiceNo } });

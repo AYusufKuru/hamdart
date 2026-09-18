@@ -11,6 +11,15 @@ export function isReadyToShip(status: Order["status"]) {
   return status === "pending" || status === "confirmed" || status === "picking";
 }
 
+export function readyShipmentLabel(order: Pick<Order, "orderNo" | "customer" | "product" | "batchNo">) {
+  const party = isUnsetShipmentCustomer(order.customer)
+    ? "Müşteri atanmadı"
+    : order.customer;
+  const batch = order.batchNo?.trim() ? ` · ${order.batchNo.trim()}` : "";
+  const product = order.product?.trim() ? ` · ${order.product.trim()}` : "";
+  return `${order.orderNo}${batch} · ${party}${product}`;
+}
+
 export function parseQuantityLabel(label: string): number {
   const match = String(label ?? "").replace(",", ".").match(/-?\d+(?:\.\d+)?/);
   if (!match) return 0;

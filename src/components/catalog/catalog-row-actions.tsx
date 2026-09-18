@@ -7,23 +7,25 @@ export function CatalogRowActions({
   onEdit,
   onDelete,
 }: {
-  onEdit: () => void;
+  onEdit?: () => void;
   onDelete: () => void;
 }) {
   return (
     <div className="flex justify-end gap-1">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-8 w-8"
-        onClick={(e) => {
-          e.stopPropagation();
-          onEdit();
-        }}
-      >
-        <Pencil className="h-4 w-4" />
-      </Button>
+      {onEdit ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+      ) : null}
       <Button
         type="button"
         variant="ghost"

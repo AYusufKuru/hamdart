@@ -24,12 +24,15 @@ import { SearchableSelect } from "@/components/shared/searchable-select";
 import type { Customer, Invoice, InvoiceLine, Supplier } from "@/data/catalog";
 import {
   createCatalog,
+  createChequeNote,
   fetchCustomers,
   fetchDocumentSettings,
   fetchInvoices,
   fetchSuppliers,
   updateCatalog,
 } from "@/lib/catalog-store";
+import { buildChequeInstallments, chequeKindFromMethod } from "@/lib/cheque-notes";
+import { formatNumber, plusMonthsIso, todayIso } from "@/lib/utils";
 import {
   calcInvoiceLine,
   COMPANY_PROFILE,
@@ -48,7 +51,6 @@ import {
   VAT_RATES,
   type InvoiceDocumentType,
 } from "@/lib/invoice-docs";
-import { formatNumber, todayIso } from "@/lib/utils";
 
 type LineForm = {
   description: string;
@@ -58,6 +60,22 @@ type LineForm = {
   discountRate: string;
   vatRate: string;
 };
+
+type InstallmentDraft = { dueDate: string; amount: string; serialNo: string };
+
+function isSalesDoc(documentType: string) {
+  return documentType === "sales" || documentType === "cash_sale";
+}
+
+function toInstallmentDrafts(
+  rows: ReturnType<typeof buildChequeInstallments>
+): InstallmentDraft[] {
+  return rows.map((row) => ({
+    dueDate: row.dueDate,
+    amount: String(row.amount),
+    serialNo: row.serialNo,
+  }));
+}
 
 function emptyLine(): LineForm {
   return {
@@ -116,6 +134,13 @@ function emptyForm(
     relatedOrderNo: row?.relatedOrderNo ?? "",
     notes: row?.notes ?? "",
     withholding: row?.withholding ? String(row.withholding) : "",
+    bankName: "",
+    serialNo: "",
+    count: "1",
+    amountEach: "",
+    firstDue: row?.dueDate || plusMonthsIso(todayIso(), 1),
+    intervalMonths: "1",
+    installments: [] as InstallmentDraft[],
     lines:
       lines && lines.length > 0
         ? lines.map((l) => ({
@@ -223,6 +248,50 @@ export function InvoiceFormSheet({
   const totalVat = roundMoney(calculatedLines.reduce((s, l) => s + l.vatAmount, 0));
   const withholding = parseFloat(form.withholding.replace(",", ".")) || 0;
   const grandTotal = roundMoney(subtotal + totalVat - withholding);
+  const chequeKind =
+    !editing && isSalesDoc(form.documentType)
+      ? chequeKindFromMethod(form.paymentMethod)
+      : null;
+  const chequeTotal = (form.installments ?? []).reduce(
+    (sum, row) => sum + (Number(String(row.amount).replace(",", ".")) || 0),
+    0
+  );
+
+  function setPaymentMethod(paymentMethod: string) {
+    const nextKind = chequeKindFromMethod(paymentMethod);
+    if (!nextKind || editing || !isSalesDoc(form.documentType)) {
+      setForm((f) => ({ ...f, paymentMethod }));
+      return;
+    }
+    setForm((f) => ({
+      ...f,
+      paymentMethod,
+      amountEach: f.amountEach.trim() || (grandTotal > 0 ? String(grandTotal) : f.amountEach),
+      firstDue: f.firstDue || f.dueDate || plusMonthsIso(f.issueDate || todayIso(), 1),
+    }));
+  }
+
+  function generateChequePlan() {
+    const count = Number(form.count);
+    const amount = Number(String(form.amountEach).replace(",", ".")) || grandTotal;
+    const interval = Number(form.intervalMonths);
+    if (!(count >= 1) || !(amount > 0) || !(interval >= 1)) {
+      toast.error("Taksit sayısı, tutar ve ay aralığı girin");
+      return;
+    }
+    const rows = buildChequeInstallments({
+      firstDue: form.firstDue || form.dueDate || plusMonthsIso(form.issueDate || todayIso(), 1),
+      count,
+      amount,
+      intervalMonths: interval,
+      serialStart: form.serialNo,
+    });
+    setForm((f) => ({
+      ...f,
+      amountEach: String(amount),
+      installments: toInstallmentDrafts(rows),
+    }));
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -300,6 +369,17 @@ export function InvoiceFormSheet({
       toast.error("En az bir kalem girin");
       return;
     }
+    const chequeKindNow =
+      !editing && isSalesDoc(form.documentType)
+        ? chequeKindFromMethod(form.paymentMethod)
+        : null;
+    const chequeInstallments = (form.installments ?? [])
+      .map((row) => ({
+        dueDate: row.dueDate,
+        amount: Number(String(row.amount).replace(",", ".")),
+        serialNo: row.serialNo.trim(),
+      }))
+      .filter((row) => row.dueDate && row.amount > 0);
     const typeMeta = documentTypeMeta(form.documentType);
     setSaving(true);
     try {
@@ -344,7 +424,34 @@ export function InvoiceFormSheet({
         toast.success("Belge güncellendi");
       } else {
         await createCatalog("invoices", body);
-        toast.success("Belge kaydedildi");
+        if (chequeKindNow && chequeInstallments.length > 0) {
+          try {
+            await createChequeNote({
+              kind: chequeKindNow,
+              direction: "received",
+              party: form.party.trim(),
+              issueDate: form.issueDate,
+              bankName: form.bankName.trim(),
+              serialNo: form.serialNo.trim(),
+              currency: form.currency,
+              notes: form.notes.trim(),
+              relatedInvoiceNo: form.invoiceNo.trim(),
+              installments: chequeInstallments,
+            });
+            toast.success(
+              `Belge ve ${chequeKindNow === "senet" ? "senet" : "çek"} kaydedildi`
+            );
+          } catch (err) {
+            toast.success("Belge kaydedildi");
+            toast.error(
+              err instanceof Error
+                ? `Fatura kaydedildi, çek/senet oluşturulamadı: ${err.message}`
+                : "Fatura kaydedildi, çek/senet oluşturulamadı"
+            );
+          }
+        } else {
+          toast.success("Belge kaydedildi");
+        }
       }
       onOpenChange(false);
       onSaved?.();
@@ -611,9 +718,7 @@ export function InvoiceFormSheet({
               <FormField label="Ödeme şekli">
                 <Select
                   value={form.paymentMethod}
-                  onValueChange={(paymentMethod) =>
-                    setForm((f) => ({ ...f, paymentMethod }))
-                  }
+                  onValueChange={setPaymentMethod}
                 >
                   <SelectTrigger className="bg-white">
                     <SelectValue />
@@ -683,6 +788,173 @@ export function InvoiceFormSheet({
               </FormField>
             </div>
           </FormSection>
+
+          {chequeKind ? (
+            <FormSection
+              title={`Yeni ${chequeKind === "senet" ? "senet" : "çek"}`}
+              description="İsterseniz çek veya seneti burada ekleyin. Boş bırakırsanız yalnızca fatura kaydedilir."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <FormField label="Banka" optional>
+                  <Input
+                    className="bg-white"
+                    value={form.bankName}
+                    onChange={(e) => setForm((f) => ({ ...f, bankName: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="İlk çek / senet no" optional>
+                  <Input
+                    className="bg-white"
+                    value={form.serialNo}
+                    onChange={(e) => setForm((f) => ({ ...f, serialNo: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Vade toplamı">
+                  <Input value={`${formatNumber(chequeTotal)} ₺`} readOnly className="bg-muted/40" />
+                </FormField>
+                <FormField label="Adet">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={24}
+                    className="bg-white"
+                    value={form.count}
+                    onChange={(e) => setForm((f) => ({ ...f, count: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Taksit tutarı">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    className="bg-white"
+                    value={form.amountEach}
+                    placeholder={grandTotal > 0 ? String(grandTotal) : "0"}
+                    onChange={(e) => setForm((f) => ({ ...f, amountEach: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="İlk vade">
+                  <Input
+                    type="date"
+                    className="bg-white"
+                    value={form.firstDue}
+                    onChange={(e) => setForm((f) => ({ ...f, firstDue: e.target.value }))}
+                  />
+                </FormField>
+                <FormField label="Aralık (ay)">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={12}
+                    className="bg-white"
+                    value={form.intervalMonths}
+                    onChange={(e) => setForm((f) => ({ ...f, intervalMonths: e.target.value }))}
+                  />
+                </FormField>
+              </div>
+              {chequeTotal > 0 && Math.abs(chequeTotal - grandTotal) > 0.01 ? (
+                <p className="text-xs text-amber-700">
+                  Vade toplamı fatura tutarından farklı. Kalemler değiştiyse vadeleri yeniden oluşturun.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={generateChequePlan}>
+                  Vadeleri oluştur
+                </Button>
+                {(form.installments ?? []).length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setForm((f) => ({ ...f, installments: [] }))}
+                  >
+                    Çek / senet ekleme
+                  </Button>
+                ) : null}
+              </div>
+              <div className="space-y-2">
+                {(form.installments ?? []).map((row, index) => (
+                  <div key={`${row.dueDate}-${index}`} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+                    <Input
+                      type="date"
+                      className="bg-white"
+                      value={row.dueDate}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          installments: (f.installments ?? []).map((item, i) =>
+                            i === index ? { ...item, dueDate: e.target.value } : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      className="bg-white"
+                      value={row.amount}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          installments: (f.installments ?? []).map((item, i) =>
+                            i === index ? { ...item, amount: e.target.value } : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Input
+                      placeholder="Belge no"
+                      className="bg-white"
+                      value={row.serialNo}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          installments: (f.installments ?? []).map((item, i) =>
+                            i === index ? { ...item, serialNo: e.target.value } : item
+                          ),
+                        }))
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          installments: (f.installments ?? []).filter((_, i) => i !== index),
+                        }))
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      installments: [
+                        ...(f.installments ?? []),
+                        {
+                          dueDate: plusMonthsIso(
+                            f.firstDue || todayIso(),
+                            (f.installments ?? []).length
+                          ),
+                          amount: f.amountEach || String(grandTotal || ""),
+                          serialNo: "",
+                        },
+                      ],
+                    }))
+                  }
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Vade ekle
+                </Button>
+              </div>
+            </FormSection>
+          ) : null}
 
           <FormSection
             title="Mal / hizmet kalemleri"

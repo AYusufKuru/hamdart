@@ -21,10 +21,9 @@ import {
 } from "@/components/shared/form-sheet";
 import { DEFAULT_DEPARTMENTS } from "@/data/departments";
 import type { Personnel } from "@/data/catalog";
-import { createCatalog, fetchDepartments, fetchPersonnel, updateCatalog } from "@/lib/catalog-store";
+import { createCatalog, fetchDepartments, fetchJobTitles, updateCatalog } from "@/lib/catalog-store";
 import {
   LAB_WORKER_TITLE,
-  PERSONNEL_TITLE_OPTIONS,
   parsePersonnelTitles,
   serializePersonnelTitles,
 } from "@/lib/personnel";
@@ -82,9 +81,7 @@ export function PersonnelFormSheet({
   const [customTitle, setCustomTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [departments, setDepartments] = useState<string[]>([]);
-  const [knownTitles, setKnownTitles] = useState<string[]>([
-    ...PERSONNEL_TITLE_OPTIONS,
-  ]);
+  const [knownTitles, setKnownTitles] = useState<string[]>([]);
   const departmentOptions = useMemo(() => {
     const base = selectItemValues([...DEFAULT_DEPARTMENTS, ...departments]);
     const current = form.department.trim();
@@ -92,11 +89,7 @@ export function PersonnelFormSheet({
     return base;
   }, [form.department, departments]);
   const titleOptions = useMemo(() => {
-    return selectItemValues([
-      ...PERSONNEL_TITLE_OPTIONS,
-      ...knownTitles,
-      ...form.titles,
-    ]);
+    return selectItemValues([...knownTitles, ...form.titles]);
   }, [knownTitles, form.titles]);
 
   useEffect(() => {
@@ -107,16 +100,9 @@ export function PersonnelFormSheet({
       fetchDepartments()
         .then((rows) => setDepartments(selectItemValues(rows.map((r) => r.name))))
         .catch(() => setDepartments([])),
-      fetchPersonnel()
-        .then((rows) =>
-          setKnownTitles(
-            selectItemValues([
-              ...PERSONNEL_TITLE_OPTIONS,
-              ...rows.flatMap((r) => parsePersonnelTitles(r.title)),
-            ])
-          )
-        )
-        .catch(() => setKnownTitles([...PERSONNEL_TITLE_OPTIONS])),
+      fetchJobTitles()
+        .then((rows) => setKnownTitles(selectItemValues(rows.map((r) => r.name))))
+        .catch(() => setKnownTitles([])),
     ]);
   }, [open, editing]);
 
@@ -245,7 +231,7 @@ export function PersonnelFormSheet({
               label="Departman"
               htmlFor="per-dep"
               required
-              hint="Analist ve Araştırmacı laboratuvar kayıtlarında kullanılır. Diğer birimler Denetim & Yedek > Departmanlar ekranından yönetilir."
+              hint="Birim listesi sağ üstteki Ayarlar’dan yönetilir."
             >
               <Select
                 value={form.department || undefined}
@@ -269,7 +255,7 @@ export function PersonnelFormSheet({
             <FormField
               label="Görev / unvan"
               required
-              hint="Birden fazla seçebilirsiniz. Listede yoksa aşağıdan ekleyin."
+              hint="Birden fazla seçebilirsiniz. Görev listesi Ayarlar’dan yönetilir."
             >
               <div className="flex flex-wrap gap-2">
                 {titleOptions.map((title) => {

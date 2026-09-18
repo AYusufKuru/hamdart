@@ -551,6 +551,32 @@ model Department {
   updatedAt DateTime @updatedAt
 }
 
+model JobTitle {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CashAccount {
+  id             String   @id
+  kind           String
+  name           String
+  locked         Boolean  @default(false)
+  currency       String   @default("TRY")
+  openingBalance Decimal  @default(0) @db.Decimal(18, 4)
+  bankName       String   @default("")
+  iban           String   @default("")
+  branch         String   @default("")
+  accountNo      String   @default("")
+  notes          String   @default("")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([kind])
+}
+
 model DocumentSettings {
   id             String   @id @default("default")
   companyName    String   @default("HamdPharma")

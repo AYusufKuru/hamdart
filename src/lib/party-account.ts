@@ -41,6 +41,10 @@ export function sameParty(a: string, b: string) {
   return Boolean(key) && key === partyKey(b);
 }
 
+export function matchesAnyParty(value: string, names: string[]) {
+  return names.some((name) => sameParty(value, name));
+}
+
 function isSalesInvoice(row: Invoice) {
   const type = documentTypeFromKind(row.kind, row.documentType);
   return type === "sales" || type === "cash_sale";
@@ -71,14 +75,37 @@ function daysBetween(from: string, to: string) {
   return Math.round((end.getTime() - start.getTime()) / 86_400_000);
 }
 
+export type PartyRole = "customer" | "supplier";
+
 export function moneyTry(value: number) {
   return `${formatNumber(Math.round((Number(value) || 0) * 100) / 100)} ₺`;
 }
 
+export function accountTone(balance: number) {
+  if (balance > 0.009) return "credit" as const;
+  if (balance < -0.009) return "debit" as const;
+  return "zero" as const;
+}
+
+export function accountStatusWord(balance: number) {
+  const tone = accountTone(balance);
+  if (tone === "credit") return "Alacak";
+  if (tone === "debit") return "Borç";
+  return "Sıfır";
+}
+
 export function accountStatusLabel(balance: number) {
-  if (balance > 0.009) return `${moneyTry(balance)} alacak`;
-  if (balance < -0.009) return `${moneyTry(Math.abs(balance))} borç`;
+  const tone = accountTone(balance);
+  if (tone === "credit") return `${moneyTry(balance)} alacak`;
+  if (tone === "debit") return `${moneyTry(Math.abs(balance))} borç`;
   return "Bakiye sıfır";
+}
+
+export function accountToneClass(balance: number) {
+  const tone = accountTone(balance);
+  if (tone === "credit") return "text-emerald-700";
+  if (tone === "debit") return "text-rose-700";
+  return "text-muted-foreground";
 }
 
 export function emptyPartyAccount(): PartyAccountSummary {
@@ -95,16 +122,39 @@ export function emptyPartyAccount(): PartyAccountSummary {
 export function buildPartyAccount(
   party: string,
   input: {
+    role?: PartyRole;
     invoices?: Invoice[];
     events?: InvoiceEvent[];
     cash?: BudgetCashEntry[];
     cheques?: ChequeNote[];
     deliveries?: DeliveryNote[];
+    openingBalance?: number;
+    openingBalanceType?: string;
+    aliases?: string[];
   }
 ): PartyAccountSummary {
+  const role = input.role ?? "customer";
+  const names = [party, ...(input.aliases ?? [])].filter((name) => partyKey(name));
+  const isParty = (value: string) => matchesAnyParty(value, names);
   const drafts: Array<Omit<PartyStatementLine, "balance">> = [];
+  const opening = Number(input.openingBalance) || 0;
+  if (opening > 0.009) {
+    const creditor = (input.openingBalanceType ?? "")
+      .trim()
+      .toLocaleLowerCase("tr")
+      .includes("alacak");
+    drafts.push({
+      id: `opening-${partyKey(party)}`,
+      date: "",
+      docNo: "Açılış",
+      kind: "Açılış",
+      description: creditor ? "Devreden alacak" : "Devreden borç",
+      debit: creditor ? 0 : opening,
+      credit: creditor ? opening : 0,
+    });
+  }
   const partyInvoices = (input.invoices ?? []).filter(
-    (row) => sameParty(row.party, party) && !isVoidInvoice(row) && !isQuoteLike(row)
+    (row) => isParty(row.party) && !isVoidInvoice(row) && !isQuoteLike(row)
   );
   const invoiceNos = new Set(partyInvoices.map((row) => row.invoiceNo));
   const eventsByInvoice = new Map<string, InvoiceEvent[]>();
@@ -116,14 +166,16 @@ export function buildPartyAccount(
     eventsByInvoice.set(event.invoiceNo, list);
   }
 
-  const collectionSpans: number[] = [];
+  const cycleSpans: number[] = [];
 
   for (const row of partyInvoices) {
     const amount = Number(row.amount) || 0;
     if (amount <= 0.009) continue;
     const isReturn =
       documentTypeFromKind(row.kind, row.documentType) === "return";
-    if (isSalesInvoice(row) && !isReturn) {
+    const sale = isSalesInvoice(row) && !isReturn;
+    const purchase = isPurchaseInvoice(row) || isReturn;
+    if (sale) {
       drafts.push({
         id: `inv-${row.id}`,
         date: row.issueDate,
@@ -133,7 +185,7 @@ export function buildPartyAccount(
         debit: amount,
         credit: 0,
       });
-    } else if (isPurchaseInvoice(row) || isReturn) {
+    } else if (purchase) {
       drafts.push({
         id: `inv-${row.id}`,
         date: row.issueDate,
@@ -151,32 +203,31 @@ export function buildPartyAccount(
       for (const event of payments) {
         const date = eventDate(event) || row.issueDate;
         if (date > lastPay) lastPay = date;
-        const collected = isSalesInvoice(row) && !isReturn;
         drafts.push({
           id: `pay-${event.id}`,
           date,
           docNo: row.invoiceNo,
-          kind: collected ? "Tahsilat" : "Ödeme",
-          description: event.method || event.note || "Fatura tahsilatı",
-          debit: collected ? 0 : Number(event.amount) || 0,
-          credit: collected ? Number(event.amount) || 0 : 0,
+          kind: sale ? "Tahsilat" : "Ödeme",
+          description: event.method || event.note || (sale ? "Fatura tahsilatı" : "Fatura ödemesi"),
+          debit: sale ? 0 : Number(event.amount) || 0,
+          credit: sale ? Number(event.amount) || 0 : 0,
         });
       }
-      if (isSalesInvoice(row) && !isReturn && Number(row.paidAmount || 0) + 0.009 >= amount) {
+      const settled = Number(row.paidAmount || 0) + 0.009 >= amount;
+      if (settled && ((role === "supplier" && purchase) || (role !== "supplier" && sale))) {
         const span = daysBetween(row.issueDate, lastPay);
-        if (span != null && span >= 0) collectionSpans.push(span);
+        if (span != null && span >= 0) cycleSpans.push(span);
       }
     } else if (Number(row.paidAmount || 0) > 0.009) {
       const paid = Number(row.paidAmount) || 0;
-      const collected = isSalesInvoice(row) && !isReturn;
       drafts.push({
         id: `paid-${row.id}`,
         date: row.dueDate || row.issueDate,
         docNo: row.invoiceNo,
-        kind: collected ? "Tahsilat" : "Ödeme",
-        description: "Fatura tahsilatı",
-        debit: collected ? 0 : paid,
-        credit: collected ? paid : 0,
+        kind: sale ? "Tahsilat" : "Ödeme",
+        description: sale ? "Fatura tahsilatı" : "Fatura ödemesi",
+        debit: sale ? 0 : paid,
+        credit: sale ? paid : 0,
       });
     }
   }
@@ -185,7 +236,7 @@ export function buildPartyAccount(
     partyInvoices.map((row) => row.invoiceNo.trim()).filter(Boolean)
   );
   for (const row of input.cash ?? []) {
-    if (!sameParty(row.party, party)) continue;
+    if (!isParty(row.party)) continue;
     if (row.invoiceNo.trim() && linkedInvoices.has(row.invoiceNo.trim())) continue;
     const amount = Number(row.amount) || 0;
     if (amount <= 0.009) continue;
@@ -202,7 +253,7 @@ export function buildPartyAccount(
   }
 
   for (const row of input.deliveries ?? []) {
-    if (!sameParty(row.party, party)) continue;
+    if (!isParty(row.party)) continue;
     drafts.push({
       id: `dn-${row.id}`,
       date: row.shipDate || row.issueDate,
@@ -214,24 +265,29 @@ export function buildPartyAccount(
     });
   }
 
-  drafts.sort((a, b) => a.date.localeCompare(b.date) || a.docNo.localeCompare(b.docNo, "tr"));
+  drafts.sort(
+    (a, b) =>
+      (a.date || "0000-01-01").localeCompare(b.date || "0000-01-01") ||
+      a.docNo.localeCompare(b.docNo, "tr")
+  );
   let running = 0;
   const lines: PartyStatementLine[] = drafts.map((row) => {
     running += row.debit - row.credit;
     return { ...row, balance: running };
   });
 
+  const chequeDirection = role === "supplier" ? "given" : "received";
   let chequeOpen = 0;
   let noteOpen = 0;
   for (const row of flattenChequeInstallments(input.cheques ?? [])) {
-    if (!sameParty(row.party, party) || row.direction !== "received") continue;
+    if (!isParty(row.party) || row.direction !== chequeDirection) continue;
     if (row.status !== "Bekliyor") continue;
     if (row.kind === "senet") noteOpen += Number(row.amount) || 0;
     else chequeOpen += Number(row.amount) || 0;
   }
 
   const deliveryOpenCount = (input.deliveries ?? []).filter(
-    (row) => sameParty(row.party, party) && !row.relatedInvoiceNo.trim()
+    (row) => isParty(row.party) && !row.relatedInvoiceNo.trim()
   ).length;
 
   return {
@@ -240,8 +296,8 @@ export function buildPartyAccount(
     noteOpen,
     deliveryOpenCount,
     avgCollectionDays:
-      collectionSpans.length > 0
-        ? Math.round(collectionSpans.reduce((sum, n) => sum + n, 0) / collectionSpans.length)
+      cycleSpans.length > 0
+        ? Math.round(cycleSpans.reduce((sum, n) => sum + n, 0) / cycleSpans.length)
         : null,
     lines: lines.slice().reverse(),
   };

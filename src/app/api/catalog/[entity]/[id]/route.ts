@@ -8,6 +8,10 @@ import {
   requireSession,
 } from "@/lib/server/api-utils";
 import {
+  dbEnqueueQcFromDeliveryNote,
+  dbGetDeliveryNoteLines,
+} from "@/lib/server/data-service";
+import {
   dbDeleteBudget,
   dbDeleteCustomer,
   dbDeleteDeliveryNote,
@@ -93,8 +97,15 @@ export async function PATCH(
         return jsonOk(await dbUpdatePersonnel(id, data, ctx));
       case "invoices":
         return jsonOk(await dbUpdateInvoice(id, data, ctx));
-      case "delivery-notes":
-        return jsonOk(await dbUpdateDeliveryNote(id, data, ctx));
+      case "delivery-notes": {
+        const note = await dbUpdateDeliveryNote(id, data, ctx);
+        const payloadLines = (data as { lines?: { description: string; quantityLabel: string; unit: string }[] }).lines;
+        const lines =
+          payloadLines ??
+          (await dbGetDeliveryNoteLines()).filter((line) => line.noteNo === note.noteNo);
+        await dbEnqueueQcFromDeliveryNote(note, lines, ctx);
+        return jsonOk(note);
+      }
       case "ledger":
         return jsonOk(await dbUpdateLedger(id, data, ctx));
       case "budget":

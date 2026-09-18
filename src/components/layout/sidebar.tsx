@@ -19,6 +19,7 @@ import {
   FileSpreadsheet,
   BarChart3,
   Wallet,
+  Landmark,
   Boxes,
   Shield,
   Stamp,
@@ -70,7 +71,12 @@ export function useSidebarSections() {
         canRead(item.resource) &&
         (!user || isNavItemVisible(user.role, item))
     ).map((item) => ({
-      icon: item.href === "/document-settings" ? Stamp : ICONS[item.resource],
+      icon:
+        item.href === "/document-settings"
+          ? Stamp
+          : item.href === "/cash"
+            ? Landmark
+            : ICONS[item.resource],
       label: item.label,
       href: item.href,
     }));

@@ -16,7 +16,7 @@ import { BudgetCashFormSheet } from "@/components/catalog/budget-cash-form-sheet
 import { BudgetCalendar } from "@/components/catalog/budget-calendar";
 import { BudgetSettingsButton } from "@/components/catalog/budget-settings-button";
 import { ChequeNoteFormSheet } from "@/components/catalog/cheque-note-form-sheet";
-import type { BudgetCashDirection, BudgetCashEntry, BudgetCategory, ChequeNote, Invoice } from "@/data/catalog";
+import type { BudgetCashDirection, BudgetCashEntry, BudgetCategory, ChequeNote, Invoice, LedgerEntry } from "@/data/catalog";
 import {
   deleteBudgetEntry,
   deleteChequeNote,
@@ -24,16 +24,20 @@ import {
   fetchBudgetEntries,
   fetchChequeNotes,
   fetchInvoices,
+  fetchLedger,
 } from "@/lib/catalog-store";
 import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   budgetDocumentLabel,
+  budgetListSourceLabel,
   buildBudgetCalendar,
+  buildBudgetLists,
   isBudgetDocumented,
+  isBudgetListEditable,
   isUndocumentedCash,
+  type BudgetListRow,
 } from "@/lib/budget-cash";
-import { chequeKindLabel } from "@/lib/cheque-notes";
 import { formatDate, formatNumber, todayIso } from "@/lib/utils";
 import { currentMonthKey, inMonth } from "@/lib/reports";
 
@@ -76,6 +80,7 @@ function BudgetPageContent() {
   const [entries, setEntries] = useState<BudgetCashEntry[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [chequeNotes, setChequeNotes] = useState<ChequeNote[]>([]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BudgetCashEntry | null>(null);
   const [chequeOpen, setChequeOpen] = useState(false);
@@ -84,16 +89,18 @@ function BudgetPageContent() {
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
 
   const refresh = useCallback(async () => {
-    const [cash, inv, cheques, cats] = await Promise.all([
+    const [cash, inv, cheques, cats, yevmiye] = await Promise.all([
       fetchBudgetEntries(),
       ifAllowed(canRead("invoices"), () => fetchInvoices(), [] as Invoice[]),
       ifAllowed(canRead("invoices") || canRead("budget"), () => fetchChequeNotes(), [] as ChequeNote[]),
       fetchBudgetCategories().catch(() => [] as BudgetCategory[]),
+      ifAllowed(canRead("ledger"), () => fetchLedger(), [] as LedgerEntry[]),
     ]);
     setEntries(cash);
     setInvoices(inv);
     setChequeNotes(cheques);
     setCategories(cats);
+    setLedger(yevmiye);
   }, [canRead]);
 
   useEffect(() => {
@@ -102,6 +109,7 @@ function BudgetPageContent() {
       setInvoices([]);
       setChequeNotes([]);
       setCategories([]);
+      setLedger([]);
     });
   }, [refresh]);
 
@@ -120,7 +128,8 @@ function BudgetPageContent() {
     setOpen(true);
   }
 
-  async function handleDelete(row: BudgetCashEntry) {
+  async function handleDelete(row: BudgetListRow) {
+    if (!isBudgetListEditable(row)) return;
     const cheque = chequeNotes.find((item) => item.id === row.id);
     if (!window.confirm(`${row.party} kaydı silinsin mi?`)) return;
     try {
@@ -134,38 +143,12 @@ function BudgetPageContent() {
   }
 
   const month = currentMonthKey();
-  const chequeEntries = useMemo(
-    () =>
-      chequeNotes.map((note) => ({
-        id: note.id,
-        direction: (note.direction === "given" ? "gider" : "gelir") as BudgetCashDirection,
-        party: note.party,
-        category: chequeKindLabel(note.kind),
-        amount: note.totalAmount,
-        date: note.issueDate,
-        dueDate: note.installments[0]?.dueDate ?? "",
-        description: note.notes,
-        invoiceNo: note.relatedInvoiceNo,
-        documented: Boolean(note.relatedInvoiceNo.trim()),
-        createdAt: note.createdAt,
-        createdBy: note.createdBy,
-      })),
-    [chequeNotes]
+  const lists = useMemo(
+    () => buildBudgetLists({ entries, invoices, chequeNotes, ledger }),
+    [entries, invoices, chequeNotes, ledger]
   );
-  const gelir = useMemo(
-    () =>
-      [...entries.filter((row) => row.direction === "gelir"), ...chequeEntries.filter((row) => row.direction === "gelir")].sort(
-        (a, b) => b.date.localeCompare(a.date)
-      ),
-    [entries, chequeEntries]
-  );
-  const gider = useMemo(
-    () =>
-      [...entries.filter((row) => row.direction === "gider"), ...chequeEntries.filter((row) => row.direction === "gider")].sort(
-        (a, b) => b.date.localeCompare(a.date)
-      ),
-    [entries, chequeEntries]
-  );
+  const gelir = lists.gelir;
+  const gider = lists.gider;
   const undocumentedOut = useMemo(
     () => gider.filter((row) => isUndocumentedCash(row)),
     [gider]
@@ -179,7 +162,7 @@ function BudgetPageContent() {
     [entries, invoices, chequeNotes]
   );
 
-  function columnsFor(direction: BudgetCashDirection): Column<BudgetCashEntry>[] {
+  function columnsFor(direction: BudgetCashDirection): Column<BudgetListRow>[] {
     return [
       { key: "date", header: "Tarih", render: (r) => formatDate(r.date) },
       {
@@ -188,6 +171,11 @@ function BudgetPageContent() {
         render: (r) => (r.dueDate ? formatDate(r.dueDate) : "—"),
       },
       { key: "party", header: "Firma", render: (r) => r.party },
+      {
+        key: "source",
+        header: "Kaynak",
+        render: (r) => <Badge variant="secondary">{budgetListSourceLabel(r.source)}</Badge>,
+      },
       { key: "category", header: "Çeşit", render: (r) => r.category },
       {
         key: "amount",
@@ -214,7 +202,7 @@ function BudgetPageContent() {
       },
       {
         key: "invoiceNo",
-        header: "Fatura",
+        header: "Belge no",
         className: "font-mono text-sm",
         render: (r) => r.invoiceNo || "—",
       },
@@ -229,22 +217,23 @@ function BudgetPageContent() {
               key: "actions",
               header: "",
               className: "w-24",
-              render: (r: BudgetCashEntry) => (
-                <CatalogRowActions
-                  onEdit={() => {
-                    const cheque = chequeNotes.find((item) => item.id === r.id);
-                    if (cheque) {
-                      setEditingCheque(cheque);
-                      setChequeOpen(true);
-                      return;
-                    }
-                    setFormDirection(direction);
-                    setEditing(r);
-                    setOpen(true);
-                  }}
-                  onDelete={() => void handleDelete(r)}
-                />
-              ),
+              render: (r: BudgetListRow) =>
+                isBudgetListEditable(r) ? (
+                  <CatalogRowActions
+                    onEdit={() => {
+                      const cheque = chequeNotes.find((item) => item.id === r.id);
+                      if (cheque) {
+                        setEditingCheque(cheque);
+                        setChequeOpen(true);
+                        return;
+                      }
+                      setFormDirection(direction);
+                      setEditing(r);
+                      setOpen(true);
+                    }}
+                    onDelete={() => void handleDelete(r)}
+                  />
+                ) : null,
             },
           ]
         : []),
@@ -262,14 +251,14 @@ function BudgetPageContent() {
       <PageHeader
         badge="Muhasebe"
         title="Bütçe"
-        description="Kasa gelir-gider hareketleri. Fatura zorunlu değil; fiş veya fatura sonra bağlanır."
+        description="Satış/alış faturaları, yevmiye, çek-senet ve kasa hareketlerinin gelir-gider görünümü."
         actions={
           <div className="flex flex-wrap gap-2">
             <BudgetSettingsButton writable={writable} onChanged={refresh} />
             {tab !== "takvim" ? (
               <CanWrite resource="budget">
                 <Button
-                  className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                  className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
                   onClick={() => openCreate(tab === "gider" ? "gider" : "gelir")}
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -331,8 +320,12 @@ function BudgetPageContent() {
                 rows={gelir}
                 columns={columnsFor("gelir")}
                 searchText={(r) =>
-                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)}`
+                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
                 }
+                onRowClick={(r) => {
+                  if (r.href) router.push(r.href);
+                }}
+                empty="Gelir kaydı yok"
               />
             </CardContent>
           </Card>
@@ -352,8 +345,12 @@ function BudgetPageContent() {
                 rows={gider}
                 columns={columnsFor("gider")}
                 searchText={(r) =>
-                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)}`
+                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
                 }
+                onRowClick={(r) => {
+                  if (r.href) router.push(r.href);
+                }}
+                empty="Gider kaydı yok"
               />
             </CardContent>
           </Card>

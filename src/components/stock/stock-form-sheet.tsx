@@ -20,7 +20,7 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
+import { WAREHOUSE_IDS, isFinishedWarehouseId, isFinishedWarehouseType, type Warehouse } from "@/data/warehouses";
 import { getWarehouses } from "@/lib/warehouse-store";
 import type { StockStatus } from "@/data/mock";
 import { plusYearsIso, selectItemValues } from "@/lib/utils";
@@ -52,13 +52,14 @@ function defaultLotNo() {
 
 function emptyForm(warehouseId?: string) {
   const defaultWh = warehouseId || WAREHOUSE_IDS.production;
+  const finished = isFinishedWarehouseId(defaultWh);
   return {
     sku: "",
     name: "",
-    category: "Ham Madde",
+    category: finished ? "Mamul" : "Ham Madde",
     warehouseId: defaultWh as string,
     quantity: "",
-    unit: "kg",
+    unit: finished ? "adet" : "kg",
     minStock: "",
     lotNo: defaultLotNo(),
     expiryDate: plusYearsIso(2),
@@ -148,6 +149,9 @@ export function StockFormSheet({
           next.labEntry = "none";
         } else if (next.labEntry === "none") {
           next.labEntry = "replenish";
+        }
+        if (wh && isFinishedWarehouseType(wh.type)) {
+          next.category = "Mamul";
         }
       }
       return next;

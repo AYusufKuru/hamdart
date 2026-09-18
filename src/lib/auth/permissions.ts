@@ -115,7 +115,10 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
       ["invoices", "delivery_notes", "ledger", "budget", "suppliers", "personnel"],
       "both"
     ),
-    ...resourcePerms(["customers", "orders"], "read"),
+    ...resourcePerms(
+      ["customers", "orders", "raw_materials", "products", "warehouses", "raw_material_orders"],
+      "read"
+    ),
   ],
   PRODUCTION: [
     ...resourcePerms(["factory", "recipes", "raw_material_orders", "lab"], "both"),
@@ -169,7 +172,12 @@ export function canCreateStockTransfer(role: Role): boolean {
   return canWrite(role, "stock");
 }
 
-export const STOCK_RECEIPT_ACTIONS = ["mark_received"] as const;
+export const STOCK_RECEIPT_ACTIONS = [
+  "mark_received",
+  "start_qc",
+  "approve_qc",
+  "reject_qc",
+] as const;
 
 export function canApplyRawMaterialOrderAction(
   role: Role,
@@ -290,6 +298,7 @@ export function pathToResource(pathname: string): Resource | null {
   if (pathname.startsWith("/delivery-notes")) return "delivery_notes";
   if (pathname.startsWith("/ledger")) return "ledger";
   if (pathname.startsWith("/budget")) return "budget";
+  if (pathname.startsWith("/cash")) return "budget";
   if (pathname.startsWith("/admin")) return "admin";
   if (pathname.startsWith("/rd-lab")) return "lab";
   return null;
@@ -396,6 +405,9 @@ export function getApiPermission(
   if (pathname.startsWith("/api/budget-entries") || pathname.startsWith("/api/budget-categories")) {
     return { kind: "require", permission: `budget:${suffix}` };
   }
+  if (pathname.startsWith("/api/cash-accounts")) {
+    return { kind: "require", permission: `budget:${suffix}` };
+  }
   if (pathname.startsWith("/api/invoice-docs")) {
     return { kind: "require", permission: "invoices:read" };
   }
@@ -465,6 +477,7 @@ export const NAV_ITEMS: {
     hiddenFor: ["PRODUCTION"],
   },
   { title: "Muhasebe", href: "/invoices", resource: "invoices", label: "Faturalar" },
+  { title: "Muhasebe", href: "/cash", resource: "budget", label: "Kasa" },
   { title: "Muhasebe", href: "/ledger", resource: "ledger", label: "Rapor" },
   { title: "Muhasebe", href: "/budget", resource: "budget", label: "Bütçe" },
   { title: "Sistem", href: "/document-settings", resource: "invoices", label: "PDF ayarları" },

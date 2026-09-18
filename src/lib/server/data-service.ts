@@ -17,7 +17,13 @@ import type {
   BudgetRow,
 } from "@/data/catalog";
 import type { StockTransfer, Warehouse } from "@/data/warehouses";
-import { WAREHOUSE_IDS, getWarehouseName } from "@/data/warehouses";
+import {
+  WAREHOUSE_IDS,
+  getWarehouseName,
+  isFinishedWarehouseType,
+  ISTANBUL_SHIPMENT_NEXT,
+  needsIstanbulShipment,
+} from "@/data/warehouses";
 import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { plusYearsIso, todayIso, parseLocalDate, selectItemValues, plusDaysIso } from "@/lib/utils";
@@ -32,7 +38,11 @@ import {
   findRecipeByProductName,
   matchNameKey,
 } from "@/lib/recipe-calculations";
-import { isUnsetShipmentCustomer, PRODUCTION_SHIPMENT_CUSTOMER } from "@/lib/shipment";
+import {
+  isUnsetShipmentCustomer,
+  parseQuantityLabel,
+  PRODUCTION_SHIPMENT_CUSTOMER,
+} from "@/lib/shipment";
 import type { CreateExperimentInput, CreateSampleInput } from "@/lib/lab-store";
 import type { RawMaterialOrderAction } from "@/lib/raw-material-order-flow";
 import {
@@ -521,9 +531,13 @@ async function deductStockForShipment(
       const warehouse =
         item.warehouseId === preferredWarehouseId
           ? 0
-          : item.warehouseId === WAREHOUSE_IDS.production
+          : item.warehouseId === WAREHOUSE_IDS.finishedFactory
             ? 1
-            : 2;
+            : item.warehouseId === WAREHOUSE_IDS.finishedInternet
+              ? 2
+              : item.warehouseId === WAREHOUSE_IDS.production
+                ? 3
+                : 4;
       const lot = lotKey && stockNorm(item.lotNo) === lotKey ? 0 : 1;
       const unit = stockNorm(item.unit) === unitKey ? 0 : 1;
       const catKey = stockNorm(item.category);
@@ -1246,7 +1260,7 @@ async function addProducedGoodsStock(
       sku,
       name: batch.product.trim(),
       category: "Mamul",
-      warehouseId: WAREHOUSE_IDS.production,
+      warehouseId: WAREHOUSE_IDS.finishedFactory,
       quantity: batch.quantity,
       unit: batch.unit,
       minStock: catalogHit?.minStock ?? 0,
@@ -1444,6 +1458,18 @@ export async function dbSyncReplenishmentOrders(ctx: AuditCtx): Promise<RawMater
   return dbGetAllRawMaterialOrders();
 }
 
+function nextHmOrderNo(existing: RawMaterialOrder[]): string {
+  const year = new Date().getFullYear();
+  let max = 0;
+  for (const order of existing) {
+    const match = order.orderNo.match(/HM-(?:AUTO-)?(\d+)-(\d+)/);
+    if (match && match[1] === String(year)) {
+      max = Math.max(max, parseInt(match[2], 10));
+    }
+  }
+  return `HM-${year}-${String(max + 1).padStart(4, "0")}`;
+}
+
 export async function dbCreateManualRawMaterialOrder(
   input: {
     materialName: string;
@@ -1461,18 +1487,10 @@ export async function dbCreateManualRawMaterialOrder(
   ctx: AuditCtx
 ): Promise<RawMaterialOrder> {
   const qty = input.quantity;
-  const year = new Date().getFullYear();
   const existing = await dbGetAllRawMaterialOrders();
-  let max = 0;
-  for (const o of existing) {
-    const match = o.orderNo.match(/HM-(?:AUTO-)?(\d+)-(\d+)/);
-    if (match && match[1] === String(year)) {
-      max = Math.max(max, parseInt(match[2], 10));
-    }
-  }
   const order: RawMaterialOrder = {
     id: `rmo-manual-${Date.now()}`,
-    orderNo: `HM-${year}-${String(max + 1).padStart(4, "0")}`,
+    orderNo: nextHmOrderNo(existing),
     materialName: input.materialName,
     sku: input.sku,
     supplier: input.supplier,
@@ -1488,6 +1506,139 @@ export async function dbCreateManualRawMaterialOrder(
     expectedDelivery: input.expectedDelivery,
   };
   return dbSaveRawMaterialOrder(order, ctx);
+}
+
+const DELIVERY_NOTE_QC_NOTE = "İrsaliye";
+
+async function resolveReceiptWarehouseId(warehouseName: string): Promise<string> {
+  const warehouses = await prisma.warehouse.findMany({
+    select: { id: true, name: true, type: true },
+  });
+  const key = matchNameKey(warehouseName);
+  const named = warehouses.find(
+    (row) => row.id === warehouseName || matchNameKey(row.name) === key
+  );
+  if (named) return named.id;
+  const production = warehouses.find((row) => row.id === WAREHOUSE_IDS.production);
+  if (production) return production.id;
+  const raw = warehouses.find((row) => row.type !== "finished");
+  return raw?.id ?? warehouses[0]?.id ?? WAREHOUSE_IDS.production;
+}
+
+export async function dbEnqueueQcFromDeliveryNote(
+  note: DeliveryNote,
+  lines: { description: string; quantityLabel: string; unit: string }[],
+  ctx: AuditCtx
+): Promise<number> {
+  if (note.kind !== "Alış") return 0;
+  const today = todayIso();
+  const [materials, products, existing] = await Promise.all([
+    dbGetAllRawMaterials(),
+    dbGetProducts(),
+    dbGetAllRawMaterialOrders(),
+  ]);
+  const targetWarehouseId = await resolveReceiptWarehouseId(note.warehouse);
+  const sourceNote = `${DELIVERY_NOTE_QC_NOTE} ${note.noteNo.trim()}`;
+  let queued = 0;
+  const working = [...existing];
+
+  for (const [index, line] of lines.entries()) {
+    const name = line.description.trim();
+    if (!name) continue;
+    const key = matchNameKey(name);
+    const material = materials.find(
+      (row) => matchNameKey(row.name) === key || matchNameKey(row.sku) === key
+    );
+    const finished = products.find(
+      (row) => matchNameKey(row.name) === key || matchNameKey(row.sku) === key
+    );
+    if (!material && finished) continue;
+
+    const sku = material?.sku || `IRS-${key.replace(/\s+/g, "-").slice(0, 24) || index}`;
+    const materialName = material?.name || name;
+    const unit = line.unit.trim() || material?.unit || "kg";
+    const quantity = parseQuantityLabel(line.quantityLabel) || 1;
+    const unitPrice = material?.unitCost ?? 0;
+    const skuKey = matchNameKey(sku);
+    const nameKey = matchNameKey(materialName);
+
+    const already = working.find(
+      (row) =>
+        (row.sourceNote?.includes(note.noteNo.trim()) || row.sourceNote === sourceNote) &&
+        (matchNameKey(row.sku) === skuKey || matchNameKey(row.materialName) === nameKey)
+    );
+    if (already) {
+      if (already.status === "warehoused" || already.status === "returned") continue;
+      const next: RawMaterialOrder = {
+        ...already,
+        supplier: note.party || already.supplier,
+        quantity,
+        unit,
+        totalPrice: quantity * already.unitPrice,
+        invoiceNo: note.relatedInvoiceNo || already.invoiceNo,
+        targetWarehouseId: already.targetWarehouseId || targetWarehouseId,
+      };
+      await dbSaveRawMaterialOrder(next, ctx);
+      queued += 1;
+      continue;
+    }
+
+    const open = working.find(
+      (row) =>
+        (row.status === "to_order" || row.status === "ordered" || row.status === "received") &&
+        (matchNameKey(row.sku) === skuKey || matchNameKey(row.materialName) === nameKey)
+    );
+    const lotNo = `LOT-${sku}-${today.replace(/-/g, "")}`;
+    if (open) {
+      const next: RawMaterialOrder = {
+        ...open,
+        status: "qc_pending",
+        supplier: note.party || open.supplier,
+        quantity: quantity || open.quantity,
+        unit,
+        totalPrice: (quantity || open.quantity) * open.unitPrice,
+        receivedDate: today,
+        qcStartedAt: today,
+        qcAnalyst: open.qcAnalyst ?? "Depo KK",
+        lotNo: open.lotNo || lotNo,
+        invoiceNo: note.relatedInvoiceNo || open.invoiceNo,
+        sourceNote,
+        targetWarehouseId: open.targetWarehouseId || targetWarehouseId,
+      };
+      await dbSaveRawMaterialOrder(next, ctx);
+      Object.assign(open, next);
+      queued += 1;
+      continue;
+    }
+
+    const created: RawMaterialOrder = {
+      id: `rmo-irs-${Date.now()}-${index}`,
+      orderNo: nextHmOrderNo(working),
+      materialName,
+      sku,
+      supplier: note.party,
+      quantity,
+      unit,
+      unitPrice,
+      totalPrice: quantity * unitPrice,
+      status: "qc_pending",
+      source: "delivery_note",
+      sourceNote,
+      targetWarehouseId,
+      orderDate: note.issueDate || today,
+      expectedDelivery: note.shipDate,
+      receivedDate: today,
+      qcStartedAt: today,
+      lotNo,
+      invoiceNo: note.relatedInvoiceNo || undefined,
+      qcAnalyst: "Depo KK",
+    };
+    await dbSaveRawMaterialOrder(created, ctx);
+    working.push(created);
+    queued += 1;
+  }
+
+  return queued;
 }
 
 const transitions: Record<
@@ -2845,6 +2996,71 @@ export async function dbGetStockTransfers(): Promise<StockTransfer[]> {
   return rows.map(toStockTransfer);
 }
 
+type StockItemSnapshot = {
+  sku: string;
+  name: string;
+  category: string;
+  unit: string;
+  minStock: number;
+  maxStock: number | null;
+  lotNo: string;
+  expiryDate: string;
+  temperature: string | null;
+  replenishFromWarehouseId: string | null;
+  labTargetQuantity: number | null;
+  labDirectEntry: boolean;
+};
+
+async function creditWarehouseStock(
+  tx: Prisma.TransactionClient,
+  source: StockItemSnapshot,
+  toWarehouseId: string,
+  quantity: number
+) {
+  const existingDest = await tx.warehouseStockItem.findFirst({
+    where: {
+      warehouseId: toWarehouseId,
+      sku: source.sku,
+      lotNo: source.lotNo,
+    },
+  });
+  if (existingDest) {
+    const destQty = existingDest.quantity + quantity;
+    await tx.warehouseStockItem.update({
+      where: { id: existingDest.id },
+      data: {
+        quantity: destQty,
+        status: deriveStockStatus(
+          destQty,
+          existingDest.minStock,
+          existingDest.expiryDate
+        ),
+      },
+    });
+    return;
+  }
+  await tx.warehouseStockItem.create({
+    data: {
+      id: `ws-tr-${Date.now()}`,
+      sku: source.sku,
+      name: source.name,
+      category: source.category,
+      warehouseId: toWarehouseId,
+      quantity,
+      unit: source.unit,
+      minStock: source.minStock,
+      maxStock: source.maxStock,
+      lotNo: source.lotNo,
+      expiryDate: source.expiryDate,
+      status: deriveStockStatus(quantity, source.minStock, source.expiryDate),
+      temperature: source.temperature,
+      replenishFromWarehouseId: source.replenishFromWarehouseId,
+      labTargetQuantity: source.labTargetQuantity,
+      labDirectEntry: source.labDirectEntry,
+    },
+  });
+}
+
 export async function dbCreateStockTransfer(
   input: {
     sourceItemId: string;
@@ -2858,7 +3074,6 @@ export async function dbCreateStockTransfer(
   const sourceItemId = input.sourceItemId.trim();
   const toWarehouseId = input.toWarehouseId.trim();
   const quantity = input.quantity;
-  const reason = input.reason;
   const note = input.note?.trim() || undefined;
 
   const transfer = await prisma.$transaction(async (tx) => {
@@ -2871,9 +3086,10 @@ export async function dbCreateStockTransfer(
     if (source.warehouseId === toWarehouseId) {
       throw new FieldError("Kaynak ve hedef depo aynı olamaz");
     }
-    const destWarehouse = await tx.warehouse.findUnique({
-      where: { id: toWarehouseId },
-    });
+    const [sourceWarehouse, destWarehouse] = await Promise.all([
+      tx.warehouse.findUnique({ where: { id: source.warehouseId } }),
+      tx.warehouse.findUnique({ where: { id: toWarehouseId } }),
+    ]);
     if (!destWarehouse) {
       throw new FieldError("Hedef depo bulunamadı");
     }
@@ -2884,6 +3100,22 @@ export async function dbCreateStockTransfer(
       throw new FieldError("Miktar kaynak stoktan fazla olamaz");
     }
 
+    const sourceFinished = isFinishedWarehouseType(sourceWarehouse?.type ?? "");
+    const destFinished = isFinishedWarehouseType(destWarehouse.type);
+    if (sourceFinished !== destFinished) {
+      throw new FieldError("Hammadde ve mamul depoları arasında aktarım yapılamaz");
+    }
+    if (destFinished && stockNorm(source.category) !== "mamul") {
+      throw new FieldError("Mamul deposuna yalnızca mamul stoğu aktarılır");
+    }
+
+    const istanbul = needsIstanbulShipment(toWarehouseId);
+    const reason: StockTransfer["reason"] = destFinished
+      ? istanbul
+        ? "istanbul_shipment"
+        : "finished_direct"
+      : input.reason;
+
     const remaining = source.quantity - quantity;
     await tx.warehouseStockItem.update({
       where: { id: source.id },
@@ -2893,48 +3125,8 @@ export async function dbCreateStockTransfer(
       },
     });
 
-    const existingDest = await tx.warehouseStockItem.findFirst({
-      where: {
-        warehouseId: toWarehouseId,
-        sku: source.sku,
-        lotNo: source.lotNo,
-      },
-    });
-
-    if (existingDest) {
-      const destQty = existingDest.quantity + quantity;
-      await tx.warehouseStockItem.update({
-        where: { id: existingDest.id },
-        data: {
-          quantity: destQty,
-          status: deriveStockStatus(
-            destQty,
-            existingDest.minStock,
-            existingDest.expiryDate
-          ),
-        },
-      });
-    } else {
-      await tx.warehouseStockItem.create({
-        data: {
-          id: `ws-tr-${Date.now()}`,
-          sku: source.sku,
-          name: source.name,
-          category: source.category,
-          warehouseId: toWarehouseId,
-          quantity,
-          unit: source.unit,
-          minStock: source.minStock,
-          maxStock: source.maxStock,
-          lotNo: source.lotNo,
-          expiryDate: source.expiryDate,
-          status: deriveStockStatus(quantity, source.minStock, source.expiryDate),
-          temperature: source.temperature,
-          replenishFromWarehouseId: source.replenishFromWarehouseId,
-          labTargetQuantity: source.labTargetQuantity,
-          labDirectEntry: source.labDirectEntry,
-        },
-      });
+    if (!istanbul) {
+      await creditWarehouseStock(tx, source, toWarehouseId, quantity);
     }
 
     return tx.stockTransfer.create({
@@ -2947,8 +3139,8 @@ export async function dbCreateStockTransfer(
         quantity,
         unit: source.unit,
         reason,
-        status: "completed",
-        completedAt: new Date(),
+        status: istanbul ? "allocated" : "completed",
+        completedAt: istanbul ? null : new Date(),
         note: note ?? null,
       },
     });
@@ -2960,7 +3152,79 @@ export async function dbCreateStockTransfer(
     action: "CREATE",
     entityType: "StockTransfer",
     entityId: mapped.id,
-    summary: `Stok aktarıldı: ${mapped.quantity} ${mapped.unit} ${mapped.materialName} (${mapped.fromWarehouseId} → ${mapped.toWarehouseId})`,
+    summary: needsIstanbulShipment(mapped.toWarehouseId)
+      ? `İstanbul sevkiyatı ayrıldı: ${mapped.quantity} ${mapped.unit} ${mapped.materialName}`
+      : `Stok aktarıldı: ${mapped.quantity} ${mapped.unit} ${mapped.materialName} (${mapped.fromWarehouseId} → ${mapped.toWarehouseId})`,
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
+}
+
+export async function dbAdvanceStockTransfer(
+  id: string,
+  action: "approve" | "depart" | "arrive",
+  ctx: AuditCtx
+): Promise<StockTransfer> {
+  const existing = await prisma.stockTransfer.findUnique({ where: { id } });
+  if (!existing) throw new FieldError("Aktarım bulunamadı");
+  if (existing.reason !== "istanbul_shipment") {
+    throw new FieldError("Bu kayıt İstanbul sevkiyatı değil");
+  }
+  const next = ISTANBUL_SHIPMENT_NEXT[existing.status];
+  if (!next || next.action !== action) {
+    throw new FieldError("Bu sevkiyat adımı şu an yapılamaz");
+  }
+
+  const status =
+    action === "approve" ? "approved" : action === "depart" ? "in_transit" : "completed";
+
+  const updated = await prisma.$transaction(async (tx) => {
+    if (action === "arrive") {
+      const source = await tx.warehouseStockItem.findUnique({
+        where: { id: existing.sourceItemId },
+      });
+      const snapshot: StockItemSnapshot = source
+        ? source
+        : {
+            sku: existing.sku,
+            name: existing.materialName,
+            category: "Mamul",
+            unit: existing.unit,
+            minStock: 0,
+            maxStock: null,
+            lotNo: "",
+            expiryDate: "",
+            temperature: null,
+            replenishFromWarehouseId: null,
+            labTargetQuantity: null,
+            labDirectEntry: false,
+          };
+      await creditWarehouseStock(tx, snapshot, existing.toWarehouseId, existing.quantity);
+    }
+    return tx.stockTransfer.update({
+      where: { id },
+      data: {
+        status,
+        completedAt: action === "arrive" ? new Date() : existing.completedAt,
+      },
+    });
+  });
+
+  const mapped = toStockTransfer(updated);
+  const summary =
+    action === "approve"
+      ? `İstanbul sevkiyatı onaylandı: ${mapped.materialName}`
+      : action === "depart"
+        ? `İstanbul sevkiyatı yola çıktı: ${mapped.materialName}`
+        : `İstanbul deposuna geldi: ${mapped.quantity} ${mapped.unit} ${mapped.materialName}`;
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "StockTransfer",
+    entityId: mapped.id,
+    summary,
+    before: toStockTransfer(existing),
     after: mapped,
     ipAddress: ctx.ip,
   });

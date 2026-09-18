@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ScrollText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,15 +27,27 @@ function statusVariant(status: string) {
 export function ChequeNotesWorkspace({
   writable,
   onChanged,
+  createOpen,
+  onCreateOpenChange,
 }: {
   writable: boolean;
   onChanged?: () => void;
+  createOpen?: boolean;
+  onCreateOpenChange?: (open: boolean) => void;
 }) {
   const [notes, setNotes] = useState<ChequeNote[]>([]);
   const [kindFilter, setKindFilter] = useState<"all" | "cek" | "senet">("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "received" | "given">("all");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ChequeNote | null>(null);
+
+  function setSheetOpen(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setEditing(null);
+      onCreateOpenChange?.(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
     const rows = await fetchChequeNotes();
@@ -47,6 +58,12 @@ export function ChequeNotesWorkspace({
   useEffect(() => {
     void refresh().catch(() => setNotes([]));
   }, [refresh]);
+
+  useEffect(() => {
+    if (!createOpen) return;
+    setEditing(null);
+    setOpen(true);
+  }, [createOpen]);
 
   const filtered = useMemo(
     () =>
@@ -137,7 +154,7 @@ export function ChequeNotesWorkspace({
 
   return (
     <div className="space-y-6">
-        <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2">
           {(
             [
               ["all", "Tümü"],
@@ -175,7 +192,7 @@ export function ChequeNotesWorkspace({
               {label}
             </Button>
           ))}
-        </div>
+      </div>
 
       <Card className="glass-card border-none">
         <CardContent className="p-6">
@@ -190,18 +207,9 @@ export function ChequeNotesWorkspace({
         </CardContent>
       </Card>
 
-      <Card className="glass-card border-none">
-        <CardContent className="flex items-start gap-3 p-6 text-sm text-muted-foreground">
-          <ScrollText className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            Alınan çek/senet Bütçe gelirinden eklenir. Fatura ödemesinde yalnızca portföyden seçilir.
-          </p>
-        </CardContent>
-      </Card>
-
       <ChequeNoteFormSheet
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={setSheetOpen}
         editing={editing}
         onSaved={() => void refresh()}
       />

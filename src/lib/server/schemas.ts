@@ -380,10 +380,20 @@ export const stockTransferCreateSchema = z.object({
   sourceItemId: text(MAX_ID),
   toWarehouseId: text(MAX_ID),
   quantity: finiteNumber({ positive: true }),
-  reason: z.enum(["replenishment", "direct_lab", "manual"], {
-    error: "Geçersiz aktarım türü",
-  }),
+  reason: z
+    .enum(
+      ["replenishment", "direct_lab", "manual", "finished_direct", "istanbul_shipment"],
+      { error: "Geçersiz aktarım türü" }
+    )
+    .optional()
+    .default("manual"),
   note: optionalText(MAX_NOTE),
+});
+
+export const stockTransferAdvanceSchema = z.object({
+  action: z.enum(["approve", "depart", "arrive"], {
+    error: "Geçersiz sevkiyat adımı",
+  }),
 });
 
 export const stockCreateSchema = z.object({
@@ -769,4 +779,30 @@ export const departmentCreateSchema = z.object({
 
 export const departmentUpdateSchema = z.object({
   name: text(80),
+});
+
+export const jobTitleCreateSchema = z.object({
+  name: text(80),
+});
+
+export const cashAccountCreateSchema = z.object({
+  name: text(120),
+  bankName: text(120),
+  iban: optionalText(50),
+  branch: optionalText(120),
+  accountNo: optionalText(80),
+  currency: optionalText(8),
+  openingBalance: finiteNumber({ min: 0 }).optional(),
+  notes: optionalText(MAX_NOTE),
+});
+
+export const cashAccountUpdateSchema = z.object({
+  name: optionalText(120),
+  bankName: optionalText(120),
+  iban: optionalText(50),
+  branch: optionalText(120),
+  accountNo: optionalText(80),
+  currency: optionalText(8),
+  openingBalance: finiteNumber({ min: 0 }).optional(),
+  notes: optionalText(MAX_NOTE),
 });

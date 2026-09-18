@@ -9,6 +9,7 @@ import {
 } from "@/lib/server/api-utils";
 import type { Personnel } from "@/data/catalog";
 import {
+  dbEnqueueQcFromDeliveryNote,
   dbGetBudget,
   dbGetCustomers,
   dbGetDeliveryNoteLines,
@@ -142,8 +143,12 @@ export async function POST(
         return jsonOk(await dbCreatePersonnel(data, ctx), 201);
       case "invoices":
         return jsonOk(await dbCreateInvoice(data, ctx), 201);
-      case "delivery-notes":
-        return jsonOk(await dbCreateDeliveryNote(data, ctx), 201);
+      case "delivery-notes": {
+        const note = await dbCreateDeliveryNote(data, ctx);
+        const lines = (data as { lines?: { description: string; quantityLabel: string; unit: string }[] }).lines ?? [];
+        await dbEnqueueQcFromDeliveryNote(note, lines, ctx);
+        return jsonOk(note, 201);
+      }
       case "ledger":
         return jsonOk(await dbCreateLedger(data, ctx), 201);
       case "budget":

@@ -185,6 +185,34 @@ export const PAYMENT_METHODS = [
   "Çek",
   "Senet",
 ] as const;
+export const QUOTE_STATUSES = [
+  "Taslak",
+  "Gönderildi",
+  "Kabul edildi",
+  "Reddedildi",
+] as const;
+
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export function isQuoteDocument(kind: string, documentType?: string) {
+  return documentTypeFromKind(kind, documentType) === "quote";
+}
+
+export function normalizeQuoteStatus(status: string): QuoteStatus {
+  if ((QUOTE_STATUSES as readonly string[]).includes(status)) {
+    return status as QuoteStatus;
+  }
+  if (status === "Onaylandı" || status === "Kabul") return "Kabul edildi";
+  if (status === "Reddedildi") return "Reddedildi";
+  if (status === "Gönderildi" || status === "İletildi") return "Gönderildi";
+  return "Taslak";
+}
+
+export function storedInvoiceStatus(status: string, documentType: string) {
+  if (documentType === "quote") return normalizeQuoteStatus(status);
+  return normalizeInvoiceStatus(status);
+}
+
 export const INVOICE_STATUSES = [
   "Proforma",
   "Onaylandı",
@@ -200,6 +228,28 @@ export function documentTypeMeta(value: string) {
     INVOICE_DOCUMENT_TYPES.find((t) => t.value === value) ??
     INVOICE_DOCUMENT_TYPES[0]
   );
+}
+
+export function isPurchaseInvoice(invoice: { kind: string; documentType?: string }) {
+  return documentTypeFromKind(invoice.kind, invoice.documentType) === "purchase";
+}
+
+export function isSalesSideInvoice(invoice: { kind: string; documentType?: string }) {
+  const type = documentTypeFromKind(invoice.kind, invoice.documentType);
+  return type === "sales" || type === "cash_sale";
+}
+
+export function invoiceStatusVariant(status: string) {
+  const normalized = normalizeInvoiceStatus(status);
+  if (normalized === "Ödendi" || normalized === "Onaylandı") return "success" as const;
+  if (normalized === "İptal Edildi" || normalized === "Reddedildi") return "danger" as const;
+  if (normalized === "Proforma") return "info" as const;
+  return "warning" as const;
+}
+
+export function invoiceRemaining(amount: number, paidAmount: number) {
+  const remaining = Math.round(((Number(amount) || 0) - (Number(paidAmount) || 0)) * 100) / 100;
+  return remaining > 0 ? remaining : 0;
 }
 
 export function documentTypeFromKind(kind: string, stored?: string): InvoiceDocumentType {

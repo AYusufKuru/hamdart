@@ -85,8 +85,12 @@ export function DeliveryNotesWorkspace() {
       className: "font-mono text-sm",
       render: (r) => r.noteNo,
     },
-    { key: "party", header: "Alıcı", render: (r) => r.party },
-    { key: "kind", header: "Tür", render: (r) => r.kind },
+    { key: "party", header: "Cari", render: (r) => r.party },
+    {
+      key: "kind",
+      header: "Tür",
+      render: (r) => (r.kind === "Alış" ? "Mal kabul" : "Sevk"),
+    },
     { key: "warehouse", header: "Depo", render: (r) => r.warehouse },
     {
       key: "shipDate",

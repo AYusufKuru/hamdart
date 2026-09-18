@@ -9,7 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -21,27 +23,42 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { SearchableSelect } from "@/components/shared/searchable-select";
-import type { Customer, DeliveryNote, DeliveryNoteLine, FinishedProduct, Supplier } from "@/data/catalog";
+import type { Customer, DeliveryNote, DeliveryNoteLine, FinishedProduct, Invoice, InvoiceLine, Supplier } from "@/data/catalog";
 import type { Order } from "@/data/mock";
+import type { RawMaterial } from "@/data/raw-materials";
+import type { RawMaterialOrder } from "@/data/raw-material-orders";
 import {
   WAREHOUSE_IDS,
+  finishedWarehouseFallbackNames,
   getWarehouseName,
+  isFinishedWarehouseType,
   type Warehouse,
 } from "@/data/warehouses";
 import {
   createCatalog,
   fetchCustomers,
   fetchDeliveryNotes,
+  fetchInvoiceLines,
+  fetchInvoices,
   fetchProducts,
   fetchSuppliers,
   updateCatalog,
 } from "@/lib/catalog-store";
 import { getWarehouses } from "@/lib/warehouse-store";
 import { getAllOrders } from "@/lib/order-store";
-import { ifAllowed } from "@/lib/api-client";
-import { useAuth } from "@/lib/auth/auth-context";
-import { isReadyToShip, isUnsetShipmentCustomer } from "@/lib/shipment";
-import { LINE_UNITS, nextDocumentNo } from "@/lib/invoice-docs";
+import { getAllRawMaterials } from "@/lib/raw-material-store";
+import { getAllRawMaterialOrders } from "@/lib/raw-material-order-store";
+import {
+  isReadyToShip,
+  isUnsetShipmentCustomer,
+  readyShipmentLabel,
+} from "@/lib/shipment";
+import {
+  isPurchaseInvoice,
+  isSalesSideInvoice,
+  LINE_UNITS,
+  nextDocumentNo,
+} from "@/lib/invoice-docs";
 import { todayIso, nowTimeHm } from "@/lib/utils";
 import { TURKEY_COUNTRIES, TURKEY_DISTRICTS, TURKEY_PROVINCES } from "@/data/turkey-locations";
 
@@ -52,6 +69,12 @@ const SHIP_METHODS = [
   "Kargo",
   "Nakliyeci ile",
   "Alıcı kendi alacak",
+] as const;
+const RECEIVE_METHODS = [
+  "Tedarikçi aracıyla geldi",
+  "Kargo",
+  "Nakliyeci ile",
+  "Kendi aracımızla aldık",
 ] as const;
 const PLATE_ORIGINS = ["Türkiye plaka", "Yabancı plaka"] as const;
 
@@ -79,19 +102,33 @@ function uniqueWarehouseNames(names: string[]) {
   return out;
 }
 
-function defaultWarehouseName(list: Warehouse[], current?: string) {
+function defaultWarehouseName(list: Warehouse[], current?: string, kind = "Satış") {
+  if (current?.trim()) return current.trim();
+  if (kind === "Alış") {
+    const production = getWarehouseName(WAREHOUSE_IDS.production);
+    return (
+      list.find((w) => w.id === WAREHOUSE_IDS.production)?.name ||
+      list.find((w) => w.type === "production")?.name ||
+      production
+    );
+  }
+  const finished = uniqueWarehouseNames([
+    ...list.filter((w) => isFinishedWarehouseType(w.type)).map((w) => w.name),
+    ...finishedWarehouseFallbackNames(),
+  ]);
   const names = uniqueWarehouseNames([
-    current ?? "",
+    ...finished,
     ...list.map((w) => w.name),
     getWarehouseName(WAREHOUSE_IDS.production),
     getWarehouseName(WAREHOUSE_IDS.packaging),
     getWarehouseName(WAREHOUSE_IDS.laboratory),
   ]);
-  if (current?.trim()) return current.trim();
+  const mamulFactory = getWarehouseName(WAREHOUSE_IDS.finishedFactory);
   return (
-    names.find((n) => n.toLocaleLowerCase("tr") === "fabrika") ||
+    names.find((n) => n.toLocaleLowerCase("tr") === mamulFactory.toLocaleLowerCase("tr")) ||
+    finished[0] ||
     names[0] ||
-    getWarehouseName(WAREHOUSE_IDS.production)
+    mamulFactory
   );
 }
 
@@ -99,7 +136,7 @@ function emptyForm(
   noteNo: string,
   row?: DeliveryNote,
   lines?: DeliveryNoteLine[],
-  warehouse = "Fabrika"
+  warehouse = getWarehouseName(WAREHOUSE_IDS.finishedFactory)
 ) {
   return {
     noteNo: row?.noteNo ?? noteNo,
@@ -122,7 +159,7 @@ function emptyForm(
     plateNo: row?.plateNo ?? "",
     trailerPlate: row?.trailerPlate ?? "",
     plateOrigin: row?.plateOrigin || "Türkiye plaka",
-    shipMethod: row?.shipMethod || "Kendi aracımla gönderiyorum",
+    shipMethod: row?.shipMethod || (row?.kind === "Alış" ? RECEIVE_METHODS[0] : SHIP_METHODS[0]),
     dispatchAddress: row?.dispatchAddress || warehouse,
     issueTime: row?.issueTime || nowTimeHm(),
     shipTime: row?.shipTime || nowTimeHm(),
@@ -162,7 +199,6 @@ export function DeliveryNoteFormSheet({
   };
   onSaved?: (note?: DeliveryNote) => void;
 }) {
-  const { canRead } = useAuth();
   const [form, setForm] = useState(() => emptyForm(""));
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -170,25 +206,43 @@ export function DeliveryNoteFormSheet({
   const [products, setProducts] = useState<FinishedProduct[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [readyOrders, setReadyOrders] = useState<Order[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterial[]>([]);
+  const [inboundOrders, setInboundOrders] = useState<RawMaterialOrder[]>([]);
+  const inbound = form.kind === "Alış";
 
   const productOptions = useMemo(() => {
     const seen = new Set<string>();
     const options: { value: string; label: string; keywords: string; unit: string }[] = [];
-    for (const product of products) {
-      const name = product.name.trim();
-      if (!name) continue;
-      const key = name.toLocaleLowerCase("tr");
-      if (seen.has(key)) continue;
+    const push = (name: string, keywords: string, unit: string, tag?: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const key = trimmed.toLocaleLowerCase("tr");
+      if (seen.has(key)) return;
       seen.add(key);
       options.push({
-        value: name,
-        label: name,
-        keywords: `${product.sku} ${product.lotNo} ${product.warehouse ?? ""}`,
-        unit: product.unit.trim() || "Adet",
+        value: trimmed,
+        label: tag ? `${trimmed} · ${tag}` : trimmed,
+        keywords,
+        unit: unit.trim() || "Adet",
       });
+    };
+    if (inbound) {
+      for (const material of rawMaterials) {
+        push(material.name, `${material.sku} ${material.category}`, material.unit, "Hammadde");
+      }
+    }
+    for (const product of products) {
+      push(
+        product.name,
+        `${product.sku} ${product.lotNo} ${product.warehouse ?? ""}`,
+        product.unit,
+        inbound ? "Mamul" : undefined
+      );
     }
     return options;
-  }, [products]);
+  }, [products, rawMaterials, inbound]);
 
   const partyOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -238,6 +292,8 @@ export function DeliveryNoteFormSheet({
     () =>
       uniqueWarehouseNames([
         form.warehouse,
+        ...warehouses.filter((w) => isFinishedWarehouseType(w.type)).map((w) => w.name),
+        ...finishedWarehouseFallbackNames(),
         ...warehouses.map((w) => w.name),
         ...products.map((p) => p.warehouse ?? ""),
         getWarehouseName(WAREHOUSE_IDS.production),
@@ -246,6 +302,19 @@ export function DeliveryNoteFormSheet({
       ]),
     [form.warehouse, warehouses, products]
   );
+  const finishedWarehouseOptions = useMemo(() => {
+    const keys = new Set(
+      uniqueWarehouseNames([
+        ...warehouses.filter((w) => isFinishedWarehouseType(w.type)).map((w) => w.name),
+        ...finishedWarehouseFallbackNames(),
+      ]).map((name) => name.toLocaleLowerCase("tr"))
+    );
+    return warehouseOptions.filter((name) => keys.has(name.toLocaleLowerCase("tr")));
+  }, [warehouseOptions, warehouses]);
+  const otherWarehouseOptions = useMemo(() => {
+    const keys = new Set(finishedWarehouseOptions.map((name) => name.toLocaleLowerCase("tr")));
+    return warehouseOptions.filter((name) => !keys.has(name.toLocaleLowerCase("tr")));
+  }, [warehouseOptions, finishedWarehouseOptions]);
 
   useEffect(() => {
     if (!open) return;
@@ -256,18 +325,27 @@ export function DeliveryNoteFormSheet({
       fetchDeliveryNotes().catch(() => [] as DeliveryNote[]),
       fetchProducts().catch(() => [] as FinishedProduct[]),
       getWarehouses().catch(() => [] as Warehouse[]),
-      ifAllowed(canRead("orders"), () => getAllOrders(), [] as Order[]),
-    ]).then(([c, s, notes, productRows, warehouseRows, orders]) => {
+      getAllOrders().catch(() => [] as Order[]),
+      fetchInvoices().catch(() => [] as Invoice[]),
+      fetchInvoiceLines().catch(() => [] as InvoiceLine[]),
+      getAllRawMaterials().catch(() => [] as RawMaterial[]),
+      getAllRawMaterialOrders().catch(() => [] as RawMaterialOrder[]),
+    ])
+      .then(([c, s, notes, productRows, warehouseRows, orders, invoiceRows, invoiceLineRows, materialRows, rmoRows]) => {
       setCustomers(c);
       setSuppliers(s);
       setProducts(productRows);
       setWarehouses(warehouseRows);
-      setReadyOrders(
-        orders.filter(
-          (order) =>
-            isReadyToShip(order.status) && !isUnsetShipmentCustomer(order.customer)
+      setInvoices(invoiceRows);
+      setInvoiceLines(invoiceLineRows);
+      setRawMaterials(materialRows);
+      setInboundOrders(
+        rmoRows.filter(
+          (row) =>
+            row.status === "to_order" || row.status === "ordered" || row.status === "received"
         )
       );
+      setReadyOrders(orders.filter((order) => isReadyToShip(order.status)));
       const nextNo = nextDocumentNo(
         notes.map((n) => n.noteNo),
         "IRS"
@@ -276,7 +354,11 @@ export function DeliveryNoteFormSheet({
         nextNo,
         editing ?? undefined,
         editingLines,
-        defaultWarehouseName(warehouseRows, editing?.warehouse || prefill?.warehouse)
+        defaultWarehouseName(
+          warehouseRows,
+          editing?.warehouse || prefill?.warehouse,
+          editing?.kind || "Satış"
+        )
       );
       if (!editing && prefill) {
         setForm({
@@ -294,8 +376,11 @@ export function DeliveryNoteFormSheet({
         return;
       }
       setForm(base);
-    });
-  }, [open, editing, editingLines, canRead]);
+    })
+      .catch(() => {
+        setReadyOrders([]);
+      });
+  }, [open, editing, editingLines]);
 
   const readyOrderOptions = useMemo(() => {
     const current = form.relatedOrderNo.trim();
@@ -318,12 +403,80 @@ export function DeliveryNoteFormSheet({
     }
     return rows.map((order) => ({
       value: order.orderNo,
-      label: order.product
-        ? `${order.orderNo} · ${order.customer} · ${order.product}`
-        : order.orderNo,
-      keywords: `${order.customer} ${order.product} ${order.batchNo ?? ""}`,
+      label: readyShipmentLabel(order),
+      keywords: `${order.customer} ${order.product} ${order.batchNo ?? ""} ${order.orderNo}`,
     }));
   }, [readyOrders, form.relatedOrderNo, form.party, form.lines, form.issueDate, form.shipDate, form.warehouse]);
+
+  const invoiceOptions = useMemo(() => {
+    const rows = invoices.filter((invoice) =>
+      inbound ? isPurchaseInvoice(invoice) : isSalesSideInvoice(invoice)
+    );
+    const current = form.relatedInvoiceNo.trim();
+    if (current && !rows.some((invoice) => invoice.invoiceNo === current)) {
+      rows.unshift({
+        id: current,
+        invoiceNo: current,
+        party: form.party,
+        kind: inbound ? "Alış" : "Satış",
+        issueDate: form.issueDate,
+        dueDate: form.issueDate,
+        amount: 0,
+        status: "",
+        documentType: inbound ? "purchase" : "sales",
+        bucket: inbound ? "expense" : "income",
+        confirmed: false,
+        eDocument: "",
+        scenario: "",
+        series: "",
+        currency: "TRY",
+        fxRate: 1,
+        partyTaxNo: "",
+        partyTaxOffice: "",
+        partyAddress: "",
+        partyCity: "",
+        partyDistrict: "",
+        partyPhone: "",
+        partyEmail: "",
+        sellerName: "",
+        sellerTaxNo: "",
+        sellerTaxOffice: "",
+        sellerAddress: "",
+        paymentMethod: "",
+        relatedDispatchNo: "",
+        relatedOrderNo: "",
+        notes: "",
+        validUntil: "",
+        deliveryTerm: "",
+        preparedBy: "",
+        subtotal: 0,
+        totalDiscount: 0,
+        totalVat: 0,
+        withholding: 0,
+        paidAmount: 0,
+      });
+    }
+    return rows.map((invoice) => ({
+      value: invoice.invoiceNo,
+      label: `${invoice.invoiceNo} · ${invoice.party || "Fatura"}`,
+      keywords: `${invoice.party} ${invoice.kind} ${invoice.partyTaxNo}`,
+    }));
+  }, [invoices, inbound, form.relatedInvoiceNo, form.party, form.issueDate]);
+
+  const inboundOrderOptions = useMemo(
+    () =>
+      inboundOrders.map((order) => ({
+        value: order.orderNo,
+        label: `${order.orderNo} · ${order.supplier} · ${order.materialName}`,
+        keywords: `${order.sku} ${order.supplier} ${order.materialName}`,
+      })),
+    [inboundOrders]
+  );
+
+  const methodOptions = useMemo(() => {
+    const base = inbound ? RECEIVE_METHODS : SHIP_METHODS;
+    return uniqueWarehouseNames([form.shipMethod, ...base]);
+  }, [inbound, form.shipMethod]);
 
   const districtOptions = TURKEY_DISTRICTS[form.partyCity] ?? [];
 
@@ -347,15 +500,34 @@ export function DeliveryNoteFormSheet({
       setForm((f) => ({ ...f, relatedOrderNo: orderNo }));
       return;
     }
-    const customer = customers.find((row) => row.name === order.customer);
+    const assignedCustomer = isUnsetShipmentCustomer(order.customer)
+      ? ""
+      : order.customer;
+    const customer = customers.find((row) => row.name === assignedCustomer);
+    const finishedKeys = new Set(
+      uniqueWarehouseNames([
+        ...warehouses.filter((w) => isFinishedWarehouseType(w.type)).map((w) => w.name),
+        ...finishedWarehouseFallbackNames(),
+      ]).map((name) => name.toLocaleLowerCase("tr"))
+    );
+    const orderWarehouse = order.warehouse?.trim() || "";
+    const warehouse =
+      orderWarehouse && finishedKeys.has(orderWarehouse.toLocaleLowerCase("tr"))
+        ? orderWarehouse
+        : "";
     setForm((f) => ({
       ...f,
       kind: "Satış",
-      party: order.customer,
+      party: assignedCustomer || f.party,
       relatedOrderNo: order.orderNo,
       relatedOrderDate: order.orderDate || f.relatedOrderDate,
-      warehouse: order.warehouse?.trim() || f.warehouse,
-      dispatchAddress: f.dispatchAddress || order.warehouse?.trim() || f.warehouse,
+      warehouse: warehouse || f.warehouse,
+      dispatchAddress:
+        f.dispatchAddress.trim() &&
+        f.dispatchAddress.trim().toLocaleLowerCase("tr") !==
+          f.warehouse.trim().toLocaleLowerCase("tr")
+          ? f.dispatchAddress
+          : warehouse || f.warehouse,
       partyAddress: order.destination?.trim() || customer?.address || f.partyAddress,
       partyTaxNo: customer?.taxNo || f.partyTaxNo,
       lines: [
@@ -365,6 +537,65 @@ export function DeliveryNoteFormSheet({
           unit: order.unit?.trim() || "Adet",
         },
       ],
+    }));
+  }
+
+  function applyInboundOrder(orderNo: string) {
+    const order = inboundOrders.find((row) => row.orderNo === orderNo);
+    if (!order) {
+      setForm((f) => ({ ...f, relatedOrderNo: orderNo }));
+      return;
+    }
+    const hit = partyOptions.find((p) => p.value === order.supplier);
+    const supplier = suppliers.find((row) => row.name === order.supplier);
+    setForm((f) => ({
+      ...f,
+      kind: "Alış",
+      relatedOrderNo: order.orderNo,
+      relatedOrderDate: order.orderDate || f.relatedOrderDate,
+      relatedInvoiceNo: order.invoiceNo || f.relatedInvoiceNo,
+      party: order.supplier || f.party,
+      partyTaxNo: hit?.taxNo || f.partyTaxNo,
+      partyAddress: hit?.address || f.partyAddress,
+      partyCity: hit?.city || supplier?.city || f.partyCity,
+      partyDistrict: hit?.district || supplier?.district || f.partyDistrict,
+      partyCountry: hit?.country || supplier?.country || f.partyCountry || "Türkiye",
+      lines: [
+        {
+          description: order.materialName,
+          quantityLabel: String(order.quantity),
+          unit: order.unit?.trim() || "kg",
+        },
+      ],
+    }));
+  }
+
+  function applyInvoice(invoiceNo: string) {
+    const invoice = invoices.find((row) => row.invoiceNo === invoiceNo);
+    if (!invoice) {
+      setForm((f) => ({ ...f, relatedInvoiceNo: invoiceNo }));
+      return;
+    }
+    const lines = invoiceLines
+      .filter((line) => line.invoiceNo === invoice.invoiceNo)
+      .map((line) => ({
+        description: line.description,
+        quantityLabel: line.quantityLabel || String(line.quantity || 1),
+        unit: line.unit?.trim() || "Adet",
+      }));
+    const hit = partyOptions.find((p) => p.value === invoice.party);
+    const supplier = suppliers.find((row) => row.name === invoice.party);
+    setForm((f) => ({
+      ...f,
+      relatedInvoiceNo: invoice.invoiceNo,
+      relatedOrderNo: invoice.relatedOrderNo || f.relatedOrderNo,
+      party: invoice.party || f.party,
+      partyTaxNo: invoice.partyTaxNo || hit?.taxNo || f.partyTaxNo,
+      partyAddress: invoice.partyAddress || hit?.address || f.partyAddress,
+      partyCity: invoice.partyCity || hit?.city || supplier?.city || f.partyCity,
+      partyDistrict:
+        invoice.partyDistrict || hit?.district || supplier?.district || f.partyDistrict,
+      lines: lines.length > 0 ? lines : f.lines,
     }));
   }
 
@@ -378,7 +609,9 @@ export function DeliveryNoteFormSheet({
         unit: l.unit.trim() || "Adet",
       }));
     if (!form.noteNo.trim() || !form.party.trim() || !form.warehouse.trim()) {
-      toast.error("İrsaliye no, alıcı ve depo zorunludur");
+      toast.error(
+        inbound ? "İrsaliye no, gönderici ve depo zorunludur" : "İrsaliye no, alıcı ve depo zorunludur"
+      );
       return;
     }
     if (lines.length === 0) {
@@ -419,12 +652,20 @@ export function DeliveryNoteFormSheet({
       };
       if (editing) {
         const updated = await updateCatalog<DeliveryNote>("delivery-notes", editing.id, body);
-        toast.success("İrsaliye güncellendi");
+        toast.success(
+          inbound
+            ? "Mal kabul irsaliyesi güncellendi. Hammadde kalemleri kalite kontrole alındı."
+            : "İrsaliye güncellendi"
+        );
         onOpenChange(false);
         onSaved?.(updated);
       } else {
         const created = await createCatalog<DeliveryNote>("delivery-notes", body);
-        toast.success("İrsaliye oluşturuldu");
+        toast.success(
+          inbound
+            ? "Mal kabul irsaliyesi kaydedildi. Hammadde kalemleri depo kalite kontrolüne düştü."
+            : "İrsaliye oluşturuldu"
+        );
         onOpenChange(false);
         onSaved?.(created);
       }
@@ -440,8 +681,20 @@ export function DeliveryNoteFormSheet({
       open={open}
       onOpenChange={onOpenChange}
       icon={Truck}
-      title={editing ? "Sevk irsaliyesini düzenle" : "Yeni sevk irsaliyesi"}
-      description="Gönderici bilgisi PDF ayarlarından gelir. Alıcı, gönderim ve irsaliye bilgilerini girin."
+      title={
+        editing
+          ? inbound
+            ? "Mal kabul irsaliyesini düzenle"
+            : "Sevk irsaliyesini düzenle"
+          : inbound
+            ? "Yeni mal kabul irsaliyesi"
+            : "Yeni sevk irsaliyesi"
+      }
+      description={
+        inbound
+          ? "Gönderici tedarikçi firmadır. Getirici bilgilerini ve gelen malları girin. Hammaddeler kalite kontrole düşer."
+          : "Gönderici bilgisi PDF ayarlarından gelir. Alıcı, gönderim ve irsaliye bilgilerini girin."
+      }
       className="max-w-4xl max-h-[min(92dvh,58rem)]"
     >
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
@@ -462,7 +715,22 @@ export function DeliveryNoteFormSheet({
               <FormField label="Tür" required>
                 <Select
                   value={form.kind}
-                  onValueChange={(kind) => setForm((f) => ({ ...f, kind, party: "" }))}
+                  onValueChange={(kind) =>
+                    setForm((f) => {
+                      const warehouse = defaultWarehouseName(warehouses, undefined, kind);
+                      return {
+                        ...f,
+                        kind,
+                        party: "",
+                        relatedOrderNo: "",
+                        relatedInvoiceNo: "",
+                        shipMethod:
+                          kind === "Alış" ? RECEIVE_METHODS[0] : SHIP_METHODS[0],
+                        warehouse,
+                        dispatchAddress: warehouse,
+                      };
+                    })
+                  }
                 >
                   <SelectTrigger className="bg-white">
                     <SelectValue />
@@ -517,22 +785,48 @@ export function DeliveryNoteFormSheet({
                     <SelectValue placeholder="Depo seçin" />
                   </SelectTrigger>
                   <SelectContent>
-                    {warehouseOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
+                    {(inbound ? otherWarehouseOptions : finishedWarehouseOptions).length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>
+                          {inbound ? "Hammadde depoları" : "Mamul stok depoları"}
+                        </SelectLabel>
+                        {(inbound ? otherWarehouseOptions : finishedWarehouseOptions).map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null}
+                    {(inbound ? finishedWarehouseOptions : otherWarehouseOptions).length > 0 ? (
+                      <SelectGroup>
+                        <SelectLabel>
+                          {inbound ? "Mamul stok depoları" : "Hammadde depoları"}
+                        </SelectLabel>
+                        {(inbound ? finishedWarehouseOptions : otherWarehouseOptions).map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </FormField>
             </div>
           </FormSection>
 
-          <FormSection title="Alıcı">
+          <FormSection
+            title={inbound ? "Gönderici" : "Alıcı"}
+            description={
+              inbound
+                ? "Malı getiren tedarikçi firma. Unvan seçilince vergi ve adres dolar."
+                : undefined
+            }
+          >
             {form.kind === "Satış" ? (
               <FormField
                 label="Sevke hazır iş"
-                hint="Siparişi seçince müşteri ve ürün kalemleri otomatik dolar."
+                hint="Sevkiyat işini seçince ürün kalemleri dolar. Müşteri yoksa alıcıyı ayrıca seçin."
               >
                 <SearchableSelect
                   value={form.relatedOrderNo || undefined}
@@ -544,12 +838,28 @@ export function DeliveryNoteFormSheet({
                   options={readyOrderOptions}
                 />
               </FormField>
-            ) : null}
+            ) : (
+              <FormField
+                label="Beklenen teslimat"
+                hint="Açık hammadde talebini seçince tedarikçi ve mal kalemi dolar."
+                optional
+              >
+                <SearchableSelect
+                  value={form.relatedOrderNo || undefined}
+                  onValueChange={applyInboundOrder}
+                  placeholder="Hammadde talebi seçin"
+                  searchPlaceholder="Talep no, tedarikçi veya malzeme ara…"
+                  emptyText="Açık hammadde talebi yok"
+                  allowCustom
+                  options={inboundOrderOptions}
+                />
+              </FormField>
+            )}
             <FormField label="Unvan" required>
               <SearchableSelect
                 value={form.party || undefined}
                 onValueChange={applyParty}
-                placeholder="Alıcı seçin veya arayın"
+                placeholder={inbound ? "Tedarikçi seçin veya arayın" : "Alıcı seçin veya arayın"}
                 searchPlaceholder="Cari ara…"
                 emptyText="Kayıt yok"
                 options={partyOptions.map((p) => ({
@@ -638,8 +948,15 @@ export function DeliveryNoteFormSheet({
             </FormField>
           </FormSection>
 
-          <FormSection title="Gönderim">
-            <FormField label="Gönderim şekli">
+          <FormSection
+            title={inbound ? "Getirici" : "Gönderim"}
+            description={
+              inbound
+                ? "Malı fabrikaya getiren şoför / nakliyeci bilgileri."
+                : undefined
+            }
+          >
+            <FormField label={inbound ? "Getirim şekli" : "Gönderim şekli"}>
               <Select
                 value={form.shipMethod}
                 onValueChange={(shipMethod) => setForm((f) => ({ ...f, shipMethod }))}
@@ -648,7 +965,7 @@ export function DeliveryNoteFormSheet({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SHIP_METHODS.map((method) => (
+                  {methodOptions.map((method) => (
                     <SelectItem key={method} value={method}>
                       {method}
                     </SelectItem>
@@ -657,7 +974,11 @@ export function DeliveryNoteFormSheet({
               </Select>
             </FormField>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              <FormField label="Şoför adı soyadı" htmlFor="dn-drv" optional>
+              <FormField
+                label={inbound ? "Getirici adı soyadı" : "Şoför adı soyadı"}
+                htmlFor="dn-drv"
+                optional
+              >
                 <Input
                   id="dn-drv"
                   className="bg-white"
@@ -724,13 +1045,13 @@ export function DeliveryNoteFormSheet({
 
           <FormSection title="Diğer bilgiler">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField label="İrsaliye adresi">
+              <FormField label={inbound ? "Teslim adresi" : "İrsaliye adresi"}>
                 <SearchableSelect
                   value={form.dispatchAddress || undefined}
                   onValueChange={(dispatchAddress) =>
                     setForm((f) => ({ ...f, dispatchAddress }))
                   }
-                  placeholder="Sevk çıkış adresi"
+                  placeholder={inbound ? "Mal kabul adresi / depo" : "Sevk çıkış adresi"}
                   searchPlaceholder="Adres veya şube ara…"
                   options={warehouseOptions.map((name) => ({ value: name, label: name }))}
                   allowCustom
@@ -766,7 +1087,7 @@ export function DeliveryNoteFormSheet({
                   />
                 </div>
               </FormField>
-              <FormField label="Sevk tarihi" htmlFor="dn-ship" required>
+              <FormField label={inbound ? "Teslim tarihi" : "Sevk tarihi"} htmlFor="dn-ship" required>
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     id="dn-ship"
@@ -786,7 +1107,11 @@ export function DeliveryNoteFormSheet({
                   />
                 </div>
               </FormField>
-              <FormField label="Sipariş no" htmlFor="dn-order" optional>
+              <FormField
+                label={inbound ? "Talep / sipariş no" : "Sipariş no"}
+                htmlFor="dn-order"
+                optional
+              >
                 <Input
                   id="dn-order"
                   className="bg-white font-mono"
@@ -808,16 +1133,14 @@ export function DeliveryNoteFormSheet({
                 />
               </FormField>
               <FormField label="Fatura no" htmlFor="dn-inv" optional>
-                <Input
-                  id="dn-inv"
-                  className="bg-white font-mono"
-                  value={form.relatedInvoiceNo}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      relatedInvoiceNo: e.target.value,
-                    }))
-                  }
+                <SearchableSelect
+                  value={form.relatedInvoiceNo || undefined}
+                  onValueChange={applyInvoice}
+                  placeholder="Fatura seçin veya yazın"
+                  searchPlaceholder="Fatura no veya cari ara…"
+                  emptyText="Kayıtlı fatura yok, elle yazabilirsiniz"
+                  allowCustom
+                  options={invoiceOptions}
                 />
               </FormField>
             </div>
@@ -826,9 +1149,11 @@ export function DeliveryNoteFormSheet({
           <FormSection
             title="Mallar"
             description={
-              form.relatedOrderNo
-                ? "Seçilen sevkiyat işindeki ürünler otomatik dolduruldu; gerekirse düzenleyin. İrsaliye stok düşmez."
-                : "Mamul ürünlerden seçin veya elle yazın. İrsaliye stok düşmez."
+              inbound
+                ? "Hammadde veya ürün seçin. Hammaddeler kayıttan sonra depo kalite kontrolüne düşer; KK onayınca stoğa işlenir."
+                : form.relatedOrderNo
+                  ? "Seçilen sevkiyat işindeki ürünler otomatik dolduruldu; gerekirse düzenleyin. İrsaliye stok düşmez."
+                  : "Mamul ürünlerden seçin veya elle yazın. İrsaliye stok düşmez."
             }
           >
             <div className="space-y-2">
@@ -841,9 +1166,15 @@ export function DeliveryNoteFormSheet({
                     <SearchableSelect
                       value={line.description || undefined}
                       allowCustom
-                      placeholder="Mamul seçin veya yazın"
-                      searchPlaceholder="Ürün ara veya yaz…"
-                      emptyText="Mamul yok, elle yazabilirsiniz"
+                      placeholder={
+                        inbound ? "Hammadde veya ürün seçin / yazın" : "Mamul seçin veya yazın"
+                      }
+                      searchPlaceholder={inbound ? "Hammadde veya ürün ara…" : "Ürün ara veya yaz…"}
+                      emptyText={
+                        inbound
+                          ? "Liste boş, hammaddenin adını yazabilirsiniz"
+                          : "Mamul yok, elle yazabilirsiniz"
+                      }
                       options={productOptions.map((p) => ({
                         value: p.value,
                         label: p.label,

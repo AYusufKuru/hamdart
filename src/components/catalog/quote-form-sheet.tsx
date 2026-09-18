@@ -35,12 +35,12 @@ import {
   LINE_UNITS,
   nextDocumentNo,
   PAYMENT_METHODS,
+  QUOTE_STATUSES,
   roundMoney,
   VAT_RATES,
+  normalizeQuoteStatus,
 } from "@/lib/invoice-docs";
 import { formatNumber, todayIso } from "@/lib/utils";
-
-const QUOTE_STATUSES = ["Taslak", "Gönderildi", "Kabul edildi", "Reddedildi"] as const;
 
 type LineForm = {
   description: string;
@@ -254,12 +254,11 @@ export function QuoteFormSheet({
         lines,
       };
       if (editing) {
-        await updateCatalog("invoices", editing.id, body);
-        toast.success("Teklif güncellendi");
-      } else {
-        await createCatalog("invoices", body);
-        toast.success("Teklif kaydedildi");
+        toast.error("Teklif içeriği kilitlidir. Yalnızca durum güncellenebilir.");
+        return;
       }
+      await createCatalog("invoices", body);
+      toast.success("Teklif kaydedildi");
       onOpenChange(false);
       onSaved?.();
     } catch (err) {
@@ -274,8 +273,8 @@ export function QuoteFormSheet({
       open={open}
       onOpenChange={onOpenChange}
       icon={BadgePercent}
-      title={editing ? "Fiyat teklifini düzenle" : "Yeni fiyat teklifi"}
-      description="Müşteriye özel geçerlilik, teslim ve ödeme koşullarıyla teklif hazırlayın."
+      title="Yeni fiyat teklifi"
+      description="Kayıttan sonra teklif içeriği kilitlenir; yalnızca durum güncellenir."
       className="max-w-4xl max-h-[min(92dvh,58rem)]"
     >
       <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
@@ -293,7 +292,11 @@ export function QuoteFormSheet({
                   }
                 />
               </FormField>
-              <FormField label="Durum" required>
+              <FormField
+                label="Durum"
+                required
+                hint="Kayıttan sonra içerik kilitlenir; durum buradan veya listeden güncellenir."
+              >
                 <Select
                   value={form.status}
                   onValueChange={(status) => setForm((f) => ({ ...f, status }))}
@@ -618,7 +621,84 @@ export function QuoteFormSheet({
             Vazgeç
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? "Kaydediliyor…" : editing ? "Değişiklikleri kaydet" : "Teklifi kaydet"}
+            {saving ? "Kaydediliyor…" : "Teklifi kaydet"}
+          </Button>
+        </FormSheetFooter>
+      </form>
+    </FormDialog>
+  );
+}
+
+export function QuoteStatusDialog({
+  open,
+  onOpenChange,
+  quote,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  quote: Invoice | null;
+  onSaved?: () => void;
+}) {
+  const [status, setStatus] = useState<string>("Taslak");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open || !quote) return;
+    setStatus(normalizeQuoteStatus(quote.status));
+    setSaving(false);
+  }, [open, quote]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quote) return;
+    setSaving(true);
+    try {
+      await updateCatalog("invoices", quote.id, { status });
+      toast.success("Teklif durumu güncellendi");
+      onOpenChange(false);
+      onSaved?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Durum güncellenemedi");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      icon={BadgePercent}
+      title="Teklif durumunu güncelle"
+      description={quote ? `${quote.invoiceNo} · ${quote.party}` : undefined}
+      className="max-w-md"
+    >
+      <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmit}>
+        <FormSheetBody className="space-y-5">
+          <FormSection title="Durum">
+            <FormField label="Durum" required>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger className="bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUOTE_STATUSES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormField>
+          </FormSection>
+        </FormSheetBody>
+        <FormSheetFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Vazgeç
+          </Button>
+          <Button type="submit" disabled={saving || !quote}>
+            {saving ? "Kaydediliyor…" : "Durumu kaydet"}
           </Button>
         </FormSheetFooter>
       </form>

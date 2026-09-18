@@ -10,7 +10,6 @@ import {
   jsonError,
   jsonOk,
   parseBody,
-  requireAdmin,
   requireSession,
 } from "@/lib/server/api-utils";
 import { departmentCreateSchema } from "@/lib/server/schemas";
@@ -28,7 +27,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireSession(req, "personnel:write");
   if (!auth.ok) return auth.response;
 
   try {

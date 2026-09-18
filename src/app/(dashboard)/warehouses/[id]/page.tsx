@@ -23,6 +23,9 @@ import {
   occupancyPercent,
   warehouseTypeLabels,
   WAREHOUSE_IDS,
+  isFinishedWarehouseType,
+  transferReasonLabel,
+  transferStatusLabel,
   type StockTransfer,
   type Warehouse,
   type WarehouseStockItem,
@@ -34,6 +37,7 @@ import {
 import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
 import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
+import { IstanbulShipmentTable } from "@/components/warehouses/istanbul-shipment-table";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
   canCreateStockEntry,
@@ -47,14 +51,9 @@ import {
   Droplets,
   MapPin,
   Thermometer,
+  Truck,
   User,
 } from "lucide-react";
-
-const transferReasonLabel = {
-  replenishment: "Ana depodan aktarım",
-  direct_lab: "Doğrudan lab girişi",
-  manual: "Manuel",
-};
 
 export default function WarehouseDetailPage({
   params,
@@ -153,12 +152,16 @@ export default function WarehouseDetailPage({
                   onClick={() => setTransferOpen(true)}
                 >
                   <ArrowRightLeft className="w-4 h-4 mr-2" />
-                  {user?.role === "PRODUCTION" ? "Depodan Talep" : "Stok Aktar"}
+                  {warehouse.type === "finished"
+                    ? "Mamul Aktar"
+                    : user?.role === "PRODUCTION"
+                      ? "Depodan Talep"
+                      : "Stok Aktar"}
                 </Button>
               ) : null}
               {canEnterStock ? (
                 <Button
-                  className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                  className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
                   onClick={() => setFormOpen(true)}
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -255,6 +258,24 @@ export default function WarehouseDetailPage({
         </CardContent>
       </Card>
 
+      {isFinishedWarehouseType(warehouse.type) ? (
+        <Card className="glass-card border-none">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Truck className="w-5 h-5 text-emerald-600" />
+              İstanbul sevkiyatları
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 pt-0">
+            <IstanbulShipmentTable
+              transfers={transfers}
+              canAct={canTransfer}
+              onChanged={() => void refreshStock()}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
+
       {warehouse.type === "laboratory" && transfers.length > 0 && (
         <Card className="glass-card border-none">
           <CardHeader>
@@ -290,7 +311,7 @@ export default function WarehouseDetailPage({
                           tr.reason === "direct_lab" ? "warning" : "secondary"
                         }
                       >
-                        {transferReasonLabel[tr.reason]}
+                        {transferReasonLabel(tr.reason)}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -299,7 +320,7 @@ export default function WarehouseDetailPage({
                           tr.status === "completed" ? "success" : "info"
                         }
                       >
-                        {tr.status === "completed" ? "Tamamlandı" : "Bekliyor"}
+                        {transferStatusLabel(tr.status)}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -341,7 +362,7 @@ export default function WarehouseDetailPage({
                           tr.status === "completed" ? "success" : "info"
                         }
                       >
-                        {tr.status === "completed" ? "Tamamlandı" : "Bekliyor"}
+                        {transferStatusLabel(tr.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground max-w-xs truncate">

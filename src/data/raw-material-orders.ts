@@ -12,7 +12,8 @@ export type RawMaterialOrderStatus =
 export type RawMaterialOrderSource =
   | "low_stock"
   | "production_need"
-  | "manual";
+  | "manual"
+  | "delivery_note";
 
 export const rawMaterialOrderSourceLabels: Record<
   RawMaterialOrderSource,
@@ -21,6 +22,7 @@ export const rawMaterialOrderSourceLabels: Record<
   low_stock: "Stok uyarısı (min. altı)",
   production_need: "Üretim / plan ihtiyacı",
   manual: "Manuel talep",
+  delivery_note: "Mal kabul irsaliyesi",
 };
 
 export interface RawMaterialOrder {

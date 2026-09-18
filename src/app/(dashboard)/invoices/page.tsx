@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { BadgePercent, Banknote, ClipboardCheck, FileDown, FileSpreadsheet, Paperclip, Plus, Truck } from "lucide-react";
+import { BadgePercent, Banknote, ClipboardCheck, FileDown, FileSpreadsheet, Plus, Truck } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
+import { InvoiceFileLinks } from "@/components/catalog/invoice-file-links";
 import { InvoiceFormSheet } from "@/components/catalog/invoice-form-sheet";
 import { InvoiceProcessDialog } from "@/components/catalog/invoice-process-dialog";
 import { ChequeNotesWorkspace } from "@/components/catalog/cheque-notes-workspace";
@@ -42,6 +43,7 @@ import {
   documentTypeMeta,
   INVOICE_PAGE_FILTERS,
   INVOICE_STATUS_FILTERS,
+  invoiceStatusVariant,
   isInvoicePageType,
   normalizeInvoiceStatus,
   type InvoiceDocumentType,
@@ -49,38 +51,6 @@ import {
   type InvoiceStatusFilter,
 } from "@/lib/invoice-docs";
 import { formatDate, formatNumber } from "@/lib/utils";
-
-function InvoiceFileLinks({ files }: { files: InvoiceEvent[] }) {
-  if (files.length === 0) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-  return (
-    <div className="flex max-w-52 flex-col items-start gap-1">
-      {files.map((file) => (
-        <a
-          key={file.fileId}
-          href={`/api/invoice-docs/${file.fileId}`}
-          target="_blank"
-          rel="noreferrer"
-          title={file.fileName || "Dekont"}
-          className="inline-flex max-w-full items-center gap-1 text-sm font-medium text-indigo-600 underline-offset-2 hover:underline"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Paperclip className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{file.fileName || "Dekont"}</span>
-        </a>
-      ))}
-    </div>
-  );
-}
-
-function statusVariant(status: string) {
-  const normalized = normalizeInvoiceStatus(status);
-  if (normalized === "Ödendi" || normalized === "Onaylandı") return "success" as const;
-  if (normalized === "İptal Edildi" || normalized === "Reddedildi") return "danger" as const;
-  if (normalized === "Proforma") return "info" as const;
-  return "warning" as const;
-}
 
 function createConfig(filter: InvoicePageFilter): {
   type: InvoiceDocumentType;
@@ -118,12 +88,16 @@ function InvoicesPageContent() {
   const [invoiceLines, setInvoiceLines] = useState<InvoiceLine[]>([]);
   const [events, setEvents] = useState<InvoiceEvent[]>([]);
   const [settings, setSettings] = useState<DocumentSettings>(EMPTY_DOCUMENT_SETTINGS);
-  const [selected, setSelected] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [chequeOpen, setChequeOpen] = useState(false);
   const [editing, setEditing] = useState<Invoice | null>(null);
   const [process, setProcess] = useState<{ mode: "status" | "payment"; invoice: Invoice } | null>(null);
   const [filter, setFilter] = useState<InvoicePageFilter>("sales");
   const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>("all");
+
+  useEffect(() => {
+    if (filter !== "cheque") setChequeOpen(false);
+  }, [filter]);
 
   const refresh = useCallback(async () => {
     const [inv, lines, company, ev] = await Promise.all([
@@ -176,13 +150,6 @@ function InvoicesPageContent() {
     return byType.filter((row) => row.workflow === statusFilter);
   }, [byType, statusFilter]);
 
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev && filtered.some((row) => row.invoiceNo === prev)) return prev;
-      return filtered[0]?.invoiceNo ?? null;
-    });
-  }, [filtered]);
-
   const filesByInvoice = useMemo(() => {
     const map = new Map<string, InvoiceEvent[]>();
     for (const event of events) {
@@ -193,16 +160,6 @@ function InvoicesPageContent() {
     }
     return map;
   }, [events]);
-
-  const selectedEvents = useMemo(
-    () => events.filter((event) => event.invoiceNo === selected),
-    [events, selected]
-  );
-
-  const lines = useMemo(
-    () => invoiceLines.filter((l) => l.invoiceNo === selected),
-    [invoiceLines, selected]
-  );
 
   const create = createConfig(filter);
   const filterLabel = INVOICE_PAGE_FILTERS.find((f) => f.value === filter)?.label ?? "Satış";
@@ -231,7 +188,7 @@ function InvoicesPageContent() {
             title: filter === "cheque" ? "Çek / Senet" : "Faturalar",
             description:
               filter === "cheque"
-                ? "Portföydeki çek/senetler. Yeni kayıt Bütçe gelirinden eklenir; faturada yalnızca seçilir."
+                ? "Alınan ve verilen çek/senetler. Yeni kayıt buradan eklenir, fatura ödemesinde portföyden seçilir."
                 : `${filterLabel} faturaları. Durum ve tahsilat bu sayfadan güncellenir.`,
           };
 
@@ -260,7 +217,9 @@ function InvoicesPageContent() {
       key: "invoiceNo",
       header: "Fatura No",
       className: "font-mono text-sm",
-      render: (r) => r.invoiceNo,
+      render: (r) => (
+        <span className="font-semibold text-indigo-600">{r.invoiceNo}</span>
+      ),
     },
     {
       key: "kind",
@@ -288,7 +247,7 @@ function InvoicesPageContent() {
     {
       key: "status",
       header: "Durum",
-      render: (r) => <Badge variant={statusVariant(r.workflow)}>{r.workflow}</Badge>,
+      render: (r) => <Badge variant={invoiceStatusVariant(r.workflow)}>{r.workflow}</Badge>,
     },
     {
       key: "files",
@@ -365,18 +324,28 @@ function InvoicesPageContent() {
         actions={
           <div className="flex flex-wrap gap-2">
             <PdfSettingsButton />
-            {docTab === "invoices" && filter !== "cheque" ? (
+            {docTab === "invoices" ? (
               <CanWrite resource="invoices">
-                <Button
-                  className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
-                  onClick={() => {
-                    setEditing(null);
-                    setOpen(true);
-                  }}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  {create.label}
-                </Button>
+                {filter === "cheque" ? (
+                  <Button
+                    className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
+                    onClick={() => setChequeOpen(true)}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Yeni çek / senet
+                  </Button>
+                ) : (
+                  <Button
+                    className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
+                    onClick={() => {
+                      setEditing(null);
+                      setOpen(true);
+                    }}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    {create.label}
+                  </Button>
+                )}
               </CanWrite>
             ) : null}
           </div>
@@ -413,7 +382,11 @@ function InvoicesPageContent() {
       </div>
 
       {filter === "cheque" ? (
-        <ChequeNotesWorkspace writable={writable} />
+        <ChequeNotesWorkspace
+          writable={writable}
+          createOpen={chequeOpen}
+          onCreateOpenChange={setChequeOpen}
+        />
       ) : (
         <>
       <Card className="glass-card border-none">
@@ -428,7 +401,7 @@ function InvoicesPageContent() {
                 .map((file) => file.fileName)
                 .join(" ")}`
             }
-            onRowClick={(r) => setSelected(r.invoiceNo)}
+            onRowClick={(r) => router.push(`/invoices/${encodeURIComponent(r.id)}`)}
             empty="Bu görünümde fatura yok"
             toolbar={
               <div className="flex items-center gap-2">
@@ -450,93 +423,6 @@ function InvoicesPageContent() {
                 </Select>
               </div>
             }
-          />
-        </CardContent>
-      </Card>
-
-      <Card className="glass-card border-none">
-        <CardContent className="p-6 space-y-4">
-          <p className="text-sm font-bold">Seçili fatura kalemleri</p>
-          {filtered.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Kalemleri görmek için fatura oluşturun.</p>
-          ) : (
-            <select
-              className="h-10 min-w-[16rem] max-w-full rounded-xl border px-3 text-sm bg-background"
-              value={selected ?? ""}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              {filtered.map((inv) => (
-                <option key={inv.id} value={inv.invoiceNo}>
-                  {inv.invoiceNo} · {inv.party}
-                </option>
-              ))}
-            </select>
-          )}
-          <SearchTable
-            rows={lines}
-            columns={[
-              { key: "description", header: "Açıklama", render: (r) => r.description },
-              {
-                key: "qty",
-                header: "Miktar",
-                render: (r) => r.quantityLabel || `${r.quantity} ${r.unit}`,
-              },
-              {
-                key: "unit",
-                header: "Birim fiyat",
-                className: "text-right",
-                render: (r) => formatNumber(r.unitPrice),
-              },
-              {
-                key: "total",
-                header: "Tutar",
-                className: "text-right font-bold",
-                render: (r) => formatNumber(r.lineTotal),
-              },
-            ]}
-            searchText={(r) => `${r.description} ${r.invoiceNo}`}
-            empty="Bu faturada kalem yok"
-          />
-        </CardContent>
-      </Card>
-
-      <Card className="glass-card border-none">
-        <CardContent className="p-6 space-y-4">
-          <p className="text-sm font-bold">Durum ve tahsilat geçmişi</p>
-          <SearchTable
-            rows={selectedEvents}
-            columns={[
-              {
-                key: "createdAt",
-                header: "Tarih",
-                render: (r) => formatDate(r.createdAt.slice(0, 10)),
-              },
-              {
-                key: "kind",
-                header: "İşlem",
-                render: (r) => (r.kind === "payment" ? "Ödeme" : "Durum"),
-              },
-              {
-                key: "status",
-                header: "Sonuç",
-                render: (r) => r.status || "—",
-              },
-              {
-                key: "amount",
-                header: "Tutar",
-                className: "text-right",
-                render: (r) => (r.kind === "payment" ? formatNumber(r.amount) : "—"),
-              },
-              { key: "note", header: "Not", render: (r) => r.note || "—" },
-              {
-                key: "file",
-                header: "Dosya",
-                render: (r) => <InvoiceFileLinks files={r.fileId ? [r] : []} />,
-              },
-              { key: "createdBy", header: "Kullanıcı", render: (r) => r.createdBy || "—" },
-            ]}
-            searchText={(r) => `${r.kind} ${r.status} ${r.note} ${r.fileName} ${r.createdBy}`}
-            empty="Henüz durum veya ödeme kaydı yok"
           />
         </CardContent>
       </Card>

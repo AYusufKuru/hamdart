@@ -10,6 +10,7 @@ import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
 import { PersonnelFormSheet } from "@/components/catalog/personnel-form-sheet";
+import { PersonnelSettingsButton } from "@/components/catalog/personnel-settings-button";
 import type { Personnel } from "@/data/catalog";
 import { deleteCatalog, fetchPersonnel } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -92,18 +93,21 @@ export default function PersonnelPage() {
         badge="İK"
         title="Personel"
         actions={
-          <CanWrite resource="personnel">
-            <Button
-              className="rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
-              onClick={() => {
-                setEditing(null);
-                setOpen(true);
-              }}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Yeni personel
-            </Button>
-          </CanWrite>
+          <div className="flex flex-wrap gap-2">
+            <PersonnelSettingsButton writable={writable} onChanged={() => void refresh()} />
+            <CanWrite resource="personnel">
+              <Button
+                className="rounded-2xl bg-linear-to-r from-indigo-600 to-blue-500 border-none"
+                onClick={() => {
+                  setEditing(null);
+                  setOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Yeni personel
+              </Button>
+            </CanWrite>
+          </div>
         }
       />
       <Card className="glass-card border-none">

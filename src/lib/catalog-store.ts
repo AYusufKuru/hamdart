@@ -17,6 +17,7 @@ import type {
   DocumentSettings,
 } from "@/data/catalog";
 import type { Warehouse } from "@/data/warehouses";
+import type { CashAccount } from "@/lib/cash-accounts";
 import type { Role } from "@/lib/auth/permissions";
 import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm, apiPut } from "@/lib/api-client";
 
@@ -291,4 +292,38 @@ export async function updateDepartment(
 export async function deleteDepartment(id: string): Promise<void> {
   const { apiDelete } = await import("@/lib/api-client");
   await apiDelete(`/api/departments/${id}`);
+}
+
+export type JobTitleRow = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
+export async function fetchJobTitles(): Promise<JobTitleRow[]> {
+  return apiGet<JobTitleRow[]>("/api/job-titles");
+}
+
+export async function createJobTitle(name: string): Promise<JobTitleRow> {
+  return apiPost<JobTitleRow>("/api/job-titles", { name });
+}
+
+export async function deleteJobTitle(id: string): Promise<void> {
+  await apiDelete(`/api/job-titles/${id}`);
+}
+
+export async function fetchCashAccounts(): Promise<CashAccount[]> {
+  return apiGet<CashAccount[]>("/api/cash-accounts");
+}
+
+export async function createCashAccount(body: unknown): Promise<CashAccount> {
+  return apiPost<CashAccount>("/api/cash-accounts", body);
+}
+
+export async function updateCashAccount(id: string, body: unknown): Promise<CashAccount> {
+  return apiPatch<CashAccount>(`/api/cash-accounts/${id}`, body);
+}
+
+export async function deleteCashAccount(id: string): Promise<void> {
+  await apiDelete(`/api/cash-accounts/${id}`);
 }

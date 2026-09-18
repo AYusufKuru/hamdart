@@ -385,6 +385,8 @@ function TableHead({
       tabIndex={canSort ? 0 : undefined}
       className={cn(
         "relative h-11 overflow-hidden px-4 text-left align-middle text-[10px] font-black uppercase tracking-widest text-muted-foreground whitespace-nowrap",
+        "[&.text-right>span]:flex-row-reverse [&.text-right>span]:pr-0",
+        "[&.text-center>span]:justify-center",
         canSort &&
           "cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         empty && "col-head-empty",
