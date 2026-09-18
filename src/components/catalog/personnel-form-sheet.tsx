@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { UserPlus, UserRoundPen } from "lucide-react";
+import { Check, UserPlus, UserRoundPen, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -25,16 +25,17 @@ import { createCatalog, fetchDepartments, fetchPersonnel, updateCatalog } from "
 import {
   LAB_WORKER_TITLE,
   PERSONNEL_TITLE_OPTIONS,
-  normalizePersonnelTitle,
+  parsePersonnelTitles,
+  serializePersonnelTitles,
 } from "@/lib/personnel";
-import { capitalizeWordsTr, selectItemValues, todayIso } from "@/lib/utils";
+import { capitalizeWordsTr, cn, selectItemValues, todayIso } from "@/lib/utils";
 
 function emptyForm(row?: Personnel) {
   return {
     firstName: row?.firstName ?? "",
     lastName: row?.lastName ?? "",
     department: row?.department ?? "",
-    title: row?.title ?? "",
+    titles: row ? parsePersonnelTitles(row.title) : [],
     email: row?.email ?? "",
     phone: row?.phone ?? "",
     hireDate: row?.hireDate || todayIso(),
@@ -62,6 +63,10 @@ function formatPhone(value: string) {
   return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7, 9)} ${digits.slice(9)}`;
 }
 
+function titleKey(title: string) {
+  return title.trim().toLocaleLowerCase("tr").replace(/\s+/g, " ");
+}
+
 export function PersonnelFormSheet({
   open,
   onOpenChange,
@@ -74,9 +79,12 @@ export function PersonnelFormSheet({
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(emptyForm());
+  const [customTitle, setCustomTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [departments, setDepartments] = useState<string[]>([]);
-  const [titles, setTitles] = useState<string[]>([...PERSONNEL_TITLE_OPTIONS]);
+  const [knownTitles, setKnownTitles] = useState<string[]>([
+    ...PERSONNEL_TITLE_OPTIONS,
+  ]);
   const departmentOptions = useMemo(() => {
     const base = selectItemValues([...DEFAULT_DEPARTMENTS, ...departments]);
     const current = form.department.trim();
@@ -84,31 +92,55 @@ export function PersonnelFormSheet({
     return base;
   }, [form.department, departments]);
   const titleOptions = useMemo(() => {
-    const base = selectItemValues([...PERSONNEL_TITLE_OPTIONS, ...titles]);
-    const current = form.title.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.title, titles]);
+    return selectItemValues([
+      ...PERSONNEL_TITLE_OPTIONS,
+      ...knownTitles,
+      ...form.titles,
+    ]);
+  }, [knownTitles, form.titles]);
 
   useEffect(() => {
     if (!open) return;
     setForm(emptyForm(editing ?? undefined));
+    setCustomTitle("");
     void Promise.all([
       fetchDepartments()
         .then((rows) => setDepartments(selectItemValues(rows.map((r) => r.name))))
         .catch(() => setDepartments([])),
       fetchPersonnel()
         .then((rows) =>
-          setTitles(
+          setKnownTitles(
             selectItemValues([
               ...PERSONNEL_TITLE_OPTIONS,
-              ...rows.map((r) => r.title),
+              ...rows.flatMap((r) => parsePersonnelTitles(r.title)),
             ])
           )
         )
-        .catch(() => setTitles([...PERSONNEL_TITLE_OPTIONS])),
+        .catch(() => setKnownTitles([...PERSONNEL_TITLE_OPTIONS])),
     ]);
   }, [open, editing]);
+
+  function toggleTitle(title: string) {
+    const key = titleKey(title);
+    setForm((f) => {
+      const exists = f.titles.some((t) => titleKey(t) === key);
+      if (exists) {
+        return { ...f, titles: f.titles.filter((t) => titleKey(t) !== key) };
+      }
+      return { ...f, titles: [...f.titles, title] };
+    });
+  }
+
+  function addCustomTitle() {
+    const value = customTitle.trim();
+    if (!value) return;
+    const key = titleKey(value);
+    setForm((f) => {
+      if (f.titles.some((t) => titleKey(t) === key)) return f;
+      return { ...f, titles: [...f.titles, capitalizeWordsTr(value)] };
+    });
+    setCustomTitle("");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -118,8 +150,12 @@ export function PersonnelFormSheet({
       toast.error("Ad ve soyad zorunludur");
       return;
     }
-    if (!form.department.trim() || !form.title.trim()) {
-      toast.error("Departman ve görev zorunludur");
+    if (!form.department.trim()) {
+      toast.error("Departman zorunludur");
+      return;
+    }
+    if (form.titles.length === 0) {
+      toast.error("En az bir görev seçin");
       return;
     }
     if (!Number.isFinite(salary) || salary < 0) {
@@ -133,13 +169,13 @@ export function PersonnelFormSheet({
     setSaving(true);
     try {
       const body = {
-        ...form,
         firstName: capitalizeWordsTr(form.firstName),
         lastName: capitalizeWordsTr(form.lastName),
         department: form.department.trim(),
-        title: normalizePersonnelTitle(form.title),
+        title: serializePersonnelTitles(form.titles),
         email: form.email.trim(),
         phone: form.phone.trim(),
+        hireDate: form.hireDate,
         salary,
         iban,
       };
@@ -203,7 +239,7 @@ export function PersonnelFormSheet({
 
           <FormSection
             title="Görev"
-            description="Çalıştığı birim, unvan ve işe başlama tarihi."
+            description="Birim tek seçilir; görev/unvan birden fazla olabilir."
           >
             <FormField
               label="Departman"
@@ -229,50 +265,92 @@ export function PersonnelFormSheet({
                 </SelectContent>
               </Select>
             </FormField>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <FormField
-                label="Görev / unvan"
-                htmlFor="per-title"
-                required
-                hint="Görev unvanı. Laboratuvar seçimi departmana göre yapılır (Analist / Araştırmacı)."
-              >
-                <Select
-                  value={titleOptions.includes(form.title) ? form.title : undefined}
-                  onValueChange={(title) => setForm((f) => ({ ...f, title }))}
-                >
-                  <SelectTrigger id="per-title" className="bg-white">
-                    <SelectValue placeholder="Görev seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {titleOptions.map((title) => (
-                      <SelectItem key={title} value={title}>
-                        {title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+
+            <FormField
+              label="Görev / unvan"
+              required
+              hint="Birden fazla seçebilirsiniz. Listede yoksa aşağıdan ekleyin."
+            >
+              <div className="flex flex-wrap gap-2">
+                {titleOptions.map((title) => {
+                  const selected = form.titles.some(
+                    (t) => titleKey(t) === titleKey(title)
+                  );
+                  return (
+                    <button
+                      key={title}
+                      type="button"
+                      onClick={() => toggleTitle(title)}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-medium transition-colors",
+                        selected
+                          ? "border-indigo-500 bg-indigo-50 text-indigo-800"
+                          : "border-border bg-white text-foreground hover:bg-muted/50"
+                      )}
+                    >
+                      {selected ? <Check className="h-3.5 w-3.5" /> : null}
+                      {title}
+                    </button>
+                  );
+                })}
+              </div>
+              {form.titles.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {form.titles.map((title) => (
+                    <span
+                      key={title}
+                      className="inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-xs font-medium"
+                    >
+                      {title}
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                        onClick={() => toggleTitle(title)}
+                        aria-label={`${title} kaldır`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex gap-2">
                 <Input
-                  required
+                  id="per-title-custom"
                   autoComplete="organization-title"
-                  placeholder={LAB_WORKER_TITLE}
-                  value={form.title}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, title: e.target.value }))
-                  }
+                  placeholder={`Örn: ${LAB_WORKER_TITLE}`}
+                  className="bg-white"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomTitle();
+                    }
+                  }}
                 />
-              </FormField>
-              <FormField label="İşe giriş tarihi" htmlFor="per-hire" required>
-                <Input
-                  id="per-hire"
-                  type="date"
-                  required
-                  value={form.hireDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, hireDate: e.target.value }))
-                  }
-                />
-              </FormField>
-            </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 rounded-xl"
+                  onClick={addCustomTitle}
+                >
+                  Ekle
+                </Button>
+              </div>
+            </FormField>
+
+            <FormField label="İşe giriş tarihi" htmlFor="per-hire" required>
+              <Input
+                id="per-hire"
+                type="date"
+                required
+                value={form.hireDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, hireDate: e.target.value }))
+                }
+              />
+            </FormField>
           </FormSection>
 
           <FormSection

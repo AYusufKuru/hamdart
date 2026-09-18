@@ -37,6 +37,9 @@ yarn-error.log*
 # backups
 /backups/
 
+# fatura dekont / ekler
+/uploads/
+
 # vercel
 .vercel
 

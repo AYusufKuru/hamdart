@@ -472,10 +472,54 @@ export const customerUpdateSchema = customerCreateSchema.partial().extend({
   active: z.boolean({ error: boolMsg }).optional(),
 });
 
+const supplierRelativeSchema = z.object({
+  name: optionalText(120).default(""),
+  phone: optionalText(40).default(""),
+});
+
+const supplierGuarantorSchema = z.object({
+  name: optionalText(120).default(""),
+  nationalId: optionalText(20).default(""),
+  address: optionalText(MAX_NOTE).default(""),
+  phone: optionalText(40).default(""),
+});
+
 export const supplierCreateSchema = z.object({
   name: text(),
   contact: optionalText().default(""),
   address: optionalText(MAX_NOTE).default(""),
+  invoiceName: optionalText().default(""),
+  accountList: optionalText(80).default("Tedarikçi"),
+  currency: optionalText(10).default("TL"),
+  accountCode: optionalText(40).default(""),
+  onlineTransactions: z.boolean({ error: boolMsg }).optional().default(true),
+  notes: optionalText(2000).default(""),
+  iban: optionalText(200).default(""),
+  country: optionalText(80).default("Türkiye"),
+  city: optionalText(80).default(""),
+  district: optionalText(80).default(""),
+  mobile: optionalText(40).default(""),
+  email: optionalText(120).default(""),
+  landline: optionalText(40).default(""),
+  accountKind: optionalText(80).default("Gerçek kişi / Şahıs Firması"),
+  taxNo: optionalText(40).default(""),
+  taxOffice: optionalText(80).default(""),
+  nationalId: optionalText(20).default(""),
+  openingBalance: finiteNumber({ min: 0 }).optional().default(0),
+  openingBalanceType: optionalText(40).default("Borçlu"),
+  paymentTermDays: z
+    .number({ error: numberMsg })
+    .int("Tam sayı olmalıdır")
+    .min(0, "En az 0 olmalıdır")
+    .optional()
+    .default(0),
+  creditLimit: finiteNumber({ min: 0 }).optional().default(0),
+  salesPriceList: optionalText(80).default("1. Satış Fiyatı"),
+  branch: optionalText(80).default("Merkez Şube"),
+  assignedPersonnel: optionalText(120).default(""),
+  paymentTaxNo: optionalText(40).default(""),
+  relatives: z.array(supplierRelativeSchema).max(4).optional().default([]),
+  guarantors: z.array(supplierGuarantorSchema).max(2).optional().default([]),
 });
 
 export const supplierUpdateSchema = supplierCreateSchema.partial().extend({
@@ -486,7 +530,7 @@ export const personnelCreateSchema = z.object({
   firstName: text(80),
   lastName: text(80),
   department: text(80),
-  title: text(120),
+  title: text(400),
   email: optionalText(120).default(""),
   phone: optionalText(40).default(""),
   hireDate: isoDate,
@@ -498,49 +542,82 @@ export const personnelUpdateSchema = personnelCreateSchema.partial();
 
 const invoiceLineInputSchema = z.object({
   description: text(),
-  quantityLabel: text(80),
+  quantityLabel: optionalText(80).default("1"),
   unitPrice: finiteNumber({ min: 0 }),
   lineTotal: finiteNumber({ min: 0 }).optional(),
+  quantity: finiteNumber({ min: 0 }).optional(),
+  unit: optionalText(40).default("Adet"),
+  discountRate: finiteNumber({ min: 0, max: 100 }).optional(),
+  vatRate: finiteNumber({ min: 0, max: 100 }).optional(),
+  vatAmount: finiteNumber({ min: 0 }).optional(),
+  lineNet: finiteNumber({ min: 0 }).optional(),
 });
 
-export const invoiceCreateSchema = z
-  .object({
-    invoiceNo: text(80),
-    party: text(),
-    kind: text(40),
-    issueDate: isoDate,
-    dueDate: isoDate,
-    amount: finiteNumber({ min: 0 }).optional(),
-    status: text(40),
-    lines: z
-      .array(invoiceLineInputSchema)
-      .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
-      .optional(),
-  })
-  .refine((data) => data.amount !== undefined || (data.lines && data.lines.length > 0), {
-    message: "Tutar veya en az bir kalem zorunludur",
-    path: ["amount"],
-  });
-
-export const invoiceUpdateSchema = z.object({
-  invoiceNo: optionalText(80),
-  party: optionalText(),
-  kind: optionalText(40),
-  issueDate: isoDate.optional(),
-  dueDate: isoDate.optional(),
+const invoiceFieldsSchema = z.object({
+  invoiceNo: text(80),
+  party: text(),
+  kind: optionalText(40).default("Satış"),
+  issueDate: isoDate,
+  dueDate: isoDate,
   amount: finiteNumber({ min: 0 }).optional(),
-  status: optionalText(40),
+  status: text(40),
+  documentType: optionalText(40).default(""),
+  bucket: optionalText(40).default(""),
+  confirmed: z.boolean({ error: boolMsg }).optional(),
+  eDocument: optionalText(40).default("e-Arşiv"),
+  scenario: optionalText(40).default("TEMELFATURA"),
+  series: optionalText(20).default(""),
+  currency: optionalText(10).default("TRY"),
+  fxRate: finiteNumber({ min: 0 }).optional(),
+  partyTaxNo: optionalText(40).default(""),
+  partyTaxOffice: optionalText(80).default(""),
+  partyAddress: optionalText(MAX_NOTE).default(""),
+  partyCity: optionalText(80).default(""),
+  partyDistrict: optionalText(80).default(""),
+  partyPhone: optionalText(40).default(""),
+  partyEmail: optionalText(120).default(""),
+  sellerName: optionalText().default("HamdPharma"),
+  sellerTaxNo: optionalText(40).default(""),
+  sellerTaxOffice: optionalText(80).default(""),
+  sellerAddress: optionalText(MAX_NOTE).default(""),
+  paymentMethod: optionalText(80).default("Cari hesap"),
+  relatedDispatchNo: optionalText(80).default(""),
+  relatedOrderNo: optionalText(80).default(""),
+  notes: optionalText(2000).default(""),
+  validUntil: optionalText(40).default(""),
+  deliveryTerm: optionalText(200).default(""),
+  preparedBy: optionalText(120).default(""),
+  subtotal: finiteNumber({ min: 0 }).optional(),
+  totalDiscount: finiteNumber({ min: 0 }).optional(),
+  totalVat: finiteNumber({ min: 0 }).optional(),
+  withholding: finiteNumber({ min: 0 }).optional(),
   lines: z
     .array(invoiceLineInputSchema)
     .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
     .optional(),
 });
 
+export const invoiceCreateSchema = invoiceFieldsSchema.refine(
+  (data) => data.amount !== undefined || (data.lines && data.lines.length > 0),
+  {
+    message: "Tutar veya en az bir kalem zorunludur",
+    path: ["amount"],
+  }
+);
+
+export const invoiceUpdateSchema = invoiceFieldsSchema.partial();
+
 const deliveryNoteLineInputSchema = z.object({
   description: text(),
   quantityLabel: text(80),
   unit: text(40),
 });
+
+const optionalTime = z
+  .string({ error: textMsg })
+  .trim()
+  .refine((value) => value === "" || /^\d{2}:\d{2}$/.test(value), "SS:DD biçiminde olmalıdır")
+  .optional();
 
 export const deliveryNoteCreateSchema = z.object({
   noteNo: text(80),
@@ -551,27 +628,89 @@ export const deliveryNoteCreateSchema = z.object({
   warehouse: text(80),
   relatedOrderNo: optionalText(80),
   relatedInvoiceNo: optionalText(80),
+  relatedOrderDate: z.union([isoDate, z.literal("")]).optional(),
   status: text(40),
+  partyTaxNo: optionalText(40).default(""),
+  partyAddress: optionalText(MAX_NOTE).default(""),
+  partyCity: optionalText(80).default(""),
+  partyDistrict: optionalText(80).default(""),
+  partyCountry: optionalText(80).default(""),
+  partyPostalCode: optionalText(20).default(""),
+  driverName: optionalText(120).default(""),
+  driverNationalId: optionalText(20).default(""),
+  plateNo: optionalText(40).default(""),
+  trailerPlate: optionalText(40).default(""),
+  plateOrigin: optionalText(80).default(""),
+  shipMethod: optionalText(120).default(""),
+  dispatchAddress: optionalText(MAX_NOTE).default(""),
+  issueTime: optionalTime,
+  shipTime: optionalTime,
+  packages: optionalText(80).default(""),
+  notes: optionalText(2000).default(""),
   lines: z
     .array(deliveryNoteLineInputSchema)
     .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
     .optional(),
 });
 
-export const deliveryNoteUpdateSchema = z.object({
-  noteNo: optionalText(80),
-  party: optionalText(),
-  kind: optionalText(40),
-  issueDate: isoDate.optional(),
-  shipDate: isoDate.optional(),
-  warehouse: optionalText(80),
-  relatedOrderNo: optionalText(80),
-  relatedInvoiceNo: optionalText(80),
-  status: optionalText(40),
-  lines: z
-    .array(deliveryNoteLineInputSchema)
-    .max(MAX_ARRAY, `En fazla ${MAX_ARRAY} satır olabilir`)
-    .optional(),
+export const deliveryNoteUpdateSchema = deliveryNoteCreateSchema.partial();
+
+const chequeInstallmentInputSchema = z.object({
+  dueDate: isoDate,
+  amount: finiteNumber({ positive: true }),
+  serialNo: optionalText(80).default(""),
+});
+
+export const chequeNoteCreateSchema = z.object({
+  kind: z.enum(["cek", "senet"]),
+  direction: z.enum(["received", "given"]),
+  party: text(),
+  issueDate: isoDate,
+  bankName: optionalText(120).default(""),
+  serialNo: optionalText(80).default(""),
+  currency: optionalText(10).default("TRY"),
+  notes: optionalText(2000).default(""),
+  relatedInvoiceNo: optionalText(80).default(""),
+  installments: z
+    .array(chequeInstallmentInputSchema)
+    .min(1, "En az bir vade girin")
+    .max(24, "En fazla 24 vade olabilir"),
+});
+
+export const chequeNoteUpdateSchema = chequeNoteCreateSchema.partial();
+
+export const documentSettingsUpdateSchema = z.object({
+  companyName: text(160),
+  legalTitle: optionalText(200).default(""),
+  taxOffice: optionalText(80).default(""),
+  taxNo: optionalText(40).default(""),
+  mersisNo: optionalText(40).default(""),
+  tradeRegister: optionalText(80).default(""),
+  address: optionalText(MAX_NOTE).default(""),
+  city: optionalText(80).default(""),
+  district: optionalText(80).default(""),
+  phone: optionalText(40).default(""),
+  email: optionalText(120).default(""),
+  website: optionalText(120).default(""),
+  iban: optionalText(40).default(""),
+  bankName: optionalText(120).default(""),
+  authorizedName: optionalText(120).default(""),
+  footerNote: optionalText(2000).default(""),
+  logoDataUrl: z
+    .string({ error: textMsg })
+    .max(900_000, "Logo çok büyük; 400 KB altı bir görsel kullanın")
+    .refine(
+      (value) =>
+        !value ||
+        value.startsWith("data:image/png") ||
+        value.startsWith("data:image/jpeg") ||
+        value.startsWith("data:image/jpg") ||
+        value.startsWith("data:image/webp"),
+      "Logo PNG, JPEG veya WebP olmalıdır"
+    )
+    .optional()
+    .default(""),
+  showLogo: z.boolean({ error: boolMsg }).optional().default(true),
 });
 
 export const ledgerCreateSchema = z.object({
@@ -593,6 +732,28 @@ export const budgetCreateSchema = z.object({
 });
 
 export const budgetUpdateSchema = budgetCreateSchema.partial();
+
+export const budgetCashCreateSchema = z.object({
+  direction: z.enum(["gelir", "gider"]),
+  party: text(160),
+  category: text(80),
+  amount: finiteNumber({ positive: true }),
+  date: isoDate,
+  dueDate: z
+    .string({ error: textMsg })
+    .trim()
+    .refine((value) => value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value), "YYYY-MM-DD biçiminde olmalıdır")
+    .optional(),
+  description: optionalText(MAX_NOTE).optional(),
+  invoiceNo: optionalText(80).optional(),
+});
+
+export const budgetCashUpdateSchema = budgetCashCreateSchema.partial();
+
+export const budgetCategoryCreateSchema = z.object({
+  direction: z.enum(["gelir", "gider"]),
+  name: text(80),
+});
 
 export const backupCreateSchema = z.object({
   note: optionalText(MAX_NOTE),

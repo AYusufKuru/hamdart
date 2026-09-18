@@ -5,14 +5,20 @@ import type {
   FinishedProduct,
   Invoice,
   InvoiceLine,
+  InvoiceEvent,
+  ChequeNote,
+  ChequeNoteInstallment,
   DeliveryNote,
   DeliveryNoteLine,
   LedgerEntry,
   BudgetRow,
+  BudgetCashEntry,
+  BudgetCategory,
+  DocumentSettings,
 } from "@/data/catalog";
 import type { Warehouse } from "@/data/warehouses";
 import type { Role } from "@/lib/auth/permissions";
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api-client";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm, apiPut } from "@/lib/api-client";
 
 export async function fetchCustomers(): Promise<Customer[]> {
   return apiGet<Customer[]>("/api/catalog/customers");
@@ -38,6 +44,56 @@ export async function fetchInvoiceLines(): Promise<InvoiceLine[]> {
   return apiGet<InvoiceLine[]>("/api/catalog/invoice-lines");
 }
 
+export async function fetchInvoiceEvents(invoiceNo?: string): Promise<InvoiceEvent[]> {
+  if (!invoiceNo) return apiGet<InvoiceEvent[]>("/api/invoice-events");
+  return apiGet<InvoiceEvent[]>(
+    `/api/invoice-events?invoiceNo=${encodeURIComponent(invoiceNo)}`
+  );
+}
+
+export async function postInvoiceEvent(form: FormData): Promise<InvoiceEvent> {
+  return apiPostForm<InvoiceEvent>("/api/invoice-events", form);
+}
+
+export async function fetchChequeNotes(): Promise<ChequeNote[]> {
+  return apiGet<ChequeNote[]>("/api/cheque-notes");
+}
+
+export async function fetchAvailableChequeInstallments(query: {
+  kind?: string;
+  direction?: string;
+  party?: string;
+}): Promise<
+  Array<
+    ChequeNoteInstallment & {
+      docNo: string;
+      kind: ChequeNote["kind"];
+      direction: ChequeNote["direction"];
+      party: string;
+      bankName: string;
+      currency: string;
+    }
+  >
+> {
+  const params = new URLSearchParams({ available: "1" });
+  if (query.kind) params.set("kind", query.kind);
+  if (query.direction) params.set("direction", query.direction);
+  if (query.party) params.set("party", query.party);
+  return apiGet(`/api/cheque-notes?${params.toString()}`);
+}
+
+export async function createChequeNote(body: unknown): Promise<ChequeNote> {
+  return apiPost<ChequeNote>("/api/cheque-notes", body);
+}
+
+export async function updateChequeNote(id: string, body: unknown): Promise<ChequeNote> {
+  return apiPatch<ChequeNote>(`/api/cheque-notes/${id}`, body);
+}
+
+export async function deleteChequeNote(id: string): Promise<void> {
+  return apiDelete(`/api/cheque-notes/${id}`);
+}
+
 export async function fetchDeliveryNotes(): Promise<DeliveryNote[]> {
   return apiGet<DeliveryNote[]>("/api/catalog/delivery-notes");
 }
@@ -46,12 +102,50 @@ export async function fetchDeliveryNoteLines(): Promise<DeliveryNoteLine[]> {
   return apiGet<DeliveryNoteLine[]>("/api/catalog/delivery-note-lines");
 }
 
+export async function fetchDocumentSettings(): Promise<DocumentSettings> {
+  return apiGet<DocumentSettings>("/api/document-settings");
+}
+
+export async function saveDocumentSettings(
+  body: Omit<DocumentSettings, "id">
+): Promise<DocumentSettings> {
+  return apiPut<DocumentSettings>("/api/document-settings", body);
+}
+
 export async function fetchLedger(): Promise<LedgerEntry[]> {
   return apiGet<LedgerEntry[]>("/api/catalog/ledger");
 }
 
 export async function fetchBudget(): Promise<BudgetRow[]> {
   return apiGet<BudgetRow[]>("/api/catalog/budget");
+}
+
+export async function fetchBudgetEntries(): Promise<BudgetCashEntry[]> {
+  return apiGet<BudgetCashEntry[]>("/api/budget-entries");
+}
+
+export async function createBudgetEntry(body: unknown): Promise<BudgetCashEntry> {
+  return apiPost<BudgetCashEntry>("/api/budget-entries", body);
+}
+
+export async function updateBudgetEntry(id: string, body: unknown): Promise<BudgetCashEntry> {
+  return apiPatch<BudgetCashEntry>(`/api/budget-entries/${id}`, body);
+}
+
+export async function deleteBudgetEntry(id: string): Promise<void> {
+  return apiDelete(`/api/budget-entries/${id}`);
+}
+
+export async function fetchBudgetCategories(): Promise<BudgetCategory[]> {
+  return apiGet<BudgetCategory[]>("/api/budget-categories");
+}
+
+export async function createBudgetCategory(body: unknown): Promise<BudgetCategory> {
+  return apiPost<BudgetCategory>("/api/budget-categories", body);
+}
+
+export async function deleteBudgetCategory(id: string): Promise<void> {
+  return apiDelete(`/api/budget-categories/${id}`);
 }
 
 export async function fetchWarehouses(): Promise<Warehouse[]> {

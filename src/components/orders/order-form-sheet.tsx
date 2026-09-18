@@ -19,6 +19,7 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
 import { fetchCustomers } from "@/lib/catalog-store";
 import { getWarehouses } from "@/lib/warehouse-store";
@@ -190,34 +191,16 @@ export function OrderFormSheet({
             description="Ürün adı üretim reçetesiyle aynı olmalıdır."
           >
             <FormField label="Müşteri" htmlFor="order-customer" required>
-              {customerOptions.length > 0 ? (
-                <Select
-                  value={form.customer || undefined}
-                  onValueChange={(customer) => setForm((f) => ({ ...f, customer }))}
-                >
-                  <SelectTrigger id="order-customer" className="bg-white">
-                    <SelectValue placeholder="Müşteri seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customerOptions.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  id="order-customer"
-                  required
-                  className="bg-white"
-                  placeholder="Örn: ALLIANCE HEALTHCARE ECZA DEPOSU A.Ş."
-                  value={form.customer}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, customer: e.target.value }))
-                  }
-                />
-              )}
+              <SearchableSelect
+                id="order-customer"
+                value={form.customer}
+                onValueChange={(customer) => setForm((f) => ({ ...f, customer }))}
+                placeholder="Müşteri seçin veya arayın"
+                searchPlaceholder="Müşteri ara…"
+                emptyText="Müşteri yok"
+                allowCustom
+                options={customerOptions.map((c) => ({ value: c, label: c }))}
+              />
             </FormField>
             <FormField label="Ürün" htmlFor="order-product" required>
               {productOptions.length > 0 ? (

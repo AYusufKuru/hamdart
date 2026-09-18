@@ -108,7 +108,7 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
   MANAGER: ADMIN_LIKE_PERMISSIONS,
   STOCK: [
     ...resourcePerms(["stock", "raw_material_orders", "orders"], "both"),
-    ...resourcePerms(["warehouses", "raw_materials", "products"], "read"),
+    ...resourcePerms(["warehouses", "raw_materials", "products", "delivery_notes"], "read"),
   ],
   ACCOUNTING: [
     ...resourcePerms(
@@ -126,7 +126,7 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
     ),
   ],
   SALES: [
-    ...resourcePerms(["customers", "orders"], "both"),
+    ...resourcePerms(["customers", "orders", "delivery_notes"], "both"),
     ...resourcePerms(["factory", "raw_materials", "raw_material_orders"], "read"),
   ],
   HR: [
@@ -285,6 +285,8 @@ export function pathToResource(pathname: string): Resource | null {
   if (pathname.startsWith("/customers")) return "customers";
   if (pathname.startsWith("/suppliers")) return "suppliers";
   if (pathname.startsWith("/invoices")) return "invoices";
+  if (pathname.startsWith("/quotes")) return "invoices";
+  if (pathname.startsWith("/document-settings")) return "invoices";
   if (pathname.startsWith("/delivery-notes")) return "delivery_notes";
   if (pathname.startsWith("/ledger")) return "ledger";
   if (pathname.startsWith("/budget")) return "budget";
@@ -385,6 +387,22 @@ export function getApiPermission(
     return { kind: "skip" };
   }
 
+  if (pathname.startsWith("/api/invoice-events")) {
+    return { kind: "require", permission: `invoices:${suffix}` };
+  }
+  if (pathname.startsWith("/api/cheque-notes")) {
+    return { kind: "require", permission: `invoices:${suffix}` };
+  }
+  if (pathname.startsWith("/api/budget-entries") || pathname.startsWith("/api/budget-categories")) {
+    return { kind: "require", permission: `budget:${suffix}` };
+  }
+  if (pathname.startsWith("/api/invoice-docs")) {
+    return { kind: "require", permission: "invoices:read" };
+  }
+  if (pathname.startsWith("/api/document-settings")) {
+    return { kind: "require", permission: `invoices:${suffix}` };
+  }
+
   const catalogMatch = pathname.match(/^\/api\/catalog\/([^/]+)/);
   if (catalogMatch) {
     const resource = CATALOG_ENTITY_RESOURCE[catalogMatch[1]];
@@ -447,9 +465,9 @@ export const NAV_ITEMS: {
     hiddenFor: ["PRODUCTION"],
   },
   { title: "Muhasebe", href: "/invoices", resource: "invoices", label: "Faturalar" },
-  { title: "Muhasebe", href: "/delivery-notes", resource: "delivery_notes", label: "İrsaliyeler" },
-  { title: "Muhasebe", href: "/ledger", resource: "ledger", label: "Yevmiye" },
+  { title: "Muhasebe", href: "/ledger", resource: "ledger", label: "Rapor" },
   { title: "Muhasebe", href: "/budget", resource: "budget", label: "Bütçe" },
+  { title: "Sistem", href: "/document-settings", resource: "invoices", label: "PDF ayarları" },
   { title: "Sistem", href: "/admin", resource: "admin", label: "Yönetim" },
 ];
 

@@ -24,6 +24,8 @@ const DELETION_ORDER = [
   "deliveryNoteLine",
   "deliveryNote",
   "ledgerEntry",
+  "budgetCashEntry",
+  "budgetCategory",
   "budgetRow",
   "labSample",
   "labExperiment",

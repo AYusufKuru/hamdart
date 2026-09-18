@@ -17,11 +17,11 @@ import {
   Building2,
   Contact,
   FileSpreadsheet,
-  FileText,
-  BookOpen,
+  BarChart3,
   Wallet,
   Boxes,
   Shield,
+  Stamp,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -42,8 +42,8 @@ const ICONS: Record<Resource, LucideIcon> = {
   customers: Contact,
   suppliers: Building2,
   invoices: FileSpreadsheet,
-  delivery_notes: FileText,
-  ledger: BookOpen,
+  delivery_notes: FileSpreadsheet,
+  ledger: BarChart3,
   budget: Wallet,
   lab: FlaskConical,
   admin: Shield,
@@ -70,7 +70,7 @@ export function useSidebarSections() {
         canRead(item.resource) &&
         (!user || isNavItemVisible(user.role, item))
     ).map((item) => ({
-      icon: ICONS[item.resource],
+      icon: item.href === "/document-settings" ? Stamp : ICONS[item.resource],
       label: item.label,
       href: item.href,
     }));

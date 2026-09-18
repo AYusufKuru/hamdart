@@ -66,15 +66,38 @@ export function todayIso(): string {
   return toLocalIsoDate();
 }
 
-export function plusDaysIso(days: number): string {
-  const [y, m, d] = todayIso().split("-").map(Number);
-  const next = new Date(Date.UTC(y, m - 1, d + days));
+/** Europe/Istanbul yerel saat HH:mm */
+export function nowTimeHm(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: APP_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.trim().slice(0, 10).split("-").map(Number);
+  const next = new Date(Date.UTC(y || 1970, (m || 1) - 1, (d || 1) + days));
   return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+}
+
+export function plusDaysIso(days: number): string {
+  return addDaysIso(todayIso(), days);
 }
 
 export function plusYearsIso(years: number): string {
   const [y, m, d] = todayIso().split("-").map(Number);
   const next = new Date(Date.UTC(y + years, m - 1, d));
+  return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
+}
+
+/** Takvim ayı ekler; ay sonu taşmasını hedef ayın son gününe sıkıştırır. */
+export function plusMonthsIso(iso: string, months: number): string {
+  const [y, m, d] = iso.trim().slice(0, 10).split("-").map(Number);
+  const lastOfTarget = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  const day = Math.min(d || 1, lastOfTarget);
+  const next = new Date(Date.UTC(y, m - 1 + months, day));
   return `${next.getUTCFullYear()}-${pad2(next.getUTCMonth() + 1)}-${pad2(next.getUTCDate())}`;
 }
 

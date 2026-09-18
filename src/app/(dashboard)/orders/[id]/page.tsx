@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import type { Order } from "@/data/mock";
+import type { DeliveryNote, DeliveryNoteLine, DocumentSettings } from "@/data/catalog";
 import { getOrder, updateOrderShipment } from "@/lib/order-store";
 import type { Recipe } from "@/data/recipes";
 import { getRecipeForOrder } from "@/lib/recipe-store";
@@ -22,8 +23,25 @@ import {
   isStockRole,
   nextShipmentStatus,
 } from "@/lib/auth/permissions";
-import { ArrowLeft, ClipboardList, Truck } from "lucide-react";
+import { ArrowLeft, ClipboardList, FileDown, FileSpreadsheet, Truck } from "lucide-react";
 import { ShipOutDialog } from "@/components/orders/ship-out-dialog";
+import {
+  fetchDeliveryNoteLines,
+  fetchDeliveryNotes,
+  fetchDocumentSettings,
+} from "@/lib/catalog-store";
+import { ifAllowed } from "@/lib/api-client";
+import { EMPTY_DOCUMENT_SETTINGS } from "@/lib/document-company";
+import { downloadDeliveryNotePdf } from "@/lib/delivery-note-pdf";
+
+function notesForOrder(order: Order, notes: DeliveryNote[]) {
+  const hint = order.shipmentNote?.trim() ?? "";
+  return notes.filter((note) => {
+    if (note.relatedOrderNo.trim() === order.orderNo) return true;
+    if (hint && (hint === note.noteNo || hint.includes(note.noteNo))) return true;
+    return false;
+  });
+}
 
 const statusMap = {
   pending: { label: "Bekliyor", variant: "warning" as const },
@@ -53,9 +71,29 @@ export default function OrderDetailPage({
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shipOpen, setShipOpen] = useState(false);
+  const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([]);
+  const [deliveryLines, setDeliveryLines] = useState<DeliveryNoteLine[]>([]);
+  const [docSettings, setDocSettings] = useState<DocumentSettings>(EMPTY_DOCUMENT_SETTINGS);
   const showRecipe = canRead("recipes");
   const canShip = Boolean(user && canWrite("orders"));
   const stockOnly = Boolean(user && isStockRole(user.role));
+  const canSeeNotes = canRead("delivery_notes");
+
+  const loadDeliveryNotes = useCallback(async () => {
+    if (!canSeeNotes) {
+      setDeliveryNotes([]);
+      setDeliveryLines([]);
+      return;
+    }
+    const [notes, lines, company] = await Promise.all([
+      fetchDeliveryNotes().catch(() => [] as DeliveryNote[]),
+      fetchDeliveryNoteLines().catch(() => [] as DeliveryNoteLine[]),
+      ifAllowed(canRead("invoices"), () => fetchDocumentSettings(), EMPTY_DOCUMENT_SETTINGS),
+    ]);
+    setDeliveryNotes(notes);
+    setDeliveryLines(lines);
+    setDocSettings(company);
+  }, [canSeeNotes, canRead]);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +106,7 @@ export default function OrderDetailPage({
         return;
       }
       setShipmentNote(found.shipmentNote ?? "");
+      void loadDeliveryNotes();
       if (showRecipe) {
         const existing = await getRecipeForOrder(found);
         if (!cancelled) setRecipe(existing ?? null);
@@ -77,7 +116,7 @@ export default function OrderDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [id, showRecipe]);
+  }, [id, showRecipe, loadDeliveryNotes]);
 
   if (ready && !order) notFound();
 
@@ -138,6 +177,17 @@ export default function OrderDetailPage({
     }
   }
 
+  async function handleDeliveryPdf(note: DeliveryNote) {
+    try {
+      const lines = deliveryLines.filter((line) => line.noteNo === note.noteNo);
+      await downloadDeliveryNotePdf(note, lines, docSettings);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "PDF oluşturulamadı");
+    }
+  }
+
+  const linkedNotes = notesForOrder(order, deliveryNotes);
+
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
       <div className="flex items-center gap-3">
@@ -193,6 +243,113 @@ export default function OrderDetailPage({
           ))}
         </CardContent>
       </Card>
+
+      {canSeeNotes ? (
+        <Card className="glass-card border-none">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4" />
+              Sevk irsaliyesi
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {linkedNotes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Bu sevkiyata bağlı sevk irsaliyesi yok. Sevke çıkarırken irsaliye seçebilir veya
+                yeni irsaliye oluşturabilirsiniz.
+              </p>
+            ) : (
+              linkedNotes.map((note) => {
+                const lines = deliveryLines.filter((line) => line.noteNo === note.noteNo);
+                return (
+                  <div key={note.id} className="space-y-4 rounded-2xl border bg-background/70 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-lg font-black">{note.noteNo}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {note.party} · {formatDate(note.shipDate || note.issueDate)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="info">{note.status}</Badge>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                          onClick={() => void handleDeliveryPdf(note)}
+                        >
+                          <FileDown className="mr-1.5 h-4 w-4" />
+                          PDF
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {[
+                        { label: "Depo", value: note.warehouse || "—" },
+                        { label: "İrsaliye adresi", value: note.dispatchAddress || note.warehouse || "—" },
+                        { label: "Gönderim", value: note.shipMethod || "—" },
+                        {
+                          label: "İrsaliye tarihi",
+                          value: note.issueTime
+                            ? `${formatDate(note.issueDate)} ${note.issueTime}`
+                            : formatDate(note.issueDate),
+                        },
+                        {
+                          label: "Sevk tarihi",
+                          value: note.shipTime
+                            ? `${formatDate(note.shipDate)} ${note.shipTime}`
+                            : formatDate(note.shipDate),
+                        },
+                        { label: "Şoför", value: note.driverName || "—" },
+                        { label: "TC kimlik", value: note.driverNationalId || "—" },
+                        { label: "Plaka", value: note.plateNo || "—" },
+                        { label: "Dorse plaka", value: note.trailerPlate || "—" },
+                        { label: "Menşei", value: note.plateOrigin || "—" },
+                        { label: "Sipariş tarihi", value: note.relatedOrderDate ? formatDate(note.relatedOrderDate) : "—" },
+                        { label: "Fatura", value: note.relatedInvoiceNo || "—" },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+                            {item.label}
+                          </p>
+                          <p className="mt-1 font-medium">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {note.partyAddress ? (
+                      <p className="text-sm text-muted-foreground">{note.partyAddress}</p>
+                    ) : null}
+                    <div className="overflow-hidden rounded-xl border">
+                      <div className="grid grid-cols-[1fr_8rem_6rem] gap-2 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <span>Malın cinsi</span>
+                        <span className="text-right">Miktar</span>
+                        <span>Birim</span>
+                      </div>
+                      {lines.length === 0 ? (
+                        <p className="px-3 py-3 text-sm text-muted-foreground">Kalem yok</p>
+                      ) : (
+                        <ul className="divide-y">
+                          {lines.map((line) => (
+                            <li
+                              key={line.id}
+                              className="grid grid-cols-[1fr_8rem_6rem] items-center gap-2 px-3 py-2 text-sm"
+                            >
+                              <span className="font-medium">{line.description}</span>
+                              <span className="text-right font-mono">{line.quantityLabel}</span>
+                              <span>{line.unit}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {canShip && (
         <Card className="glass-card border-none">
@@ -271,6 +428,7 @@ export default function OrderDetailPage({
           setOrder(updated);
           setShipmentNote(updated.shipmentNote ?? "");
           setShipOpen(false);
+          void loadDeliveryNotes();
         }}
       />
     </div>

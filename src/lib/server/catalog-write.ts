@@ -14,6 +14,20 @@ import { logAudit } from "@/lib/server/audit";
 import { ConflictError, FieldError } from "@/lib/server/fields";
 import { capitalizeWordsTr } from "@/lib/utils";
 import { normalizePersonnelTitle } from "@/lib/personnel";
+import {
+  serializeGuarantors,
+  serializeRelatives,
+  type SupplierGuarantor,
+  type SupplierRelative,
+} from "@/lib/supplier-card";
+import {
+  bucketFor,
+  calcInvoiceLine,
+  documentTypeFromKind,
+  documentTypeMeta,
+  isConfirmedDocument,
+  normalizeInvoiceStatus,
+} from "@/lib/invoice-docs";
 
 type AuditCtx = { actor: string; ip?: string };
 
@@ -47,14 +61,122 @@ function toCustomer(row: {
   return { ...row };
 }
 
-function toSupplier(row: {
+export function toSupplier(row: {
   id: string;
   name: string;
   contact: string;
   address: string;
   active: boolean;
+  invoiceName: string;
+  accountList: string;
+  currency: string;
+  accountCode: string;
+  onlineTransactions: boolean;
+  notes: string;
+  iban: string;
+  country: string;
+  city: string;
+  district: string;
+  mobile: string;
+  email: string;
+  landline: string;
+  accountKind: string;
+  taxNo: string;
+  taxOffice: string;
+  nationalId: string;
+  openingBalance: unknown;
+  openingBalanceType: string;
+  paymentTermDays: number;
+  creditLimit: unknown;
+  salesPriceList: string;
+  branch: string;
+  assignedPersonnel: string;
+  paymentTaxNo: string;
+  relatives: string;
+  guarantors: string;
 }): Supplier {
-  return { ...row };
+  return {
+    ...row,
+    openingBalance: asNumber(row.openingBalance),
+    creditLimit: asNumber(row.creditLimit),
+  };
+}
+
+type SupplierWriteInput = {
+  name: string;
+  contact?: string;
+  address?: string;
+  invoiceName?: string;
+  accountList?: string;
+  currency?: string;
+  accountCode?: string;
+  onlineTransactions?: boolean;
+  notes?: string;
+  iban?: string;
+  country?: string;
+  city?: string;
+  district?: string;
+  mobile?: string;
+  email?: string;
+  landline?: string;
+  accountKind?: string;
+  taxNo?: string;
+  taxOffice?: string;
+  nationalId?: string;
+  openingBalance?: number;
+  openingBalanceType?: string;
+  paymentTermDays?: number;
+  creditLimit?: number;
+  salesPriceList?: string;
+  branch?: string;
+  assignedPersonnel?: string;
+  paymentTaxNo?: string;
+  relatives?: SupplierRelative[];
+  guarantors?: SupplierGuarantor[];
+};
+
+function supplierContact(input: SupplierWriteInput) {
+  const mobile = input.mobile?.trim() ?? "";
+  const landline = input.landline?.trim() ?? "";
+  const contact = input.contact?.trim() ?? "";
+  return contact || mobile || landline;
+}
+
+function supplierWriteData(input: SupplierWriteInput) {
+  const mobile = input.mobile?.trim() ?? "";
+  const address = input.address?.trim() ?? "";
+  return {
+    name: input.name.trim(),
+    contact: supplierContact(input),
+    address,
+    invoiceName: input.invoiceName?.trim() ?? "",
+    accountList: input.accountList?.trim() || "Tedarikçi",
+    currency: input.currency?.trim() || "TL",
+    accountCode: input.accountCode?.trim() ?? "",
+    onlineTransactions: input.onlineTransactions ?? true,
+    notes: input.notes?.trim() ?? "",
+    iban: input.iban?.trim() ?? "",
+    country: input.country?.trim() || "Türkiye",
+    city: input.city?.trim() ?? "",
+    district: input.district?.trim() ?? "",
+    mobile,
+    email: input.email?.trim() ?? "",
+    landline: input.landline?.trim() ?? "",
+    accountKind: input.accountKind?.trim() || "Gerçek kişi / Şahıs Firması",
+    taxNo: input.taxNo?.trim() ?? "",
+    taxOffice: input.taxOffice?.trim() ?? "",
+    nationalId: input.nationalId?.trim() ?? "",
+    openingBalance: input.openingBalance ?? 0,
+    openingBalanceType: input.openingBalanceType?.trim() || "Borçlu",
+    paymentTermDays: input.paymentTermDays ?? 0,
+    creditLimit: input.creditLimit ?? 0,
+    salesPriceList: input.salesPriceList?.trim() || "1. Satış Fiyatı",
+    branch: input.branch?.trim() || "Merkez Şube",
+    assignedPersonnel: input.assignedPersonnel?.trim() ?? "",
+    paymentTaxNo: input.paymentTaxNo?.trim() ?? "",
+    relatives: serializeRelatives(input.relatives ?? []),
+    guarantors: serializeGuarantors(input.guarantors ?? []),
+  };
 }
 
 function toPersonnel(row: {
@@ -75,7 +197,7 @@ function toPersonnel(row: {
   };
 }
 
-function toInvoice(row: {
+export function toInvoice(row: {
   id: string;
   invoiceNo: string;
   party: string;
@@ -84,10 +206,75 @@ function toInvoice(row: {
   dueDate: string;
   amount: unknown;
   status: string;
+  documentType: string;
+  bucket: string;
+  confirmed: boolean;
+  eDocument: string;
+  scenario: string;
+  series: string;
+  currency: string;
+  fxRate: number;
+  partyTaxNo: string;
+  partyTaxOffice: string;
+  partyAddress: string;
+  partyCity: string;
+  partyDistrict: string;
+  partyPhone: string;
+  partyEmail: string;
+  sellerName: string;
+  sellerTaxNo: string;
+  sellerTaxOffice: string;
+  sellerAddress: string;
+  paymentMethod: string;
+  relatedDispatchNo: string;
+  relatedOrderNo: string;
+  notes: string;
+  validUntil?: string;
+  deliveryTerm?: string;
+  preparedBy?: string;
+  subtotal: unknown;
+  totalDiscount: unknown;
+  totalVat: unknown;
+  withholding: unknown;
+  paidAmount?: unknown;
 }): Invoice {
+  const documentType = documentTypeFromKind(row.kind, row.documentType);
   return {
     ...row,
+    documentType,
+    bucket: bucketFor(documentType, row.bucket),
     amount: asNumber(row.amount),
+    subtotal: asNumber(row.subtotal),
+    totalDiscount: asNumber(row.totalDiscount),
+    totalVat: asNumber(row.totalVat),
+    withholding: asNumber(row.withholding),
+    paidAmount: asNumber((row as { paidAmount?: unknown }).paidAmount),
+    validUntil: row.validUntil ?? "",
+    deliveryTerm: row.deliveryTerm ?? "",
+    preparedBy: row.preparedBy ?? "",
+  };
+}
+
+export function toInvoiceLine(row: {
+  id: string;
+  invoiceNo: string;
+  description: string;
+  quantityLabel: string;
+  unitPrice: unknown;
+  lineTotal: unknown;
+  quantity: number;
+  unit: string;
+  discountRate: number;
+  vatRate: number;
+  vatAmount: unknown;
+  lineNet: unknown;
+}): InvoiceLine {
+  return {
+    ...row,
+    unitPrice: asNumber(row.unitPrice),
+    lineTotal: asNumber(row.lineTotal),
+    vatAmount: asNumber(row.vatAmount),
+    lineNet: asNumber(row.lineNet),
   };
 }
 
@@ -250,15 +437,14 @@ export async function dbDeleteCustomer(
 }
 
 export async function dbCreateSupplier(
-  input: { name: string; contact: string; address: string },
+  input: SupplierWriteInput,
   ctx: AuditCtx
 ): Promise<Supplier> {
+  const data = supplierWriteData(input);
   const row = await prisma.supplier.create({
     data: {
       id: `sup-${Date.now()}`,
-      name: input.name,
-      contact: input.contact,
-      address: input.address,
+      ...data,
       active: true,
     },
   });
@@ -277,19 +463,66 @@ export async function dbCreateSupplier(
 
 export async function dbUpdateSupplier(
   id: string,
-  input: Partial<{ name: string; contact: string; address: string; active: boolean }>,
+  input: Partial<SupplierWriteInput> & { active?: boolean },
   ctx: AuditCtx
 ): Promise<Supplier> {
   const before = await prisma.supplier.findUnique({ where: { id } });
   if (!before) throw new FieldError("Tedarikçi bulunamadı");
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.contact !== undefined) patch.contact = input.contact.trim();
+  if (input.address !== undefined) patch.address = input.address.trim();
+  if (input.active !== undefined) patch.active = input.active;
+  if (input.invoiceName !== undefined) patch.invoiceName = input.invoiceName.trim();
+  if (input.accountList !== undefined) patch.accountList = input.accountList.trim() || "Tedarikçi";
+  if (input.currency !== undefined) patch.currency = input.currency.trim() || "TL";
+  if (input.accountCode !== undefined) patch.accountCode = input.accountCode.trim();
+  if (input.onlineTransactions !== undefined) {
+    patch.onlineTransactions = input.onlineTransactions;
+  }
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.iban !== undefined) patch.iban = input.iban.trim();
+  if (input.country !== undefined) patch.country = input.country.trim() || "Türkiye";
+  if (input.city !== undefined) patch.city = input.city.trim();
+  if (input.district !== undefined) patch.district = input.district.trim();
+  if (input.mobile !== undefined) patch.mobile = input.mobile.trim();
+  if (input.email !== undefined) patch.email = input.email.trim();
+  if (input.landline !== undefined) patch.landline = input.landline.trim();
+  if (input.accountKind !== undefined) {
+    patch.accountKind = input.accountKind.trim() || "Gerçek kişi / Şahıs Firması";
+  }
+  if (input.taxNo !== undefined) patch.taxNo = input.taxNo.trim();
+  if (input.taxOffice !== undefined) patch.taxOffice = input.taxOffice.trim();
+  if (input.nationalId !== undefined) patch.nationalId = input.nationalId.trim();
+  if (input.openingBalance !== undefined) patch.openingBalance = input.openingBalance;
+  if (input.openingBalanceType !== undefined) {
+    patch.openingBalanceType = input.openingBalanceType.trim() || "Borçlu";
+  }
+  if (input.paymentTermDays !== undefined) patch.paymentTermDays = input.paymentTermDays;
+  if (input.creditLimit !== undefined) patch.creditLimit = input.creditLimit;
+  if (input.salesPriceList !== undefined) {
+    patch.salesPriceList = input.salesPriceList.trim() || "1. Satış Fiyatı";
+  }
+  if (input.branch !== undefined) patch.branch = input.branch.trim() || "Merkez Şube";
+  if (input.assignedPersonnel !== undefined) {
+    patch.assignedPersonnel = input.assignedPersonnel.trim();
+  }
+  if (input.paymentTaxNo !== undefined) patch.paymentTaxNo = input.paymentTaxNo.trim();
+  if (input.relatives !== undefined) patch.relatives = serializeRelatives(input.relatives);
+  if (input.guarantors !== undefined) {
+    patch.guarantors = serializeGuarantors(input.guarantors);
+  }
+  if (input.mobile !== undefined || input.landline !== undefined || input.contact !== undefined) {
+    patch.contact = supplierContact({
+      name: input.name ?? before.name,
+      contact: input.contact ?? before.contact,
+      mobile: input.mobile ?? before.mobile,
+      landline: input.landline ?? before.landline,
+    });
+  }
   const row = await prisma.supplier.update({
     where: { id },
-    data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.contact !== undefined ? { contact: input.contact } : {}),
-      ...(input.address !== undefined ? { address: input.address } : {}),
-      ...(input.active !== undefined ? { active: input.active } : {}),
-    },
+    data: patch,
   });
   const mapped = toSupplier(row);
   await logAudit({
@@ -442,51 +675,154 @@ export async function dbDeletePersonnel(id: string, ctx: AuditCtx): Promise<void
 
 type LineInput = {
   description: string;
-  quantityLabel: string;
+  quantityLabel?: string;
   unitPrice: number;
   lineTotal?: number;
+  quantity?: number;
+  unit?: string;
+  discountRate?: number;
+  vatRate?: number;
+  vatAmount?: number;
+  lineNet?: number;
 };
 
 function normalizeLines(lines: LineInput[]): Omit<InvoiceLine, "id" | "invoiceNo">[] {
-  return lines.map((line) => ({
-    description: line.description,
-    quantityLabel: line.quantityLabel,
-    unitPrice: line.unitPrice,
-    lineTotal: line.lineTotal ?? line.unitPrice,
-  }));
+  return lines.map((line) => {
+    const unit = line.unit?.trim() || "Adet";
+    const quantity =
+      line.quantity ??
+      parseFloat(String(line.quantityLabel ?? "1").replace(",", ".")) ??
+      1;
+    const calc = calcInvoiceLine(
+      {
+        quantity: Number.isFinite(quantity) ? quantity : 1,
+        unitPrice: line.unitPrice,
+        discountRate: line.discountRate ?? 0,
+        vatRate: line.vatRate ?? 20,
+      },
+      unit
+    );
+    return {
+      description: line.description,
+      quantityLabel: line.quantityLabel?.trim() || calc.quantityLabel,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal ?? calc.lineTotal,
+      quantity: Number.isFinite(quantity) ? quantity : 1,
+      unit,
+      discountRate: line.discountRate ?? 0,
+      vatRate: line.vatRate ?? 20,
+      vatAmount: line.vatAmount ?? calc.vatAmount,
+      lineNet: line.lineNet ?? calc.lineNet,
+    };
+  });
+}
+
+type InvoiceWriteInput = {
+  invoiceNo: string;
+  party: string;
+  kind?: string;
+  issueDate: string;
+  dueDate: string;
+  amount?: number;
+  status: string;
+  documentType?: string;
+  bucket?: string;
+  confirmed?: boolean;
+  eDocument?: string;
+  scenario?: string;
+  series?: string;
+  currency?: string;
+  fxRate?: number;
+  partyTaxNo?: string;
+  partyTaxOffice?: string;
+  partyAddress?: string;
+  partyCity?: string;
+  partyDistrict?: string;
+  partyPhone?: string;
+  partyEmail?: string;
+  sellerName?: string;
+  sellerTaxNo?: string;
+  sellerTaxOffice?: string;
+  sellerAddress?: string;
+  paymentMethod?: string;
+  relatedDispatchNo?: string;
+  relatedOrderNo?: string;
+  notes?: string;
+  validUntil?: string;
+  deliveryTerm?: string;
+  preparedBy?: string;
+  subtotal?: number;
+  totalDiscount?: number;
+  totalVat?: number;
+  withholding?: number;
+  lines?: LineInput[];
+};
+
+function invoiceHeaderFromInput(input: InvoiceWriteInput, lines: Omit<InvoiceLine, "id" | "invoiceNo">[]) {
+  const documentType = documentTypeFromKind(input.kind ?? "", input.documentType);
+  const meta = documentTypeMeta(documentType);
+  const kind = input.kind?.trim() || meta.kind;
+  const status = normalizeInvoiceStatus(input.status.trim());
+  const subtotal = input.subtotal ?? lines.reduce((s, l) => s + l.lineNet, 0);
+  const totalVat = input.totalVat ?? lines.reduce((s, l) => s + l.vatAmount, 0);
+  const amount =
+    input.amount ??
+    lines.reduce((s, l) => s + l.lineTotal, 0);
+  return {
+    documentType,
+    bucket: bucketFor(documentType, input.bucket),
+    kind,
+    status,
+    confirmed: input.confirmed ?? isConfirmedDocument(status, documentType),
+    eDocument: input.eDocument?.trim() || (meta.bucket === "proforma" ? "Proforma" : "e-Arşiv"),
+    scenario: input.scenario?.trim() || "TEMELFATURA",
+    series: input.series?.trim() ?? "",
+    currency: input.currency?.trim() || "TRY",
+    fxRate: input.fxRate ?? 1,
+    partyTaxNo: input.partyTaxNo?.trim() ?? "",
+    partyTaxOffice: input.partyTaxOffice?.trim() ?? "",
+    partyAddress: input.partyAddress?.trim() ?? "",
+    partyCity: input.partyCity?.trim() ?? "",
+    partyDistrict: input.partyDistrict?.trim() ?? "",
+    partyPhone: input.partyPhone?.trim() ?? "",
+    partyEmail: input.partyEmail?.trim() ?? "",
+    sellerName: input.sellerName?.trim() || "HamdPharma",
+    sellerTaxNo: input.sellerTaxNo?.trim() ?? "",
+    sellerTaxOffice: input.sellerTaxOffice?.trim() ?? "",
+    sellerAddress: input.sellerAddress?.trim() ?? "",
+    paymentMethod: input.paymentMethod?.trim() || "Cari hesap",
+    relatedDispatchNo: input.relatedDispatchNo?.trim() ?? "",
+    relatedOrderNo: input.relatedOrderNo?.trim() ?? "",
+    notes: input.notes?.trim() ?? "",
+    validUntil: input.validUntil?.trim() ?? "",
+    deliveryTerm: input.deliveryTerm?.trim() ?? "",
+    preparedBy: input.preparedBy?.trim() ?? "",
+    subtotal,
+    totalDiscount: input.totalDiscount ?? 0,
+    totalVat,
+    withholding: input.withholding ?? 0,
+    amount,
+  };
 }
 
 export async function dbCreateInvoice(
-  input: {
-    invoiceNo: string;
-    party: string;
-    kind: string;
-    issueDate: string;
-    dueDate: string;
-    amount?: number;
-    status: string;
-    lines?: LineInput[];
-  },
+  input: InvoiceWriteInput,
   ctx: AuditCtx
 ): Promise<Invoice> {
   const invoiceNo = input.invoiceNo.trim();
   const existing = await prisma.invoice.findUnique({ where: { invoiceNo } });
   if (existing) throw new FieldError("Bu fatura numarası zaten kayıtlı");
   const lines = normalizeLines(input.lines ?? []);
-  const amount =
-    input.amount ??
-    lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  const header = invoiceHeaderFromInput(input, lines);
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.invoice.create({
       data: {
         id: `inv-${Date.now()}`,
         invoiceNo,
         party: input.party,
-        kind: input.kind,
         issueDate: input.issueDate,
         dueDate: input.dueDate,
-        amount,
-        status: input.status,
+        ...header,
       },
     });
     if (lines.length > 0) {
@@ -515,16 +851,7 @@ export async function dbCreateInvoice(
 
 export async function dbUpdateInvoice(
   id: string,
-  input: {
-    invoiceNo?: string;
-    party?: string;
-    kind?: string;
-    issueDate?: string;
-    dueDate?: string;
-    amount?: number;
-    status?: string;
-    lines?: LineInput[];
-  },
+  input: Partial<InvoiceWriteInput>,
   ctx: AuditCtx
 ): Promise<Invoice> {
   const before = await prisma.invoice.findUnique({ where: { id } });
@@ -535,24 +862,69 @@ export async function dbUpdateInvoice(
     if (clash) throw new FieldError("Bu fatura numarası zaten kayıtlı");
   }
   const lines = input.lines ? normalizeLines(input.lines) : undefined;
-  const amount =
-    input.amount ??
-    (lines ? lines.reduce((sum, line) => sum + line.lineTotal, 0) : undefined);
+  const merged: InvoiceWriteInput = {
+    invoiceNo,
+    party: input.party ?? before.party,
+    kind: input.kind ?? before.kind,
+    issueDate: input.issueDate ?? before.issueDate,
+    dueDate: input.dueDate ?? before.dueDate,
+    amount: input.amount,
+    status: input.status ?? before.status,
+    documentType: input.documentType ?? before.documentType,
+    bucket: input.bucket ?? before.bucket,
+    confirmed: input.confirmed,
+    eDocument: input.eDocument ?? before.eDocument,
+    scenario: input.scenario ?? before.scenario,
+    series: input.series ?? before.series,
+    currency: input.currency ?? before.currency,
+    fxRate: input.fxRate ?? before.fxRate,
+    partyTaxNo: input.partyTaxNo ?? before.partyTaxNo,
+    partyTaxOffice: input.partyTaxOffice ?? before.partyTaxOffice,
+    partyAddress: input.partyAddress ?? before.partyAddress,
+    partyCity: input.partyCity ?? before.partyCity,
+    partyDistrict: input.partyDistrict ?? before.partyDistrict,
+    partyPhone: input.partyPhone ?? before.partyPhone,
+    partyEmail: input.partyEmail ?? before.partyEmail,
+    sellerName: input.sellerName ?? before.sellerName,
+    sellerTaxNo: input.sellerTaxNo ?? before.sellerTaxNo,
+    sellerTaxOffice: input.sellerTaxOffice ?? before.sellerTaxOffice,
+    sellerAddress: input.sellerAddress ?? before.sellerAddress,
+    paymentMethod: input.paymentMethod ?? before.paymentMethod,
+    relatedDispatchNo: input.relatedDispatchNo ?? before.relatedDispatchNo,
+    relatedOrderNo: input.relatedOrderNo ?? before.relatedOrderNo,
+    notes: input.notes ?? before.notes,
+    validUntil: input.validUntil ?? before.validUntil,
+    deliveryTerm: input.deliveryTerm ?? before.deliveryTerm,
+    preparedBy: input.preparedBy ?? before.preparedBy,
+    subtotal: input.subtotal,
+    totalDiscount: input.totalDiscount,
+    totalVat: input.totalVat,
+    withholding: input.withholding,
+    lines: input.lines,
+  };
+  const header = invoiceHeaderFromInput(merged, lines ?? []);
   const row = await prisma.$transaction(async (tx) => {
     const updated = await tx.invoice.update({
       where: { id },
       data: {
         invoiceNo,
-        ...(input.party !== undefined ? { party: input.party } : {}),
-        ...(input.kind !== undefined ? { kind: input.kind } : {}),
-        ...(input.issueDate !== undefined ? { issueDate: input.issueDate } : {}),
-        ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
-        ...(amount !== undefined ? { amount } : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
+        party: merged.party,
+        issueDate: merged.issueDate,
+        dueDate: merged.dueDate,
+        ...header,
+        ...(lines
+          ? {}
+          : {
+              amount: input.amount ?? before.amount,
+              subtotal: input.subtotal ?? before.subtotal,
+              totalVat: input.totalVat ?? before.totalVat,
+              totalDiscount: input.totalDiscount ?? before.totalDiscount,
+              withholding: input.withholding ?? before.withholding,
+            }),
       },
     });
     if (lines) {
-      await tx.invoiceLine.deleteMany({ where: { invoiceNo } });
+      await tx.invoiceLine.deleteMany({ where: { invoiceNo: before.invoiceNo } });
       if (lines.length > 0) {
         await tx.invoiceLine.createMany({
           data: lines.map((line, i) => ({
@@ -562,6 +934,11 @@ export async function dbUpdateInvoice(
           })),
         });
       }
+    } else if (invoiceNo !== before.invoiceNo) {
+      await tx.invoiceLine.updateMany({
+        where: { invoiceNo: before.invoiceNo },
+        data: { invoiceNo },
+      });
     }
     return updated;
   });
@@ -608,7 +985,7 @@ type DeliveryLineInput = {
   unit: string;
 };
 
-function toDeliveryNote(row: {
+export function toDeliveryNote(row: {
   id: string;
   noteNo: string;
   party: string;
@@ -619,8 +996,55 @@ function toDeliveryNote(row: {
   relatedOrderNo: string;
   relatedInvoiceNo: string;
   status: string;
+  partyTaxNo?: string;
+  partyAddress?: string;
+  partyCity?: string;
+  partyDistrict?: string;
+  partyCountry?: string;
+  partyPostalCode?: string;
+  driverName?: string;
+  driverNationalId?: string;
+  plateNo?: string;
+  trailerPlate?: string;
+  plateOrigin?: string;
+  shipMethod?: string;
+  dispatchAddress?: string;
+  issueTime?: string;
+  shipTime?: string;
+  relatedOrderDate?: string;
+  packages?: string;
+  notes?: string;
 }): DeliveryNote {
-  return { ...row };
+  return {
+    id: row.id,
+    noteNo: row.noteNo,
+    party: row.party,
+    kind: row.kind,
+    issueDate: row.issueDate,
+    shipDate: row.shipDate,
+    warehouse: row.warehouse,
+    relatedOrderNo: row.relatedOrderNo,
+    relatedInvoiceNo: row.relatedInvoiceNo,
+    status: row.status,
+    partyTaxNo: row.partyTaxNo ?? "",
+    partyAddress: row.partyAddress ?? "",
+    partyCity: row.partyCity ?? "",
+    partyDistrict: row.partyDistrict ?? "",
+    partyCountry: row.partyCountry || "Türkiye",
+    partyPostalCode: row.partyPostalCode ?? "",
+    driverName: row.driverName ?? "",
+    driverNationalId: row.driverNationalId ?? "",
+    plateNo: row.plateNo ?? "",
+    trailerPlate: row.trailerPlate ?? "",
+    plateOrigin: row.plateOrigin || "Türkiye plaka",
+    shipMethod: row.shipMethod || "Kendi aracımla gönderiyorum",
+    dispatchAddress: row.dispatchAddress ?? "",
+    issueTime: row.issueTime ?? "",
+    shipTime: row.shipTime ?? "",
+    relatedOrderDate: row.relatedOrderDate ?? "",
+    packages: row.packages ?? "",
+    notes: row.notes ?? "",
+  };
 }
 
 function normalizeDeliveryLines(
@@ -633,19 +1057,64 @@ function normalizeDeliveryLines(
   }));
 }
 
+type DeliveryNoteWriteInput = {
+  noteNo: string;
+  party: string;
+  kind: string;
+  issueDate: string;
+  shipDate: string;
+  warehouse: string;
+  relatedOrderNo?: string;
+  relatedInvoiceNo?: string;
+  status: string;
+  partyTaxNo?: string;
+  partyAddress?: string;
+  partyCity?: string;
+  partyDistrict?: string;
+  partyCountry?: string;
+  partyPostalCode?: string;
+  driverName?: string;
+  driverNationalId?: string;
+  plateNo?: string;
+  trailerPlate?: string;
+  plateOrigin?: string;
+  shipMethod?: string;
+  dispatchAddress?: string;
+  issueTime?: string;
+  shipTime?: string;
+  relatedOrderDate?: string;
+  packages?: string;
+  notes?: string;
+  lines?: DeliveryLineInput[];
+};
+
+function deliveryExtras(input: Partial<DeliveryNoteWriteInput>) {
+  return {
+    relatedOrderNo: input.relatedOrderNo?.trim() ?? "",
+    relatedInvoiceNo: input.relatedInvoiceNo?.trim() ?? "",
+    relatedOrderDate: input.relatedOrderDate?.trim() ?? "",
+    partyTaxNo: input.partyTaxNo?.trim() ?? "",
+    partyAddress: input.partyAddress?.trim() ?? "",
+    partyCity: input.partyCity?.trim() ?? "",
+    partyDistrict: input.partyDistrict?.trim() ?? "",
+    partyCountry: input.partyCountry?.trim() || "Türkiye",
+    partyPostalCode: input.partyPostalCode?.trim() ?? "",
+    driverName: input.driverName?.trim() ?? "",
+    driverNationalId: input.driverNationalId?.trim() ?? "",
+    plateNo: input.plateNo?.trim() ?? "",
+    trailerPlate: input.trailerPlate?.trim() ?? "",
+    plateOrigin: input.plateOrigin?.trim() || "Türkiye plaka",
+    shipMethod: input.shipMethod?.trim() || "Kendi aracımla gönderiyorum",
+    dispatchAddress: input.dispatchAddress?.trim() ?? "",
+    issueTime: input.issueTime?.trim() ?? "",
+    shipTime: input.shipTime?.trim() ?? "",
+    packages: input.packages?.trim() ?? "",
+    notes: input.notes?.trim() ?? "",
+  };
+}
+
 export async function dbCreateDeliveryNote(
-  input: {
-    noteNo: string;
-    party: string;
-    kind: string;
-    issueDate: string;
-    shipDate: string;
-    warehouse: string;
-    relatedOrderNo?: string;
-    relatedInvoiceNo?: string;
-    status: string;
-    lines?: DeliveryLineInput[];
-  },
+  input: DeliveryNoteWriteInput,
   ctx: AuditCtx
 ): Promise<DeliveryNote> {
   const noteNo = input.noteNo.trim();
@@ -662,9 +1131,8 @@ export async function dbCreateDeliveryNote(
         issueDate: input.issueDate,
         shipDate: input.shipDate,
         warehouse: input.warehouse,
-        relatedOrderNo: input.relatedOrderNo?.trim() ?? "",
-        relatedInvoiceNo: input.relatedInvoiceNo?.trim() ?? "",
         status: input.status,
+        ...deliveryExtras(input),
       },
     });
     if (lines.length > 0) {
@@ -693,18 +1161,7 @@ export async function dbCreateDeliveryNote(
 
 export async function dbUpdateDeliveryNote(
   id: string,
-  input: {
-    noteNo?: string;
-    party?: string;
-    kind?: string;
-    issueDate?: string;
-    shipDate?: string;
-    warehouse?: string;
-    relatedOrderNo?: string;
-    relatedInvoiceNo?: string;
-    status?: string;
-    lines?: DeliveryLineInput[];
-  },
+  input: Partial<DeliveryNoteWriteInput>,
   ctx: AuditCtx
 ): Promise<DeliveryNote> {
   const before = await prisma.deliveryNote.findUnique({ where: { id } });
@@ -725,13 +1182,39 @@ export async function dbUpdateDeliveryNote(
         ...(input.issueDate !== undefined ? { issueDate: input.issueDate } : {}),
         ...(input.shipDate !== undefined ? { shipDate: input.shipDate } : {}),
         ...(input.warehouse !== undefined ? { warehouse: input.warehouse } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.relatedOrderNo !== undefined
           ? { relatedOrderNo: input.relatedOrderNo.trim() }
           : {}),
         ...(input.relatedInvoiceNo !== undefined
           ? { relatedInvoiceNo: input.relatedInvoiceNo.trim() }
           : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.partyTaxNo !== undefined ? { partyTaxNo: input.partyTaxNo.trim() } : {}),
+        ...(input.partyAddress !== undefined
+          ? { partyAddress: input.partyAddress.trim() }
+          : {}),
+        ...(input.partyCity !== undefined ? { partyCity: input.partyCity.trim() } : {}),
+        ...(input.partyDistrict !== undefined ? { partyDistrict: input.partyDistrict.trim() } : {}),
+        ...(input.partyCountry !== undefined ? { partyCountry: input.partyCountry.trim() } : {}),
+        ...(input.partyPostalCode !== undefined ? { partyPostalCode: input.partyPostalCode.trim() } : {}),
+        ...(input.driverName !== undefined ? { driverName: input.driverName.trim() } : {}),
+        ...(input.driverNationalId !== undefined
+          ? { driverNationalId: input.driverNationalId.trim() }
+          : {}),
+        ...(input.plateNo !== undefined ? { plateNo: input.plateNo.trim() } : {}),
+        ...(input.trailerPlate !== undefined ? { trailerPlate: input.trailerPlate.trim() } : {}),
+        ...(input.plateOrigin !== undefined ? { plateOrigin: input.plateOrigin.trim() } : {}),
+        ...(input.shipMethod !== undefined ? { shipMethod: input.shipMethod.trim() } : {}),
+        ...(input.dispatchAddress !== undefined
+          ? { dispatchAddress: input.dispatchAddress.trim() }
+          : {}),
+        ...(input.issueTime !== undefined ? { issueTime: input.issueTime.trim() } : {}),
+        ...(input.shipTime !== undefined ? { shipTime: input.shipTime.trim() } : {}),
+        ...(input.relatedOrderDate !== undefined
+          ? { relatedOrderDate: input.relatedOrderDate.trim() }
+          : {}),
+        ...(input.packages !== undefined ? { packages: input.packages.trim() } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes.trim() } : {}),
       },
     });
     if (lines) {

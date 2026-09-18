@@ -233,11 +233,38 @@ model Customer {
 }
 
 model Supplier {
-  id      String  @id
-  name    String
-  contact String
-  address String
-  active  Boolean @default(true)
+  id                   String  @id
+  name                 String
+  contact              String  @default("")
+  address              String  @default("")
+  active               Boolean @default(true)
+  invoiceName          String  @default("")
+  accountList          String  @default("Tedarikçi")
+  currency             String  @default("TL")
+  accountCode          String  @default("")
+  onlineTransactions   Boolean @default(true)
+  notes                String  @default("")
+  iban                 String  @default("")
+  country              String  @default("Türkiye")
+  city                 String  @default("")
+  district             String  @default("")
+  mobile               String  @default("")
+  email                String  @default("")
+  landline             String  @default("")
+  accountKind          String  @default("Gerçek kişi / Şahıs Firması")
+  taxNo                String  @default("")
+  taxOffice            String  @default("")
+  nationalId           String  @default("")
+  openingBalance       Decimal @default(0) @db.Decimal(18, 4)
+  openingBalanceType   String  @default("Borçlu")
+  paymentTermDays      Int     @default(0)
+  creditLimit          Decimal @default(0) @db.Decimal(18, 4)
+  salesPriceList       String  @default("1. Satış Fiyatı")
+  branch               String  @default("Merkez Şube")
+  assignedPersonnel    String  @default("")
+  paymentTaxNo         String  @default("")
+  relatives            String  @default("[]")
+  guarantors           String  @default("[]")
 }
 
 model Personnel {
@@ -265,15 +292,47 @@ model FinishedProduct {
 }
 
 model Invoice {
-  id        String        @id
-  invoiceNo String        @unique
-  party     String
-  kind      String
-  issueDate String
-  dueDate   String
-  amount    Decimal       @db.Decimal(18, 4)
-  status    String
-  lines     InvoiceLine[]
+  id                 String        @id
+  invoiceNo          String        @unique
+  party              String
+  kind               String
+  issueDate          String
+  dueDate            String
+  amount             Decimal       @db.Decimal(18, 4)
+  status             String
+  documentType       String        @default("")
+  bucket             String        @default("")
+  confirmed          Boolean       @default(true)
+  eDocument          String        @default("e-Arşiv")
+  scenario           String        @default("TEMELFATURA")
+  series             String        @default("")
+  currency           String        @default("TRY")
+  fxRate             Float         @default(1)
+  partyTaxNo         String        @default("")
+  partyTaxOffice     String        @default("")
+  partyAddress       String        @default("")
+  partyCity          String        @default("")
+  partyDistrict      String        @default("")
+  partyPhone         String        @default("")
+  partyEmail         String        @default("")
+  sellerName         String        @default("HamdPharma")
+  sellerTaxNo        String        @default("")
+  sellerTaxOffice    String        @default("")
+  sellerAddress      String        @default("")
+  paymentMethod      String        @default("Cari hesap")
+  relatedDispatchNo  String        @default("")
+  relatedOrderNo     String        @default("")
+  notes              String        @default("")
+  validUntil         String        @default("")
+  deliveryTerm       String        @default("")
+  preparedBy         String        @default("")
+  subtotal           Decimal       @default(0) @db.Decimal(18, 4)
+  totalDiscount      Decimal       @default(0) @db.Decimal(18, 4)
+  totalVat           Decimal       @default(0) @db.Decimal(18, 4)
+  withholding        Decimal       @default(0) @db.Decimal(18, 4)
+  paidAmount         Decimal       @default(0) @db.Decimal(18, 4)
+  lines              InvoiceLine[]
+  events             InvoiceEvent[]
 }
 
 model InvoiceLine {
@@ -283,9 +342,70 @@ model InvoiceLine {
   quantityLabel String
   unitPrice     Decimal @db.Decimal(18, 4)
   lineTotal     Decimal @db.Decimal(18, 4)
+  quantity      Float   @default(1)
+  unit          String  @default("Adet")
+  discountRate  Float   @default(0)
+  vatRate       Float   @default(20)
+  vatAmount     Decimal @default(0) @db.Decimal(18, 4)
+  lineNet       Decimal @default(0) @db.Decimal(18, 4)
   invoice       Invoice @relation(fields: [invoiceNo], references: [invoiceNo], onDelete: Cascade)
 
   @@index([invoiceNo])
+}
+
+model InvoiceEvent {
+  id        String   @id
+  invoiceNo String
+  kind      String
+  status    String   @default("")
+  amount    Decimal  @default(0) @db.Decimal(18, 4)
+  method    String   @default("")
+  note      String   @default("")
+  fileName  String   @default("")
+  fileId    String   @default("")
+  mimeType  String   @default("")
+  createdAt DateTime @default(now())
+  createdBy String   @default("")
+  invoice   Invoice  @relation(fields: [invoiceNo], references: [invoiceNo], onDelete: Cascade)
+
+  @@index([invoiceNo])
+}
+
+model ChequeNote {
+  id               String                   @id
+  docNo            String                   @unique
+  kind             String
+  direction        String
+  party            String
+  issueDate        String
+  bankName         String                   @default("")
+  serialNo         String                   @default("")
+  totalAmount      Decimal                  @db.Decimal(18, 4)
+  currency         String                   @default("TRY")
+  status           String                   @default("Portföy")
+  notes            String                   @default("")
+  relatedInvoiceNo String                   @default("")
+  createdAt        DateTime                 @default(now())
+  createdBy        String                   @default("")
+  installments     ChequeNoteInstallment[]
+}
+
+model ChequeNoteInstallment {
+  id             String     @id
+  chequeNoteId   String
+  sequence       Int
+  dueDate        String
+  amount         Decimal    @db.Decimal(18, 4)
+  serialNo       String     @default("")
+  status         String     @default("Bekliyor")
+  paidAt         String     @default("")
+  invoiceNo      String     @default("")
+  paymentEventId String     @default("")
+  chequeNote     ChequeNote @relation(fields: [chequeNoteId], references: [id], onDelete: Cascade)
+
+  @@index([chequeNoteId])
+  @@index([status])
+  @@index([dueDate])
 }
 
 model DeliveryNote {
@@ -299,6 +419,24 @@ model DeliveryNote {
   relatedOrderNo   String             @default("")
   relatedInvoiceNo String             @default("")
   status           String
+  partyTaxNo       String             @default("")
+  partyAddress     String             @default("")
+  partyCity        String             @default("")
+  partyDistrict    String             @default("")
+  partyCountry     String             @default("Türkiye")
+  partyPostalCode  String             @default("")
+  driverName       String             @default("")
+  driverNationalId String             @default("")
+  plateNo          String             @default("")
+  trailerPlate     String             @default("")
+  plateOrigin      String             @default("Türkiye plaka")
+  shipMethod       String             @default("Kendi aracımla gönderiyorum")
+  dispatchAddress  String             @default("")
+  issueTime        String             @default("")
+  shipTime         String             @default("")
+  relatedOrderDate String             @default("")
+  packages         String             @default("")
+  notes            String             @default("")
   lines            DeliveryNoteLine[]
 }
 
@@ -329,6 +467,35 @@ model BudgetRow {
   department String
   annual     Decimal @db.Decimal(18, 4)
   spent      Decimal @db.Decimal(18, 4)
+}
+
+model BudgetCashEntry {
+  id          String   @id
+  direction   String
+  party       String
+  category    String
+  amount      Decimal  @db.Decimal(18, 4)
+  date        String
+  dueDate     String   @default("")
+  description String   @default("")
+  invoiceNo   String   @default("")
+  documented  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  createdBy   String   @default("")
+
+  @@index([direction])
+  @@index([date])
+  @@index([dueDate])
+  @@index([invoiceNo])
+}
+
+model BudgetCategory {
+  id        String @id
+  direction String
+  name      String
+
+  @@unique([direction, name])
+  @@index([direction])
 }
 
 model AuditLog {
@@ -382,4 +549,27 @@ model Department {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model DocumentSettings {
+  id             String   @id @default("default")
+  companyName    String   @default("HamdPharma")
+  legalTitle     String   @default("")
+  taxOffice      String   @default("")
+  taxNo          String   @default("")
+  mersisNo       String   @default("")
+  tradeRegister  String   @default("")
+  address        String   @default("")
+  city           String   @default("")
+  district       String   @default("")
+  phone          String   @default("")
+  email          String   @default("")
+  website        String   @default("")
+  iban           String   @default("")
+  bankName       String   @default("")
+  authorizedName String   @default("")
+  footerNote     String   @default("")
+  logoDataUrl    String   @default("")
+  showLogo       Boolean  @default(true)
+  updatedAt      DateTime @updatedAt
 }

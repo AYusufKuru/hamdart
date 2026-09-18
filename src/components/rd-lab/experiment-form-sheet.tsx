@@ -6,19 +6,13 @@ import { Microscope, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   FormDialog,
   FormField,
   FormSection,
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import {
   createLabExperiment,
   getLabPeople,
@@ -256,25 +250,20 @@ export function ExperimentFormSheet({
                       label={index === 0 ? "Hammadde" : undefined}
                       required={index === 0}
                     >
-                      <Select
+                      <SearchableSelect
                         value={line.stockItemId || undefined}
                         onValueChange={(stockItemId) =>
                           updateLine(line.key, { stockItemId })
                         }
-                      >
-                        <SelectTrigger className="bg-white">
-                          <SelectValue placeholder="Stoktan hammadde seçin" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {materialStock.map((item) => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.name} · {item.lotNo} ·{" "}
-                              {getWarehouseName(item.warehouseId)} (
-                              {formatNumber(item.quantity)} {item.unit})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Stoktan hammadde seçin"
+                        searchPlaceholder="Hammadde ara…"
+                        emptyText="Eşleşen hammadde yok"
+                        options={materialStock.map((item) => ({
+                          value: item.id,
+                          label: `${item.name} · ${item.lotNo} · ${getWarehouseName(item.warehouseId)} (${formatNumber(item.quantity)} ${item.unit})`,
+                          keywords: `${item.name} ${item.lotNo} ${getWarehouseName(item.warehouseId)}`,
+                        }))}
+                      />
                     </FormField>
                     <FormField
                       label={index === 0 ? "Miktar" : undefined}

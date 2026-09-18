@@ -19,6 +19,7 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import type { Recipe } from "@/data/recipes";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
 import {
@@ -278,23 +279,20 @@ export function RecipeFormSheet({
                     required={index === 0}
                   >
                     {materials.length > 0 ? (
-                      <Select
+                      <SearchableSelect
+                        id={`mat-${index}`}
                         value={line.materialName || undefined}
                         onValueChange={(materialName) =>
                           patchLine(index, { materialName })
                         }
-                      >
-                        <SelectTrigger id={`mat-${index}`} className="bg-white">
-                          <SelectValue placeholder="Malzeme seçin" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {materialOptionsFor(line).map((m) => (
-                            <SelectItem key={m.name} value={m.name}>
-                              {m.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Malzeme seçin"
+                        searchPlaceholder="Hammadde ara…"
+                        emptyText="Eşleşen hammadde yok"
+                        options={materialOptionsFor(line).map((m) => ({
+                          value: m.name,
+                          label: m.name,
+                        }))}
+                      />
                     ) : (
                       <Input
                         id={`mat-${index}`}

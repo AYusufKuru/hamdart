@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Truck } from "lucide-react";
+import { Plus, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,19 +14,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FormDialog, FormField } from "@/components/shared/form-sheet";
+import { SearchableSelect } from "@/components/shared/searchable-select";
+import { DeliveryNoteFormSheet } from "@/components/catalog/delivery-note-form-sheet";
 import type { Order } from "@/data/mock";
-import type { Customer } from "@/data/catalog";
+import type { Customer, DeliveryNote, DeliveryNoteLine } from "@/data/catalog";
 import { getWarehouseName, type WarehouseStockItem } from "@/data/warehouses";
-import { fetchCustomers } from "@/lib/catalog-store";
+import {
+  fetchCustomers,
+  fetchDeliveryNoteLines,
+  fetchDeliveryNotes,
+} from "@/lib/catalog-store";
 import {
   createShipment,
+  getAllOrders,
   getOrderCustomers,
   updateOrderShipment,
 } from "@/lib/order-store";
 import { getAllWarehouseStockItems } from "@/lib/stock-store";
 import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
-import { isUnsetShipmentCustomer } from "@/lib/shipment";
+import {
+  isReadyToShip,
+  isUnsetShipmentCustomer,
+  parseQuantityLabel,
+} from "@/lib/shipment";
 import { formatNumber, selectItemValues } from "@/lib/utils";
 
 function emptyForm(order: Order | null) {
@@ -36,6 +47,8 @@ function emptyForm(order: Order | null) {
     destination: order?.destination ?? "",
     stockItemId: "",
     quantity: order?.quantity ? String(order.quantity) : "",
+    noteNo: "",
+    relatedOrderNo: order?.orderNo ?? "",
   };
 }
 
@@ -63,13 +76,17 @@ export function ShipOutDialog({
   onOpenChange: (open: boolean) => void;
   onShipped?: (order: Order) => void;
 }) {
-  const { canRead } = useAuth();
+  const { canRead, canWrite } = useAuth();
   const standalone = !order;
   const [form, setForm] = useState(() => emptyForm(order));
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerNames, setCustomerNames] = useState<string[]>([]);
   const [stockItems, setStockItems] = useState<WarehouseStockItem[]>([]);
+  const [notes, setNotes] = useState<DeliveryNote[]>([]);
+  const [noteLines, setNoteLines] = useState<DeliveryNoteLine[]>([]);
+  const [readyOrders, setReadyOrders] = useState<Order[]>([]);
   const [saving, setSaving] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
 
   const customerOptions = useMemo(() => {
     const names = selectItemValues([
@@ -80,8 +97,32 @@ export function ShipOutDialog({
     return names;
   }, [customers, customerNames, form.customer]);
 
+  const salesNotes = useMemo(
+    () =>
+      notes
+        .filter((note) => note.kind !== "Alış")
+        .sort((a, b) => b.issueDate.localeCompare(a.issueDate) || b.noteNo.localeCompare(a.noteNo)),
+    [notes]
+  );
+
+  const noteOptions = useMemo(
+    () =>
+      salesNotes.map((note) => ({
+        value: note.noteNo,
+        label: `${note.noteNo} · ${note.party}`,
+        keywords: `${note.party} ${note.relatedOrderNo} ${note.status}`,
+      })),
+    [salesNotes]
+  );
+
+  const productHint = useMemo(() => {
+    if (order?.product) return order.product;
+    if (!form.noteNo) return "";
+    return noteLines.find((line) => line.noteNo === form.noteNo)?.description ?? "";
+  }, [order?.product, form.noteNo, noteLines]);
+
   const stockOptions = useMemo(() => {
-    const product = order?.product ?? "";
+    const product = productHint;
     return [...stockItems]
       .filter(
         (item) => item.quantity > 0 && productKey(item.category) === "mamul"
@@ -93,21 +134,28 @@ export function ShipOutDialog({
         if (ma !== mb) return ma - mb;
         return a.name.localeCompare(b.name, "tr");
       });
-  }, [stockItems, order?.product]);
+  }, [stockItems, productHint]);
 
   const selected = stockOptions.find((item) => item.id === form.stockItemId);
+  const linkedOrder =
+    order ??
+    readyOrders.find(
+      (row) => row.orderNo === form.relatedOrderNo && isReadyToShip(row.status)
+    ) ??
+    null;
   const maxQty = selected
-    ? order
-      ? Math.min(selected.quantity, order.quantity)
+    ? linkedOrder
+      ? Math.min(selected.quantity, linkedOrder.quantity)
       : selected.quantity
-    : order?.quantity ?? 0;
+    : linkedOrder?.quantity ?? 0;
 
   useEffect(() => {
     if (!open) return;
     setSaving(false);
+    setNoteOpen(false);
     setForm(emptyForm(order));
     void (async () => {
-      const [catalog, names, stock] = await Promise.all([
+      const [catalog, names, stock, deliveryNotes, lines, orders] = await Promise.all([
         ifAllowed(canRead("customers"), () => fetchCustomers(), [] as Customer[]),
         getOrderCustomers(),
         ifAllowed(
@@ -115,10 +163,16 @@ export function ShipOutDialog({
           () => getAllWarehouseStockItems(),
           [] as WarehouseStockItem[]
         ),
+        ifAllowed(canRead("delivery_notes"), () => fetchDeliveryNotes(), [] as DeliveryNote[]),
+        ifAllowed(canRead("delivery_notes"), () => fetchDeliveryNoteLines(), [] as DeliveryNoteLine[]),
+        ifAllowed(canRead("orders"), () => getAllOrders(), [] as Order[]),
       ]);
       setCustomers(catalog.filter((c) => c.active !== false));
       setCustomerNames(names);
       setStockItems(stock);
+      setNotes(deliveryNotes);
+      setNoteLines(lines);
+      setReadyOrders(orders.filter((row) => isReadyToShip(row.status)));
       const product = order?.product ?? "";
       const match = product
         ? stock.find(
@@ -137,10 +191,7 @@ export function ShipOutDialog({
       setForm((f) => ({
         ...f,
         stockItemId: picked?.id ?? f.stockItemId,
-        quantity:
-          max != null
-            ? String(max)
-            : f.quantity,
+        quantity: max != null ? String(max) : f.quantity,
       }));
     })();
   }, [open, order, canRead]);
@@ -157,8 +208,8 @@ export function ShipOutDialog({
   function applyStock(stockItemId: string) {
     const item = stockOptions.find((s) => s.id === stockItemId);
     const max = item
-      ? order
-        ? Math.min(item.quantity, order.quantity)
+      ? linkedOrder
+        ? Math.min(item.quantity, linkedOrder.quantity)
         : item.quantity
       : undefined;
     setForm((f) => ({
@@ -166,6 +217,52 @@ export function ShipOutDialog({
       stockItemId,
       quantity: max != null ? String(max) : f.quantity,
     }));
+  }
+
+  function applyDeliveryNote(noteNo: string, sourceNotes = notes, sourceLines = noteLines, sourceStock = stockItems) {
+    const note = sourceNotes.find((row) => row.noteNo === noteNo);
+    if (!note) {
+      setForm((f) => ({ ...f, noteNo }));
+      return;
+    }
+    const lines = sourceLines.filter((line) => line.noteNo === noteNo);
+    const productNames = lines.map((line) => line.description).filter(Boolean);
+    const match = productNames
+      .map((name) =>
+        sourceStock.find(
+          (item) =>
+            item.quantity > 0 &&
+            productKey(item.category) === "mamul" &&
+            matchesOrderProduct(item, name)
+        )
+      )
+      .find(Boolean);
+    const qty =
+      lines.map((line) => parseQuantityLabel(line.quantityLabel)).find((n) => n > 0) ??
+      (match && linkedOrder
+        ? Math.min(match.quantity, linkedOrder.quantity)
+        : match?.quantity);
+    setForm((f) => ({
+      ...f,
+      noteNo: note.noteNo,
+      relatedOrderNo: note.relatedOrderNo || f.relatedOrderNo,
+      customer: note.party || f.customer,
+      destination: note.partyAddress || f.destination,
+      stockItemId: match?.id ?? f.stockItemId,
+      quantity: qty != null ? String(qty) : f.quantity,
+    }));
+  }
+
+  async function handleNoteSaved(note?: DeliveryNote) {
+    const [deliveryNotes, lines] = await Promise.all([
+      fetchDeliveryNotes().catch(() => [] as DeliveryNote[]),
+      fetchDeliveryNoteLines().catch(() => [] as DeliveryNoteLine[]),
+    ]);
+    setNotes(deliveryNotes);
+    setNoteLines(lines);
+    if (note?.noteNo) {
+      applyDeliveryNote(note.noteNo, deliveryNotes, lines, stockItems);
+    }
   }
 
   async function submit() {
@@ -190,28 +287,31 @@ export function ShipOutDialog({
       );
       return;
     }
-    if (order && quantity > order.quantity) {
+    if (linkedOrder && quantity > linkedOrder.quantity) {
       toast.error(
-        `Siparişte en fazla ${formatNumber(order.quantity)} ${order.unit} var`
+        `Siparişte en fazla ${formatNumber(linkedOrder.quantity)} ${linkedOrder.unit} var`
       );
       return;
     }
 
     setSaving(true);
     try {
-      const updated = order
-        ? await updateOrderShipment(order.id, {
+      const shipmentNote = form.noteNo.trim();
+      const updated = linkedOrder
+        ? await updateOrderShipment(linkedOrder.id, {
             status: "shipped",
             customer,
             destination,
             stockItemId: form.stockItemId,
             quantity,
+            shipmentNote: shipmentNote || undefined,
           })
         : await createShipment({
             customer,
             destination,
             stockItemId: form.stockItemId,
             quantity,
+            shipmentNote: shipmentNote || undefined,
           });
       toast.success(
         `${updated.orderNo} sevk edildi — ${formatNumber(quantity)} ${updated.unit} mamul stoktan düşüldü`
@@ -225,60 +325,79 @@ export function ShipOutDialog({
     }
   }
 
+  const selectedNoteLines = noteLines.filter((line) => line.noteNo === form.noteNo);
+
   return (
+    <>
     <FormDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !saving) onOpenChange(false);
+        if (!next && !saving && !noteOpen) onOpenChange(false);
       }}
       title={standalone ? "Yeni sevk başlat" : "Sevke çıkar"}
       description={
         order
           ? `${order.orderNo}${order.batchNo ? ` · ${order.batchNo}` : ""}`
-          : "Mamul stoğundan kısmi veya tam miktar sevk edin."
+          : "İrsaliye seçin veya yeni oluşturun, sonra mamul stoğundan sevk edin."
       }
       icon={Truck}
-      className="max-w-md"
+      className="max-w-lg"
     >
       <div className="space-y-4 px-5 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Müşteri ve teslimat yerini girin. Seçtiğiniz miktar mamul stoğundan düşülür;
-          kalan stok depoda kalır.
-        </p>
-        {customerOptions.length > 0 ? (
-          <FormField label="Kayıtlı müşteri">
-            <Select
-              value={
-                customerOptions.includes(form.customer)
-                  ? form.customer
-                  : undefined
-              }
-              onValueChange={applyCustomer}
-              disabled={saving}
-            >
-              <SelectTrigger className="rounded-xl">
-                <SelectValue placeholder="Listeden seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {customerOptions.map((name) => (
-                  <SelectItem key={name} value={name}>
-                    {name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {canRead("delivery_notes") ? (
+          <FormField
+            label="Sevk irsaliyesi"
+            hint="Kayıtlı irsaliyeyi seçince cari ve ürünler dolar."
+          >
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="min-w-0 flex-1">
+                <SearchableSelect
+                  value={form.noteNo || undefined}
+                  onValueChange={(noteNo) => applyDeliveryNote(noteNo)}
+                  placeholder="İrsaliye seçin veya arayın"
+                  searchPlaceholder="İrsaliye no veya cari ara…"
+                  emptyText="İrsaliye yok"
+                  disabled={saving}
+                  options={noteOptions}
+                />
+              </div>
+              {canWrite("delivery_notes") ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl shrink-0"
+                  disabled={saving}
+                  onClick={() => setNoteOpen(true)}
+                >
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Yeni irsaliye
+                </Button>
+              ) : null}
+            </div>
           </FormField>
         ) : null}
-        <FormField label="Müşteri / alıcı" htmlFor="ship-customer" required>
-          <Input
-            id="ship-customer"
-            className="rounded-xl"
+        {selectedNoteLines.length > 0 ? (
+          <ul className="rounded-xl border bg-muted/30 px-3 py-2 text-sm">
+            {selectedNoteLines.map((line) => (
+              <li key={line.id} className="flex justify-between gap-3">
+                <span className="truncate">{line.description}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {line.quantityLabel} {line.unit}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <FormField label="Müşteri / alıcı" required>
+          <SearchableSelect
             value={form.customer}
+            onValueChange={applyCustomer}
+            placeholder="Müşteri seçin veya arayın"
+            searchPlaceholder="Müşteri ara…"
+            emptyText="Müşteri yok"
+            allowCustom
             disabled={saving}
-            placeholder="Örn. eczane, depo, müşteri adı"
-            onChange={(e) =>
-              setForm((f) => ({ ...f, customer: e.target.value }))
-            }
+            options={customerOptions.map((name) => ({ value: name, label: name }))}
           />
         </FormField>
         <FormField label="Teslimat yeri" htmlFor="ship-destination" required>
@@ -324,8 +443,8 @@ export function ShipOutDialog({
           hint={
             selected
               ? `Stokta ${formatNumber(selected.quantity)} ${selected.unit}${
-                  order
-                    ? ` · sipariş ${formatNumber(order.quantity)} ${order.unit}`
+                  linkedOrder
+                    ? ` · sipariş ${formatNumber(linkedOrder.quantity)} ${linkedOrder.unit}`
                     : ""
                 }`
               : "Stoktan düşülecek adet"
@@ -366,5 +485,30 @@ export function ShipOutDialog({
         </Button>
       </div>
     </FormDialog>
+    <DeliveryNoteFormSheet
+      open={noteOpen}
+      onOpenChange={setNoteOpen}
+      prefill={{
+        party: form.customer,
+        partyAddress: form.destination,
+        relatedOrderNo: form.relatedOrderNo || order?.orderNo,
+        relatedOrderDate: order?.orderDate,
+        warehouse: order?.warehouse || selected?.warehouseId
+          ? getWarehouseName(selected?.warehouseId ?? "")
+          : undefined,
+        lines:
+          order || selected
+            ? [
+                {
+                  description: order?.product || selected?.name || "",
+                  quantityLabel: form.quantity || String(order?.quantity ?? 1),
+                  unit: order?.unit || selected?.unit || "Adet",
+                },
+              ]
+            : undefined,
+      }}
+      onSaved={(note) => void handleNoteSaved(note)}
+    />
+    </>
   );
 }

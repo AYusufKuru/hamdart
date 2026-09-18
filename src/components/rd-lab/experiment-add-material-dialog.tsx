@@ -6,14 +6,8 @@ import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { FormDialog, FormField } from "@/components/shared/form-sheet";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import type { LabExperiment } from "@/data/mock";
 import { addExperimentMaterial } from "@/lib/lab-store";
 import { getAllWarehouseStockItems } from "@/lib/stock-store";
@@ -124,20 +118,18 @@ export function ExperimentAddMaterialDialog({
       <div className="space-y-4 px-5 py-4">
         <FormField label="Hammadde" required>
           {materialStock.length > 0 ? (
-            <Select value={stockItemId || undefined} onValueChange={setStockItemId}>
-              <SelectTrigger className="bg-white">
-                <SelectValue placeholder="Stoktan seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                {materialStock.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name} · {item.lotNo} ·{" "}
-                    {getWarehouseName(item.warehouseId)} (
-                    {formatNumber(item.quantity)} {item.unit})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={stockItemId || undefined}
+              onValueChange={setStockItemId}
+              placeholder="Stoktan seçin"
+              searchPlaceholder="Hammadde ara…"
+              emptyText="Eşleşen hammadde yok"
+              options={materialStock.map((item) => ({
+                value: item.id,
+                label: `${item.name} · ${item.lotNo} · ${getWarehouseName(item.warehouseId)} (${formatNumber(item.quantity)} ${item.unit})`,
+                keywords: `${item.name} ${item.lotNo} ${getWarehouseName(item.warehouseId)}`,
+              }))}
+            />
           ) : (
             <p className="text-sm text-amber-700">Uygun hammadde stoğu yok.</p>
           )}

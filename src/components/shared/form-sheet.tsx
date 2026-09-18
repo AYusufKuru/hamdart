@@ -103,7 +103,9 @@ export function FormDialog({
             </div>
           </div>
         </DialogHeader>
-        {children}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {children}
+        </div>
       </DialogContent>
     </Dialog>
   );

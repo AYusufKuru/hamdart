@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FormDialog } from "@/components/shared/form-sheet";
+import { FormDialog, FormSheetBody, FormSheetFooter } from "@/components/shared/form-sheet";
 import type { BatchMaterialUsage, ProductionBatch } from "@/data/mock";
 import { getAllRecipes } from "@/lib/recipe-store";
 import { getAllRawMaterials } from "@/lib/raw-material-store";
@@ -102,7 +102,7 @@ export function QcApproveDialog({
       icon={Check}
       className="max-w-lg"
     >
-      <div className="space-y-3 px-5 py-4">
+      <FormSheetBody className="space-y-3">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Tahmini tüketim reçeteden hesaplanır. Kutuya fiilen giden miktarı yazın;
           sevkiyata düşünce stoktan bu değerler düşülür.
@@ -154,8 +154,8 @@ export function QcApproveDialog({
             </ul>
           </div>
         )}
-      </div>
-      <div className="flex justify-end gap-2 border-t px-5 py-3">
+      </FormSheetBody>
+      <FormSheetFooter>
         <Button
           type="button"
           variant="outline"
@@ -173,7 +173,7 @@ export function QcApproveDialog({
         >
           Onayla ve sevkiyata ver
         </Button>
-      </div>
+      </FormSheetFooter>
     </FormDialog>
   );
 }

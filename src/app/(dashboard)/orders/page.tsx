@@ -31,6 +31,7 @@ import {
   ShoppingCart,
   Truck,
 } from "lucide-react";
+import { isReadyToShip } from "@/lib/shipment";
 
 const statusMap = {
   pending: { label: "Bekliyor", variant: "warning" as const },
@@ -46,10 +47,6 @@ const priorityMap = {
   high: { label: "Yüksek", variant: "warning" as const },
   urgent: { label: "Acil", variant: "danger" as const },
 };
-
-function isReadyToShip(status: Order["status"]) {
-  return status === "pending" || status === "confirmed" || status === "picking";
-}
 
 function OrdersPageContent() {
   const router = useRouter();

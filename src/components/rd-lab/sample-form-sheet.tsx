@@ -31,6 +31,7 @@ import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatNumber, selectItemValues, todayIso } from "@/lib/utils";
 import { PersonField } from "@/components/rd-lab/person-field";
+import { SearchableSelect } from "@/components/shared/searchable-select";
 import type { WarehouseStockItem } from "@/data/warehouses";
 
 function isMamul(item: WarehouseStockItem) {
@@ -204,28 +205,26 @@ export function SampleFormSheet({
               }
             >
               {stockOptions.length > 0 ? (
-                <Select
+                <SearchableSelect
                   value={form.stockItemId || undefined}
                   onValueChange={applyStock}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue
-                      placeholder={
-                        form.sourceKind === "product"
-                          ? "Mamul seçin"
-                          : "Hammadde seçin"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stockOptions.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name} · {item.lotNo} · {getWarehouseName(item.warehouseId)}{" "}
-                        ({formatNumber(item.quantity)} {item.unit})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  placeholder={
+                    form.sourceKind === "product"
+                      ? "Mamul seçin"
+                      : "Hammadde seçin"
+                  }
+                  searchPlaceholder={
+                    form.sourceKind === "product"
+                      ? "Mamul ara…"
+                      : "Hammadde ara…"
+                  }
+                  emptyText="Eşleşen stok kalemi yok"
+                  options={stockOptions.map((item) => ({
+                    value: item.id,
+                    label: `${item.name} · ${item.lotNo} · ${getWarehouseName(item.warehouseId)} (${formatNumber(item.quantity)} ${item.unit})`,
+                    keywords: `${item.name} ${item.lotNo} ${getWarehouseName(item.warehouseId)}`,
+                  }))}
+                />
               ) : (
                 <p className="text-sm text-amber-700">
                   {form.sourceKind === "product"

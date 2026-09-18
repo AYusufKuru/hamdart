@@ -46,9 +46,23 @@ export default function SuppliersPage() {
   }
 
   const columns: Column<Supplier>[] = [
-    { key: "name", header: "Firma Adı", render: (r) => r.name },
-    { key: "contact", header: "İletişim", render: (r) => r.contact || "—" },
-    { key: "address", header: "Adres", render: (r) => r.address || "—" },
+    { key: "name", header: "Hesap Adı", render: (r) => r.name },
+    {
+      key: "accountCode",
+      header: "Kod",
+      render: (r) => r.accountCode || "—",
+    },
+    {
+      key: "contact",
+      header: "İletişim",
+      render: (r) => r.mobile || r.contact || r.email || "—",
+    },
+    {
+      key: "city",
+      header: "İl / İlçe",
+      render: (r) =>
+        [r.city, r.district].filter(Boolean).join(" / ") || r.address || "—",
+    },
     {
       key: "active",
       header: "Durum",
@@ -104,7 +118,9 @@ export default function SuppliersPage() {
           <SearchTable
             rows={rows}
             columns={columns}
-            searchText={(r) => `${r.name} ${r.contact} ${r.address}`}
+            searchText={(r) =>
+              `${r.name} ${r.invoiceName} ${r.accountCode} ${r.contact} ${r.mobile} ${r.email} ${r.address} ${r.city} ${r.district} ${r.taxNo} ${r.nationalId}`
+            }
           />
         </CardContent>
       </Card>

@@ -22,6 +22,7 @@ import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { plusYearsIso, todayIso, parseLocalDate, selectItemValues, plusDaysIso } from "@/lib/utils";
 import { personnelDisplayName, matchesLabPersonnelDepartment, type LabPersonRole } from "@/lib/personnel";
+import { toSupplier, toInvoice, toInvoiceLine, toDeliveryNote } from "@/lib/server/catalog-write";
 import type { CreateRecipeInput } from "@/lib/recipe-store";
 import type { CreateRawMaterialInput } from "@/lib/raw-material-store";
 import type { CreateStockInput } from "@/lib/stock-store";
@@ -2708,13 +2709,7 @@ export async function dbGetCustomers(): Promise<Customer[]> {
 
 export async function dbGetSuppliers(): Promise<Supplier[]> {
   const rows = await prisma.supplier.findMany({ orderBy: { name: "asc" } });
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    contact: row.contact,
-    address: row.address,
-    active: row.active,
-  }));
+  return rows.map(toSupplier);
 }
 
 export async function dbGetPersonnel(): Promise<Personnel[]> {
@@ -2747,24 +2742,18 @@ export async function dbGetProducts(): Promise<FinishedProduct[]> {
 }
 
 export async function dbGetInvoices(): Promise<Invoice[]> {
-  const rows = await prisma.invoice.findMany();
-  return rows.map((row) => ({
-    ...row,
-    amount: asNumber(row.amount),
-  }));
+  const rows = await prisma.invoice.findMany({ orderBy: { issueDate: "desc" } });
+  return rows.map(toInvoice);
 }
 
 export async function dbGetInvoiceLines(): Promise<InvoiceLine[]> {
   const rows = await prisma.invoiceLine.findMany();
-  return rows.map((row) => ({
-    ...row,
-    unitPrice: asNumber(row.unitPrice),
-    lineTotal: asNumber(row.lineTotal),
-  }));
+  return rows.map(toInvoiceLine);
 }
 
 export async function dbGetDeliveryNotes(): Promise<DeliveryNote[]> {
-  return prisma.deliveryNote.findMany();
+  const rows = await prisma.deliveryNote.findMany();
+  return rows.map(toDeliveryNote);
 }
 
 export async function dbGetDeliveryNoteLines(): Promise<DeliveryNoteLine[]> {

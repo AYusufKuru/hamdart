@@ -30,6 +30,7 @@ export function SearchTable<T extends { id: string }>({
   pageSize = 20,
   empty = "Kayıt bulunamadı",
   onRowClick,
+  toolbar,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -37,6 +38,7 @@ export function SearchTable<T extends { id: string }>({
   pageSize?: number;
   empty?: string;
   onRowClick?: (row: T) => void;
+  toolbar?: ReactNode;
 }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -64,17 +66,20 @@ export function SearchTable<T extends { id: string }>({
 
   return (
     <div className="min-w-0 space-y-4">
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="Ara..."
-          className="pl-10 rounded-xl"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setPage(1);
-          }}
-        />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[14rem] flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="Ara..."
+            className="pl-10 rounded-xl"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        {toolbar}
       </div>
       <Table
         sort={sort}
