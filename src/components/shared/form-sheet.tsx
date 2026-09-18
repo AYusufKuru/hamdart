@@ -142,7 +142,7 @@ export function FormField({
   className,
   children,
 }: {
-  label: string;
+  label?: string;
   htmlFor?: string;
   hint?: string;
   required?: boolean;
