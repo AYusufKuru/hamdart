@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Banknote,
   Building2,
+  ExternalLink,
   FileDown,
   FileSpreadsheet,
   FileText,
@@ -66,6 +69,7 @@ const GROUP_META: Record<string, { icon: LucideIcon; tint: string; iconBg: strin
 };
 
 export function ReportsWorkspace({ data }: { data: ReportsData }) {
+  const router = useRouter();
   const [reportId, setReportId] = useState<ReportId>("top-sales-customers");
   const [productQuery, setProductQuery] = useState("");
   const [menuQuery, setMenuQuery] = useState("");
@@ -88,12 +92,30 @@ export function ReportsWorkspace({ data }: { data: ReportsData }) {
     })).filter((group) => group.items.length > 0);
   }, [menuQuery]);
 
-  const columns: Column<(typeof report.rows)[number]>[] = report.columns.map((col) => ({
-    key: col.key,
-    header: col.header,
-    className: col.className,
-    render: (row) => row[col.key] ?? "—",
-  }));
+  const columns: Column<(typeof report.rows)[number]>[] = [
+    ...report.columns.map((col) => ({
+      key: col.key,
+      header: col.header,
+      className: col.className,
+      render: (row: (typeof report.rows)[number]) => row[col.key] ?? "—",
+    })),
+    {
+      key: "href",
+      header: "",
+      className: "w-32 max-w-none text-right",
+      render: (row) =>
+        row.href ? (
+          <Button asChild size="sm" variant="outline" className="rounded-xl">
+            <Link href={row.href} onClick={(e) => e.stopPropagation()}>
+              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+              Görüntüle
+            </Link>
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+  ];
 
   return (
     <div className="grid gap-6 xl:grid-cols-[19.5rem_minmax(0,1fr)]">
@@ -217,8 +239,16 @@ export function ReportsWorkspace({ data }: { data: ReportsData }) {
           <SearchTable
             rows={report.rows}
             columns={columns}
-            searchText={(row) => Object.values(row).join(" ")}
+            searchText={(row) =>
+              Object.entries(row)
+                .filter(([key]) => key !== "href")
+                .map(([, value]) => value)
+                .join(" ")
+            }
             empty={report.empty}
+            onRowClick={(row) => {
+              if (row.href) router.push(row.href);
+            }}
           />
         </CardContent>
       </Card>

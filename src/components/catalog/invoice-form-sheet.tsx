@@ -155,7 +155,9 @@ export function InvoiceFormSheet({
   editingLines,
   defaultDocumentType = "sales",
   defaultStatus,
+  defaultParty = "",
   lockDocumentType = false,
+  lockParty = false,
   onSaved,
 }: {
   open: boolean;
@@ -164,7 +166,9 @@ export function InvoiceFormSheet({
   editingLines?: InvoiceLine[];
   defaultDocumentType?: InvoiceDocumentType;
   defaultStatus?: string;
+  defaultParty?: string;
   lockDocumentType?: boolean;
+  lockParty?: boolean;
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(() => emptyForm(defaultDocumentType, ""));
@@ -193,11 +197,11 @@ export function InvoiceFormSheet({
         value: c.name,
         label: c.name,
         taxNo: c.taxNo,
-        taxOffice: "",
+        taxOffice: c.taxOffice,
         address: c.address,
-        city: "",
-        district: "",
-        phone: c.contact,
+        city: c.city,
+        district: c.district,
+        phone: c.mobile || c.contact,
         email: c.email,
       }));
     }
@@ -206,11 +210,11 @@ export function InvoiceFormSheet({
         value: c.name,
         label: `${c.name} (müşteri)`,
         taxNo: c.taxNo,
-        taxOffice: "",
+        taxOffice: c.taxOffice,
         address: c.address,
-        city: "",
-        district: "",
-        phone: c.contact,
+        city: c.city,
+        district: c.district,
+        phone: c.mobile || c.contact,
         email: c.email,
       })),
       ...suppliers.map((s) => ({
@@ -297,9 +301,22 @@ export function InvoiceFormSheet({
         next.status = defaultStatus;
         next.confirmed = isConfirmedWorkflow(defaultStatus);
       }
+      if (!editing && defaultParty.trim()) {
+        const hit = (
+          documentTypeMeta(type).partyKind === "supplier" ? s : c
+        ).find((row) => row.name === defaultParty);
+        next.party = defaultParty;
+        next.partyTaxNo = hit?.taxNo || next.partyTaxNo;
+        next.partyTaxOffice = hit?.taxOffice || next.partyTaxOffice;
+        next.partyAddress = hit?.address || next.partyAddress;
+        next.partyCity = hit?.city || next.partyCity;
+        next.partyDistrict = hit?.district || next.partyDistrict;
+        next.partyPhone = hit?.mobile || hit?.contact || next.partyPhone;
+        next.partyEmail = hit?.email || next.partyEmail;
+      }
       setForm(next);
     });
-  }, [open, editing, editingLines, defaultDocumentType, defaultStatus]);
+  }, [open, editing, editingLines, defaultDocumentType, defaultStatus, defaultParty]);
 
   function applyParty(name: string) {
     const hit = partyOptions.find((p) => p.value === name);
@@ -616,6 +633,7 @@ export function InvoiceFormSheet({
                   placeholder="Cari seçin veya arayın"
                   searchPlaceholder="Cari ara…"
                   emptyText="Kayıt yok"
+                  disabled={lockParty}
                   options={partyOptions.map((p) => ({
                     value: p.value,
                     label: p.label,

@@ -14,7 +14,7 @@ import { CanWrite } from "@/components/auth/can-write";
 import { CatalogRowActions } from "@/components/catalog/catalog-row-actions";
 import { CashAccountFormSheet } from "@/components/catalog/cash-account-form-sheet";
 import type { CashAccount } from "@/lib/cash-accounts";
-import { currencySymbol, cashLocation, formatIban } from "@/lib/cash-accounts";
+import { cashAccountBalance, currencySymbol, cashLocation, formatIban } from "@/lib/cash-accounts";
 import { deleteCashAccount, fetchCashAccounts } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
 import { formatNumber } from "@/lib/utils";
@@ -25,8 +25,8 @@ function tabFromQuery(value: string | null): TabId {
   return value === "banka" ? "banka" : "kasa";
 }
 
-function money(row: Pick<CashAccount, "openingBalance" | "currency">) {
-  return `${formatNumber(row.openingBalance)} ${currencySymbol(row.currency)}`;
+function money(row: Pick<CashAccount, "openingBalance" | "balance" | "currency">) {
+  return `${formatNumber(cashAccountBalance(row))} ${currencySymbol(row.currency)}`;
 }
 
 function CashPageContent() {
@@ -51,8 +51,8 @@ function CashPageContent() {
 
   const kasas = useMemo(() => rows.filter((row) => row.kind === "cash"), [rows]);
   const banks = useMemo(() => rows.filter((row) => row.kind === "bank"), [rows]);
-  const kasaTotal = kasas.reduce((sum, row) => sum + row.openingBalance, 0);
-  const bankTotal = banks.reduce((sum, row) => sum + row.openingBalance, 0);
+  const kasaTotal = kasas.reduce((sum, row) => sum + cashAccountBalance(row), 0);
+  const bankTotal = banks.reduce((sum, row) => sum + cashAccountBalance(row), 0);
 
   function setTab(next: string) {
     const value = tabFromQuery(next);
@@ -102,7 +102,7 @@ function CashPageContent() {
     { key: "branch", header: "Şube", render: (r) => r.branch || "—" },
     { key: "accountNo", header: "Hesap no", render: (r) => r.accountNo || "—" },
     {
-      key: "openingBalance",
+      key: "balance",
       header: "Bakiye",
       className: "text-right",
       render: (r) => (

@@ -223,13 +223,38 @@ model LabSample {
 }
 
 model Customer {
-  id      String  @id
-  name    String
-  contact String
-  address String
-  taxNo   String
-  email   String
-  active  Boolean @default(true)
+  id                   String  @id
+  name                 String
+  contact              String  @default("")
+  address              String  @default("")
+  taxNo                String  @default("")
+  email                String  @default("")
+  active               Boolean @default(true)
+  invoiceName          String  @default("")
+  accountList          String  @default("Müşteri")
+  currency             String  @default("TL")
+  accountCode          String  @default("")
+  onlineTransactions   Boolean @default(true)
+  notes                String  @default("")
+  iban                 String  @default("")
+  country              String  @default("Türkiye")
+  city                 String  @default("")
+  district             String  @default("")
+  mobile               String  @default("")
+  landline             String  @default("")
+  accountKind          String  @default("Gerçek kişi / Şahıs Firması")
+  taxOffice            String  @default("")
+  nationalId           String  @default("")
+  openingBalance       Decimal @default(0) @db.Decimal(18, 4)
+  openingBalanceType   String  @default("Borçlu")
+  paymentTermDays      Int     @default(0)
+  creditLimit          Decimal @default(0) @db.Decimal(18, 4)
+  salesPriceList       String  @default("1. Satış Fiyatı")
+  branch               String  @default("Merkez Şube")
+  assignedPersonnel    String  @default("")
+  paymentTaxNo         String  @default("")
+  relatives            String  @default("[]")
+  guarantors           String  @default("[]")
 }
 
 model Supplier {
@@ -470,23 +495,29 @@ model BudgetRow {
 }
 
 model BudgetCashEntry {
-  id          String   @id
-  direction   String
-  party       String
-  category    String
-  amount      Decimal  @db.Decimal(18, 4)
-  date        String
-  dueDate     String   @default("")
-  description String   @default("")
-  invoiceNo   String   @default("")
-  documented  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  createdBy   String   @default("")
+  id            String   @id
+  direction     String
+  party         String
+  category      String
+  amount        Decimal  @db.Decimal(18, 4)
+  date          String
+  dueDate       String   @default("")
+  description   String   @default("")
+  invoiceNo     String   @default("")
+  cashAccountId String   @default("")
+  fileId        String   @default("")
+  fileName      String   @default("")
+  mimeType      String   @default("")
+  documented    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  createdBy     String   @default("")
 
   @@index([direction])
   @@index([date])
   @@index([dueDate])
   @@index([invoiceNo])
+  @@index([cashAccountId])
+  @@index([fileId])
 }
 
 model BudgetCategory {

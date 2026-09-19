@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, Plus, TrendingDown, TrendingUp } from "lucide-react";
+import { CalendarDays, Paperclip, Plus, TrendingDown, TrendingUp } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,10 +22,13 @@ import {
   deleteChequeNote,
   fetchBudgetCategories,
   fetchBudgetEntries,
+  fetchCashAccounts,
   fetchChequeNotes,
   fetchInvoices,
   fetchLedger,
 } from "@/lib/catalog-store";
+import type { CashAccount } from "@/lib/cash-accounts";
+import { cashAccountLabel } from "@/lib/cash-accounts";
 import { ifAllowed } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
@@ -87,20 +90,23 @@ function BudgetPageContent() {
   const [editingCheque, setEditingCheque] = useState<ChequeNote | null>(null);
   const [formDirection, setFormDirection] = useState<BudgetCashDirection>("gelir");
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
 
   const refresh = useCallback(async () => {
-    const [cash, inv, cheques, cats, yevmiye] = await Promise.all([
+    const [cash, inv, cheques, cats, yevmiye, accounts] = await Promise.all([
       fetchBudgetEntries(),
       ifAllowed(canRead("invoices"), () => fetchInvoices(), [] as Invoice[]),
       ifAllowed(canRead("invoices") || canRead("budget"), () => fetchChequeNotes(), [] as ChequeNote[]),
       fetchBudgetCategories().catch(() => [] as BudgetCategory[]),
       ifAllowed(canRead("ledger"), () => fetchLedger(), [] as LedgerEntry[]),
+      fetchCashAccounts().catch(() => [] as CashAccount[]),
     ]);
     setEntries(cash);
     setInvoices(inv);
     setChequeNotes(cheques);
     setCategories(cats);
     setLedger(yevmiye);
+    setCashAccounts(accounts);
   }, [canRead]);
 
   useEffect(() => {
@@ -178,6 +184,14 @@ function BudgetPageContent() {
       },
       { key: "category", header: "Çeşit", render: (r) => r.category },
       {
+        key: "cashAccountId",
+        header: "Hesap",
+        render: (r) => {
+          const account = cashAccounts.find((item) => item.id === r.cashAccountId);
+          return account ? cashAccountLabel(account) : "—";
+        },
+      },
+      {
         key: "amount",
         header: "Miktar",
         className: "text-right font-bold",
@@ -204,7 +218,21 @@ function BudgetPageContent() {
         key: "invoiceNo",
         header: "Belge no",
         className: "font-mono text-sm",
-        render: (r) => r.invoiceNo || "—",
+        render: (r) =>
+          r.fileId ? (
+            <a
+              href={`/api/budget-docs/${r.fileId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex max-w-52 items-center gap-1 font-sans text-sm font-medium text-indigo-600 underline-offset-2 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Paperclip className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{r.fileName || "Fiş"}</span>
+            </a>
+          ) : (
+            r.invoiceNo || "—"
+          ),
       },
       {
         key: "description",
@@ -320,7 +348,7 @@ function BudgetPageContent() {
                 rows={gelir}
                 columns={columnsFor("gelir")}
                 searchText={(r) =>
-                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
+                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${r.fileName} ${r.cashAccountId} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
                 }
                 onRowClick={(r) => {
                   if (r.href) router.push(r.href);
@@ -345,7 +373,7 @@ function BudgetPageContent() {
                 rows={gider}
                 columns={columnsFor("gider")}
                 searchText={(r) =>
-                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
+                  `${r.party} ${r.category} ${r.description} ${r.invoiceNo} ${r.fileName} ${r.cashAccountId} ${budgetDocumentLabel(r)} ${budgetListSourceLabel(r.source)}`
                 }
                 onRowClick={(r) => {
                   if (r.href) router.push(r.href);

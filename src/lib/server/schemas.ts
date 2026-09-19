@@ -470,18 +470,6 @@ export const sampleCompleteSchema = z.object({
   result: optionalText(500),
 });
 
-export const customerCreateSchema = z.object({
-  name: text(),
-  contact: optionalText().default(""),
-  address: optionalText(MAX_NOTE).default(""),
-  taxNo: optionalText(40).default(""),
-  email: optionalText(120).default(""),
-});
-
-export const customerUpdateSchema = customerCreateSchema.partial().extend({
-  active: z.boolean({ error: boolMsg }).optional(),
-});
-
 const supplierRelativeSchema = z.object({
   name: optionalText(120).default(""),
   phone: optionalText(40).default(""),
@@ -492,6 +480,48 @@ const supplierGuarantorSchema = z.object({
   nationalId: optionalText(20).default(""),
   address: optionalText(MAX_NOTE).default(""),
   phone: optionalText(40).default(""),
+});
+
+export const customerCreateSchema = z.object({
+  name: text(),
+  contact: optionalText().default(""),
+  address: optionalText(MAX_NOTE).default(""),
+  invoiceName: optionalText().default(""),
+  accountList: optionalText(80).default("Müşteri"),
+  currency: optionalText(10).default("TL"),
+  accountCode: optionalText(40).default(""),
+  onlineTransactions: z.boolean({ error: boolMsg }).optional().default(true),
+  notes: optionalText(2000).default(""),
+  iban: optionalText(200).default(""),
+  country: optionalText(80).default("Türkiye"),
+  city: optionalText(80).default(""),
+  district: optionalText(80).default(""),
+  mobile: optionalText(40).default(""),
+  email: optionalText(120).default(""),
+  landline: optionalText(40).default(""),
+  accountKind: optionalText(80).default("Gerçek kişi / Şahıs Firması"),
+  taxNo: optionalText(40).default(""),
+  taxOffice: optionalText(80).default(""),
+  nationalId: optionalText(20).default(""),
+  openingBalance: finiteNumber({ min: 0 }).optional().default(0),
+  openingBalanceType: optionalText(40).default("Borçlu"),
+  paymentTermDays: z
+    .number({ error: numberMsg })
+    .int("Tam sayı olmalıdır")
+    .min(0, "En az 0 olmalıdır")
+    .optional()
+    .default(0),
+  creditLimit: finiteNumber({ min: 0 }).optional().default(0),
+  salesPriceList: optionalText(80).default("1. Satış Fiyatı"),
+  branch: optionalText(80).default("Merkez Şube"),
+  assignedPersonnel: optionalText(120).default(""),
+  paymentTaxNo: optionalText(40).default(""),
+  relatives: z.array(supplierRelativeSchema).max(4).optional().default([]),
+  guarantors: z.array(supplierGuarantorSchema).max(2).optional().default([]),
+});
+
+export const customerUpdateSchema = customerCreateSchema.partial().extend({
+  active: z.boolean({ error: boolMsg }).optional(),
 });
 
 export const supplierCreateSchema = z.object({
@@ -771,6 +801,8 @@ export const budgetCashCreateSchema = z.object({
     .optional(),
   description: optionalText(MAX_NOTE).optional(),
   invoiceNo: optionalText(80).optional(),
+  cashAccountId: optionalText(80).optional(),
+  receiptMode: z.enum(["invoice", "file"]).optional(),
 });
 
 export const budgetCashUpdateSchema = budgetCashCreateSchema.partial();

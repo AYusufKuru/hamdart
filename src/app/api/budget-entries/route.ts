@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
-import { jsonCaught, jsonOk, parseBody, requireSession } from "@/lib/server/api-utils";
-import { createBudgetCashEntry, listBudgetCashEntries } from "@/lib/server/budget-cash";
+import { jsonCaught, jsonOk, requireSession } from "@/lib/server/api-utils";
+import {
+  createBudgetCashEntry,
+  listBudgetCashEntries,
+  parseBudgetCashRequest,
+} from "@/lib/server/budget-cash";
 import { budgetCashCreateSchema } from "@/lib/server/schemas";
 
 export async function GET(req: NextRequest) {
@@ -17,9 +21,12 @@ export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "budget:write");
   if (!auth.ok) return auth.response;
   try {
-    const parsed = await parseBody(req, budgetCashCreateSchema);
+    const parsed = await parseBudgetCashRequest(req, budgetCashCreateSchema);
     if (!parsed.ok) return parsed.response;
-    return jsonOk(await createBudgetCashEntry(parsed.data, auth.session.name), 201);
+    return jsonOk(
+      await createBudgetCashEntry(parsed.data, auth.session.name, parsed.file),
+      201
+    );
   } catch (e) {
     return jsonCaught(e, "Kasa hareketi kaydedilemedi");
   }

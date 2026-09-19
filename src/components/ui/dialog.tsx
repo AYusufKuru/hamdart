@@ -34,25 +34,25 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-1.5rem)] max-w-md max-h-[min(90dvh,40rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-3xl border bg-background shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "fixed left-1/2 top-1/2 z-50 flex w-[calc(100%-1.5rem)] max-w-md max-h-[min(90dvh,40rem)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-visible rounded-3xl border bg-background shadow-2xl duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}
       onPointerDownOutside={(e) => {
-        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
-          e.preventDefault();
-        }
+        const node = e.target instanceof Node ? e.target : null;
+        const el = node instanceof Element ? node : node?.parentElement;
+        if (el?.closest("[data-hamdart-select-panel]")) e.preventDefault();
         onPointerDownOutside?.(e);
       }}
       onFocusOutside={(e) => {
-        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
-          e.preventDefault();
-        }
+        const node = e.target instanceof Node ? e.target : null;
+        const el = node instanceof Element ? node : node?.parentElement;
+        if (el?.closest("[data-hamdart-select-panel]")) e.preventDefault();
         onFocusOutside?.(e);
       }}
       onInteractOutside={(e) => {
-        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
-          e.preventDefault();
-        }
+        const node = e.target instanceof Node ? e.target : null;
+        const el = node instanceof Element ? node : node?.parentElement;
+        if (el?.closest("[data-hamdart-select-panel]")) e.preventDefault();
         onInteractOutside?.(e);
       }}
       {...props}

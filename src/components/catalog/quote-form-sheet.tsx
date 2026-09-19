@@ -112,12 +112,16 @@ export function QuoteFormSheet({
   onOpenChange,
   editing,
   editingLines,
+  defaultParty = "",
+  lockParty = false,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing?: Invoice | null;
   editingLines?: InvoiceLine[];
+  defaultParty?: string;
+  lockParty?: boolean;
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(() => emptyForm(""));
@@ -131,7 +135,7 @@ export function QuoteFormSheet({
         label: c.name,
         taxNo: c.taxNo,
         address: c.address,
-        phone: c.contact,
+        phone: c.mobile || c.contact,
         email: c.email,
       })),
     [customers]
@@ -175,9 +179,17 @@ export function QuoteFormSheet({
           .join(" / ");
         next.preparedBy = next.preparedBy || settings.authorizedName;
       }
+      if (!editing && defaultParty.trim()) {
+        const hit = c.find((row) => row.name === defaultParty);
+        next.party = defaultParty;
+        next.partyTaxNo = hit?.taxNo || next.partyTaxNo;
+        next.partyAddress = hit?.address || next.partyAddress;
+        next.partyPhone = hit?.mobile || hit?.contact || next.partyPhone;
+        next.partyEmail = hit?.email || next.partyEmail;
+      }
       setForm(next);
     });
-  }, [open, editing, editingLines]);
+  }, [open, editing, editingLines, defaultParty]);
 
   function applyParty(name: string) {
     const hit = partyOptions.find((p) => p.value === name);
@@ -348,6 +360,7 @@ export function QuoteFormSheet({
                 placeholder="Müşteri seçin veya arayın"
                 searchPlaceholder="Müşteri ara…"
                 emptyText="Kayıt yok"
+                disabled={lockParty}
                 options={partyOptions.map((p) => ({
                   value: p.value,
                   label: p.label,

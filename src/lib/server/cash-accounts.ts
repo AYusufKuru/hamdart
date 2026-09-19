@@ -31,17 +31,19 @@ function toIso(value: unknown): string {
   return String(value ?? "");
 }
 
-function toAccount(row: CashAccountDbRow): CashAccount {
+function toAccount(row: CashAccountDbRow, movement = 0): CashAccount {
   const kind: CashAccountKind = row.kind === "bank" ? "bank" : "cash";
   const currencyRaw = String(row.currency ?? "TRY").toUpperCase();
   const currency: CashCurrency = isCashCurrency(currencyRaw) ? currencyRaw : "TRY";
+  const openingBalance = asNumber(row.openingBalance);
   return {
     id: String(row.id ?? ""),
     kind,
     name: String(row.name ?? "").trim(),
     locked: Boolean(row.locked),
     currency,
-    openingBalance: asNumber(row.openingBalance),
+    openingBalance,
+    balance: roundMoney(openingBalance + movement),
     bankName: String(row.bankName ?? "").trim(),
     iban: String(row.iban ?? "").trim(),
     branch: String(row.branch ?? "").trim(),
@@ -50,6 +52,29 @@ function toAccount(row: CashAccountDbRow): CashAccount {
     active: row.active !== false,
     createdAt: toIso(row.createdAt),
   };
+}
+
+async function movementByAccount(): Promise<Map<string, number>> {
+  const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
+    SELECT "cashAccountId",
+           SUM(CASE WHEN "direction" = 'gider' THEN -"amount" ELSE "amount" END) AS delta
+    FROM "BudgetCashEntry"
+    WHERE "cashAccountId" <> ''
+    GROUP BY "cashAccountId"
+  `;
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const id = String(row.cashAccountId ?? "").trim();
+    if (!id) continue;
+    map.set(id, asNumber(row.delta));
+  }
+  return map;
+}
+
+async function toAccountWithBalance(row: CashAccountDbRow): Promise<CashAccount> {
+  const id = String(row.id ?? "");
+  const movements = await movementByAccount();
+  return toAccount(row, movements.get(id) ?? 0);
 }
 
 function newBankId() {
@@ -101,11 +126,13 @@ async function ensureSystemCashRegisters() {
 
 export async function listCashAccounts(): Promise<CashAccount[]> {
   await ensureSystemCashRegisters();
-  const rows = await findAll();
-  return rows.map(toAccount).sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "cash" ? -1 : 1;
-    return a.name.localeCompare(b.name, "tr");
-  });
+  const [rows, movements] = await Promise.all([findAll(), movementByAccount()]);
+  return rows
+    .map((row) => toAccount(row, movements.get(String(row.id ?? "")) ?? 0))
+    .sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "cash" ? -1 : 1;
+      return a.name.localeCompare(b.name, "tr");
+    });
 }
 
 export type CashAccountWriteInput = {
@@ -157,7 +184,7 @@ export async function createBankAccount(
   `;
   const createdRow = await findById(id);
   if (!createdRow) throw new FieldError("Banka hesabı oluşturulamadı");
-  const created = toAccount(createdRow);
+  const created = await toAccountWithBalance(createdRow);
   await logAudit({
     actor: ctx.actor,
     action: "CREATE",
@@ -177,7 +204,7 @@ export async function updateCashAccount(
 ): Promise<CashAccount> {
   const beforeRow = await findById(id);
   if (!beforeRow) throw new FieldError("Kayıt bulunamadı");
-  const before = toAccount(beforeRow);
+  const before = await toAccountWithBalance(beforeRow);
 
   if (before.kind === "cash") {
     const openingBalance =
@@ -220,7 +247,7 @@ export async function updateCashAccount(
 
   const afterRow = await findById(id);
   if (!afterRow) throw new FieldError("Kayıt güncellenemedi");
-  const after = toAccount(afterRow);
+  const after = await toAccountWithBalance(afterRow);
   await logAudit({
     actor: ctx.actor,
     action: "UPDATE",
@@ -243,7 +270,7 @@ export async function deleteCashAccount(
 ): Promise<void> {
   const beforeRow = await findById(id);
   if (!beforeRow) throw new FieldError("Kayıt bulunamadı");
-  const before = toAccount(beforeRow);
+  const before = await toAccountWithBalance(beforeRow);
   if (before.locked || before.kind === "cash") {
     throw new ConflictError("Sistem kasaları silinemez");
   }

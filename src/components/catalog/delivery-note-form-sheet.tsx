@@ -183,6 +183,7 @@ export function DeliveryNoteFormSheet({
   editing,
   editingLines,
   prefill,
+  lockParty = false,
   onSaved,
 }: {
   open: boolean;
@@ -192,11 +193,16 @@ export function DeliveryNoteFormSheet({
   prefill?: {
     party?: string;
     partyAddress?: string;
+    partyTaxNo?: string;
+    partyCity?: string;
+    partyDistrict?: string;
+    kind?: "Satış" | "Alış";
     relatedOrderNo?: string;
     relatedOrderDate?: string;
     warehouse?: string;
     lines?: LineForm[];
   };
+  lockParty?: boolean;
   onSaved?: (note?: DeliveryNote) => void;
 }) {
   const [form, setForm] = useState(() => emptyForm(""));
@@ -357,19 +363,26 @@ export function DeliveryNoteFormSheet({
         defaultWarehouseName(
           warehouseRows,
           editing?.warehouse || prefill?.warehouse,
-          editing?.kind || "Satış"
+          editing?.kind || prefill?.kind || "Satış"
         )
       );
       if (!editing && prefill) {
+        const kind = prefill.kind || base.kind;
         setForm({
           ...base,
+          kind,
           party: prefill.party?.trim() || base.party,
           partyAddress: prefill.partyAddress?.trim() || base.partyAddress,
+          partyTaxNo: prefill.partyTaxNo?.trim() || base.partyTaxNo,
+          partyCity: prefill.partyCity?.trim() || base.partyCity,
+          partyDistrict: prefill.partyDistrict?.trim() || base.partyDistrict,
           relatedOrderNo: prefill.relatedOrderNo?.trim() || base.relatedOrderNo,
           relatedOrderDate: prefill.relatedOrderDate?.trim() || base.relatedOrderDate,
           warehouse: prefill.warehouse?.trim() || base.warehouse,
           dispatchAddress:
             prefill.warehouse?.trim() || base.dispatchAddress || base.warehouse,
+          shipMethod:
+            kind === "Alış" ? RECEIVE_METHODS[0] : SHIP_METHODS[0],
           lines:
             prefill.lines && prefill.lines.length > 0 ? prefill.lines : base.lines,
         });
@@ -380,7 +393,7 @@ export function DeliveryNoteFormSheet({
       .catch(() => {
         setReadyOrders([]);
       });
-  }, [open, editing, editingLines]);
+  }, [open, editing, editingLines, prefill?.party, prefill?.kind]);
 
   const readyOrderOptions = useMemo(() => {
     const current = form.relatedOrderNo.trim();
@@ -715,6 +728,7 @@ export function DeliveryNoteFormSheet({
               <FormField label="Tür" required>
                 <Select
                   value={form.kind}
+                  disabled={lockParty}
                   onValueChange={(kind) =>
                     setForm((f) => {
                       const warehouse = defaultWarehouseName(warehouses, undefined, kind);
@@ -862,6 +876,7 @@ export function DeliveryNoteFormSheet({
                 placeholder={inbound ? "Tedarikçi seçin veya arayın" : "Alıcı seçin veya arayın"}
                 searchPlaceholder="Cari ara…"
                 emptyText="Kayıt yok"
+                disabled={lockParty}
                 options={partyOptions.map((p) => ({
                   value: p.value,
                   label: p.label,

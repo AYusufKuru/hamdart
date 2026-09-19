@@ -33,11 +33,29 @@ interface SheetContentProps
 const SheetContent = React.forwardRef<
   React.ComponentRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
+>(({ side = "right", className, children, onPointerDownOutside, onFocusOutside, onInteractOutside, ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
     <SheetPrimitive.Content
       ref={ref}
+      onPointerDownOutside={(e) => {
+        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
+          e.preventDefault();
+        }
+        onPointerDownOutside?.(e);
+      }}
+      onFocusOutside={(e) => {
+        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
+          e.preventDefault();
+        }
+        onFocusOutside?.(e);
+      }}
+      onInteractOutside={(e) => {
+        if ((e.target as HTMLElement | null)?.closest("[data-hamdart-select-panel]")) {
+          e.preventDefault();
+        }
+        onInteractOutside?.(e);
+      }}
       className={cn(
         "fixed z-50 flex flex-col gap-0 bg-background shadow-2xl transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-300",
         side === "right" &&

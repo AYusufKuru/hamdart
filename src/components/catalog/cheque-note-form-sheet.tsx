@@ -69,11 +69,17 @@ export function ChequeNoteFormSheet({
   open,
   onOpenChange,
   editing,
+  defaultParty = "",
+  defaultDirection,
+  lockParty = false,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editing?: ChequeNote | null;
+  defaultParty?: string;
+  defaultDirection?: ChequeDirection;
+  lockParty?: boolean;
   onSaved?: () => void;
 }) {
   const [form, setForm] = useState(emptyForm());
@@ -84,7 +90,12 @@ export function ChequeNoteFormSheet({
 
   useEffect(() => {
     if (!open) return;
-    setForm(emptyForm(editing ?? null));
+    const next = emptyForm(editing ?? null);
+    if (!editing) {
+      if (defaultDirection) next.direction = defaultDirection;
+      if (defaultParty.trim()) next.party = defaultParty;
+    }
+    setForm(next);
     setStep(0);
     setSaving(false);
     void Promise.all([
@@ -94,7 +105,7 @@ export function ChequeNoteFormSheet({
       setCustomers(c);
       setSuppliers(s);
     });
-  }, [open, editing]);
+  }, [open, editing, defaultParty, defaultDirection]);
 
   const locked = Boolean(editing?.installments.some((row) => row.status !== "Bekliyor"));
   const partyOptions = useMemo(() => {
@@ -290,6 +301,7 @@ export function ChequeNoteFormSheet({
                   <FormField label="Yön" required>
                     <Select
                       value={form.direction}
+                      disabled={lockParty}
                       onValueChange={(direction) =>
                         setForm((f) => ({ ...f, direction: direction as ChequeDirection, party: "" }))
                       }
@@ -314,6 +326,7 @@ export function ChequeNoteFormSheet({
                     options={partyOptions}
                     placeholder={form.direction === "given" ? "Tedarikçi" : "Müşteri"}
                     allowCustom
+                    disabled={lockParty}
                   />
                 </FormField>
                 <div className="grid gap-3 sm:grid-cols-2">

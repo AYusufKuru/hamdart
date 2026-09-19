@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { Paperclip, TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,18 +25,22 @@ import type {
 import {
   createBudgetEntry,
   createChequeNote,
+  fetchCashAccounts,
   fetchCustomers,
   fetchInvoices,
   fetchPersonnel,
   fetchSuppliers,
   updateBudgetEntry,
 } from "@/lib/catalog-store";
+import type { CashAccount } from "@/lib/cash-accounts";
+import { cashAccountLabel } from "@/lib/cash-accounts";
 import {
   BUDGET_EXPENSE_CATEGORIES,
   BUDGET_INCOME_CATEGORIES,
   budgetDirectionLabel,
 } from "@/lib/budget-cash";
 import { chequeKindFromCategory, parseChequeMoney } from "@/lib/cheque-notes";
+import { normalizeInvoiceStatus } from "@/lib/invoice-docs";
 import { isPurchaseInvoice, isSalesInvoice } from "@/lib/reports";
 import { personnelDisplayName } from "@/lib/personnel";
 import { formatNumber, todayIso } from "@/lib/utils";
@@ -58,6 +62,7 @@ function emptyForm(row?: BudgetCashEntry | null) {
     dueDate: row?.dueDate ?? "",
     description: row?.description ?? "",
     invoiceNo: row?.invoiceNo ?? "",
+    cashAccountId: row?.cashAccountId ?? "",
     bankName: "",
     serialNo: "",
     installmentCount: "none",
@@ -91,11 +96,16 @@ export function BudgetCashFormSheet({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [docMode, setDocMode] = useState<"invoice" | "file">("invoice");
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const base = emptyForm(editing ?? null);
     setChequeStep(0);
+    setReceiptFile(null);
+    setDocMode(editing?.fileId ? "file" : "invoice");
     setForm({
       ...base,
       party: editing?.party || defaultParty || base.party,
@@ -105,11 +115,13 @@ export function BudgetCashFormSheet({
       fetchSuppliers().catch(() => [] as Supplier[]),
       fetchPersonnel().catch(() => [] as Personnel[]),
       fetchInvoices().catch(() => [] as Invoice[]),
-    ]).then(([c, s, p, i]) => {
+      fetchCashAccounts().catch(() => [] as CashAccount[]),
+    ]).then(([c, s, p, i, accounts]) => {
       setCustomers(c);
       setSuppliers(s);
       setPersonnel(p);
       setInvoices(i);
+      setCashAccounts(accounts.filter((row) => row.active));
     });
   }, [open, editing, direction, defaultParty]);
 
@@ -130,15 +142,40 @@ export function BudgetCashFormSheet({
     return [...new Set([...extra, ...base])].map((name) => ({ value: name, label: name }));
   }, [categories, direction, form.category]);
 
+  const accountOptions = useMemo(() => {
+    const kasas = cashAccounts.filter((row) => row.kind === "cash");
+    const banks = cashAccounts.filter((row) => row.kind === "bank");
+    const extra =
+      form.cashAccountId && !cashAccounts.some((row) => row.id === form.cashAccountId)
+        ? [{ value: form.cashAccountId, label: form.cashAccountId }]
+        : [];
+    return [
+      ...extra,
+      ...kasas.map((row) => ({
+        value: row.id,
+        label: cashAccountLabel(row),
+        keywords: `kasa ${row.name}`,
+      })),
+      ...banks.map((row) => ({
+        value: row.id,
+        label: cashAccountLabel(row),
+        keywords: `banka ${row.name} ${row.bankName} ${row.iban}`,
+      })),
+    ];
+  }, [cashAccounts, form.cashAccountId]);
+
   const invoiceOptions = useMemo(() => {
     const filtered = invoices.filter((row) => {
+      const status = normalizeInvoiceStatus(row.status);
+      if (status === "İptal Edildi" || status === "Reddedildi") return false;
       if (direction === "gider" ? !isPurchaseInvoice(row) : !isSalesInvoice(row)) return false;
       if (!form.party.trim()) return true;
       return sameParty(row.party, form.party);
     });
-    const extra = form.invoiceNo.trim()
-      ? [{ value: form.invoiceNo.trim(), label: form.invoiceNo.trim() }]
-      : [];
+    const extra =
+      form.invoiceNo.trim() && !filtered.some((row) => row.invoiceNo === form.invoiceNo.trim())
+        ? [{ value: form.invoiceNo.trim(), label: form.invoiceNo.trim() }]
+        : [];
     return [
       ...extra,
       ...filtered.map((row) => ({
@@ -148,6 +185,21 @@ export function BudgetCashFormSheet({
       })),
     ];
   }, [invoices, direction, form.invoiceNo, form.party]);
+
+  function applyInvoice(invoiceNo: string) {
+    const invoice = invoices.find((row) => row.invoiceNo === invoiceNo);
+    const remaining = invoice
+      ? Math.max(0, Number(invoice.amount || 0) - Number(invoice.paidAmount || 0))
+      : 0;
+    setForm((f) => ({
+      ...f,
+      invoiceNo,
+      party: lockParty ? f.party : invoice?.party || f.party,
+      amount: invoice
+        ? String(remaining > 0 ? remaining : invoice.amount)
+        : f.amount,
+    }));
+  }
 
   const chequeKind = editing ? null : chequeKindFromCategory(form.category);
   const chequeAmount = parseChequeMoney(form.amount);
@@ -172,6 +224,10 @@ export function BudgetCashFormSheet({
     }
     if (!form.category.trim()) {
       toast.error("Çeşit seçin");
+      return;
+    }
+    if (direction === "gelir" && !chequeKindFromCategory(form.category) && !form.cashAccountId) {
+      toast.error("Gelirin gideceği kasa veya banka hesabını seçin");
       return;
     }
     const chequeKindNow = editing ? null : chequeKindFromCategory(form.category);
@@ -224,16 +280,18 @@ export function BudgetCashFormSheet({
         });
         toast.success(`${chequeKindNow === "senet" ? "Senet" : "Çek"} kaydedildi`);
       } else {
-        const body = {
-          direction,
-          party: form.party.trim(),
-          category: form.category.trim(),
-          amount,
-          date: form.date,
-          dueDate: form.dueDate.trim(),
-          description: form.description.trim(),
-          invoiceNo: form.invoiceNo.trim(),
-        };
+        const body = new FormData();
+        body.set("direction", direction);
+        body.set("party", form.party.trim());
+        body.set("category", form.category.trim());
+        body.set("amount", String(amount));
+        body.set("date", form.date);
+        body.set("dueDate", form.dueDate.trim());
+        body.set("description", form.description.trim());
+        body.set("cashAccountId", form.cashAccountId);
+        body.set("receiptMode", docMode);
+        body.set("invoiceNo", docMode === "invoice" ? form.invoiceNo.trim() : "");
+        if (docMode === "file" && receiptFile) body.set("file", receiptFile);
         if (editing) {
           await updateBudgetEntry(editing.id, body);
           toast.success(`${budgetDirectionLabel(direction)} güncellendi`);
@@ -286,6 +344,28 @@ export function BudgetCashFormSheet({
                   placeholder="Çeşit"
                 />
               </FormField>
+              {chequeKind ? null : (
+                <FormField
+                  label={income ? "Hesap (nereye)" : "Hesap (nereden)"}
+                  required={income}
+                  hint={
+                    income
+                      ? "Tahsilat İstanbul / Kastamonu kasasına veya bir banka hesabına yazılır."
+                      : "Ödeme hangi kasa veya bankadan çıkacaksa onu seçin."
+                  }
+                >
+                  <SearchableSelect
+                    value={form.cashAccountId || undefined}
+                    onValueChange={(cashAccountId) =>
+                      setForm((f) => ({ ...f, cashAccountId }))
+                    }
+                    options={accountOptions}
+                    placeholder="Kasa veya banka seçin"
+                    searchPlaceholder="Kasa / banka ara…"
+                    emptyText="Kasa veya banka hesabı yok"
+                  />
+                </FormField>
+              )}
               <FormField label={chequeKind ? `${chequeKind === "senet" ? "Senet" : "Çek"} tutarı` : "Miktar"} required>
                 <Input
                   type="text"
@@ -318,16 +398,78 @@ export function BudgetCashFormSheet({
               <FormField
                 label="Fatura / fiş"
                 optional
-                hint="Zorunlu değil. Belge sonra işlendiğinde buradan bağlanır."
+                hint={
+                  income
+                    ? "Gelir faturalarından birini seçin veya fiş / fatura dosyası yükleyin."
+                    : "Alış faturalarından birini seçin veya fiş / fatura dosyası yükleyin."
+                }
               >
                 <div className="space-y-2">
-                  <SearchableSelect
-                    value={form.invoiceNo}
-                    onValueChange={(invoiceNo) => setForm((f) => ({ ...f, invoiceNo }))}
-                    options={invoiceOptions}
-                    placeholder="Fatura seçin veya no yazın"
-                    allowCustom
-                  />
+                  {chequeKind ? (
+                    <SearchableSelect
+                      value={form.invoiceNo}
+                      onValueChange={applyInvoice}
+                      options={invoiceOptions}
+                      placeholder={income ? "Gelir faturası seçin" : "Alış faturası seçin"}
+                      searchPlaceholder="Fatura ara…"
+                      emptyText={income ? "Gelir faturası yok" : "Alış faturası yok"}
+                    />
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant={docMode === "invoice" ? "default" : "outline"}
+                          onClick={() => {
+                            setDocMode("invoice");
+                            setReceiptFile(null);
+                          }}
+                        >
+                          Mevcut fatura
+                        </Button>
+                        <Button
+                          type="button"
+                          variant={docMode === "file" ? "default" : "outline"}
+                          onClick={() => {
+                            setDocMode("file");
+                            setForm((f) => ({ ...f, invoiceNo: "" }));
+                          }}
+                        >
+                          Dosya yükle
+                        </Button>
+                      </div>
+                      {docMode === "invoice" ? (
+                        <SearchableSelect
+                          value={form.invoiceNo}
+                          onValueChange={applyInvoice}
+                          options={invoiceOptions}
+                          placeholder={income ? "Gelir faturası seçin" : "Alış faturası seçin"}
+                          searchPlaceholder="Fatura ara…"
+                          emptyText={income ? "Gelir faturası yok" : "Alış faturası yok"}
+                        />
+                      ) : (
+                        <div className="space-y-2">
+                          {editing?.fileId && !receiptFile ? (
+                            <a
+                              href={`/api/budget-docs/${editing.fileId}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex max-w-full items-center gap-1 text-sm font-medium text-indigo-600 underline-offset-2 hover:underline"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{editing.fileName || "Yüklü fiş"}</span>
+                            </a>
+                          ) : null}
+                          <Input
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+                            onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
+                          />
+                          <p className="text-xs text-muted-foreground">PDF, PNG veya JPEG. En fazla 5 MB.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
                   {form.invoiceNo ? (
                     <Button
                       type="button"

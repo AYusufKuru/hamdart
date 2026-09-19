@@ -57,6 +57,16 @@ export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
   return handleResponse<T>(res);
 }
 
+export async function apiPatchForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(path, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { ...csrfHeader() },
+    body: form,
+  });
+  return handleResponse<T>(res);
+}
+
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "POST",

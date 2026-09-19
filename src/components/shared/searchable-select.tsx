@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -55,16 +54,10 @@ export function SearchableSelect({
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [coords, setCoords] = useState<{
-    top: number;
-    left: number;
-    width: number;
-    maxHeight: number;
-  } | null>(null);
+  const [dropUp, setDropUp] = useState(false);
 
   const uniqueOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -89,59 +82,37 @@ export function SearchableSelect({
       (o) => o.value === customQuery || o.label === customQuery
     );
 
-  function updatePosition() {
-    const el = rootRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const gap = 4;
-    const spaceBelow = window.innerHeight - rect.bottom - 8;
-    const spaceAbove = rect.top - 8;
-    const maxHeight = Math.min(360, Math.max(spaceBelow, spaceAbove, 180));
-    const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
-    setCoords({
-      top: openUp ? Math.max(8, rect.top - maxHeight - gap) : rect.bottom + gap,
-      left: rect.left,
-      width: Math.max(rect.width, 240),
-      maxHeight,
-    });
-  }
-
   function close() {
     setOpen(false);
     setQuery("");
     setActiveIndex(0);
   }
 
-  useEffect(() => {
-    if (!open) return;
-    updatePosition();
-    function onPointer(e: MouseEvent) {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t) || panelRef.current?.contains(t)) return;
-      close();
-    }
-    function onReposition() {
-      updatePosition();
-    }
-    document.addEventListener("mousedown", onPointer);
-    window.addEventListener("resize", onReposition);
-    window.addEventListener("scroll", onReposition, true);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      window.removeEventListener("resize", onReposition);
-      window.removeEventListener("scroll", onReposition, true);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [query]);
-
   function pick(next: string) {
     onValueChange(next);
     close();
     inputRef.current?.blur();
   }
+
+  useLayoutEffect(() => {
+    if (!open || !rootRef.current) return;
+    const rect = rootRef.current.getBoundingClientRect();
+    setDropUp(window.innerHeight - rect.bottom < 240 && rect.top > 240);
+  }, [open, filtered.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(e: MouseEvent) {
+      if (rootRef.current?.contains(e.target as Node)) return;
+      close();
+    }
+    document.addEventListener("mousedown", onPointer);
+    return () => document.removeEventListener("mousedown", onPointer);
+  }, [open]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
 
   function onInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Escape") {
@@ -227,71 +198,62 @@ export function SearchableSelect({
           <ChevronDown className="h-4 w-4 opacity-50" />
         </button>
       </div>
-      {open && coords
-        ? createPortal(
-            <div
-              ref={panelRef}
-              id={listId}
-              role="listbox"
-              data-hamdart-select-panel=""
-              className="fixed z-100 overflow-y-auto rounded-2xl border bg-white p-1 text-foreground shadow-xl"
-              style={{
-                top: coords.top,
-                left: coords.left,
-                width: coords.width,
-                maxHeight: coords.maxHeight,
-              }}
-            >
-              {filtered.length === 0 && !showCustom ? (
-                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                  {emptyText}
-                </p>
-              ) : (
-                <>
-                  {showCustom ? (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={value === customQuery}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => pick(customQuery)}
-                      className="relative flex w-full cursor-pointer items-center rounded-lg py-2 px-3 text-left text-sm hover:bg-muted"
-                    >
-                      <span className="line-clamp-2">
-                        “{customQuery}” olarak kullan
-                      </span>
-                    </button>
-                  ) : null}
-                  {filtered.map((option, index) => {
-                    const isSelected = option.value === value;
-                    const isActive = index === activeIndex;
-                    return (
-                      <button
-                        key={`${option.value}-${index}`}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected}
-                        onMouseEnter={() => setActiveIndex(index)}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => pick(option.value)}
-                        className={cn(
-                          "relative flex w-full cursor-pointer items-center rounded-lg py-2 pl-8 pr-2 text-left text-sm",
-                          isActive && "bg-muted"
-                        )}
-                      >
-                        {isSelected ? (
-                          <Check className="absolute left-2 h-4 w-4" />
-                        ) : null}
-                        <span className="line-clamp-2">{option.label}</span>
-                      </button>
-                    );
-                  })}
-                </>
-              )}
-            </div>,
-            document.body
-          )
-        : null}
+      {open ? (
+        <div
+          id={listId}
+          role="listbox"
+          data-hamdart-select-panel=""
+          className={cn(
+            "absolute z-50 max-h-60 w-full overflow-y-auto rounded-2xl border bg-white p-1 text-foreground shadow-xl",
+            dropUp ? "bottom-[calc(100%+4px)]" : "top-[calc(100%+4px)]"
+          )}
+        >
+          {filtered.length === 0 && !showCustom ? (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              {emptyText}
+            </p>
+          ) : (
+            <>
+              {showCustom ? (
+                <div
+                  role="option"
+                  aria-selected={value === customQuery}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(customQuery);
+                  }}
+                  className="flex cursor-pointer items-center rounded-lg px-3 py-2 text-left text-sm hover:bg-muted"
+                >
+                  <span className="line-clamp-2">“{customQuery}” olarak kullan</span>
+                </div>
+              ) : null}
+              {filtered.map((option, index) => {
+                const isSelected = option.value === value;
+                const isActive = index === activeIndex;
+                return (
+                  <div
+                    key={`${option.value}-${index}`}
+                    role="option"
+                    aria-selected={isSelected}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pick(option.value);
+                    }}
+                    className={cn(
+                      "relative flex cursor-pointer items-center rounded-lg py-2 pl-8 pr-2 text-left text-sm hover:bg-muted",
+                      isActive && "bg-muted"
+                    )}
+                  >
+                    {isSelected ? <Check className="absolute left-2 h-4 w-4" /> : null}
+                    <span className="line-clamp-2">{option.label}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

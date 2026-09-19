@@ -28,7 +28,7 @@ import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/server/audit";
 import { plusYearsIso, todayIso, parseLocalDate, selectItemValues, plusDaysIso } from "@/lib/utils";
 import { personnelDisplayName, matchesLabPersonnelDepartment, type LabPersonRole } from "@/lib/personnel";
-import { toSupplier, toInvoice, toInvoiceLine, toDeliveryNote } from "@/lib/server/catalog-write";
+import { toCustomer, toSupplier, toInvoice, toInvoiceLine, toDeliveryNote } from "@/lib/server/catalog-write";
 import type { CreateRecipeInput } from "@/lib/recipe-store";
 import type { CreateRawMaterialInput } from "@/lib/raw-material-store";
 import type { CreateStockInput } from "@/lib/stock-store";
@@ -2847,15 +2847,7 @@ export async function dbCompleteLabSample(
 
 export async function dbGetCustomers(): Promise<Customer[]> {
   const rows = await prisma.customer.findMany({ orderBy: { name: "asc" } });
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    contact: row.contact,
-    address: row.address,
-    taxNo: row.taxNo,
-    email: row.email,
-    active: row.active,
-  }));
+  return rows.map(toCustomer);
 }
 
 export async function dbGetSuppliers(): Promise<Supplier[]> {

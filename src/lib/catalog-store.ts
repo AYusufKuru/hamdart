@@ -19,7 +19,7 @@ import type {
 import type { Warehouse } from "@/data/warehouses";
 import type { CashAccount } from "@/lib/cash-accounts";
 import type { Role } from "@/lib/auth/permissions";
-import { apiDelete, apiGet, apiPatch, apiPost, apiPostForm, apiPut } from "@/lib/api-client";
+import { apiDelete, apiGet, apiPatch, apiPatchForm, apiPost, apiPostForm, apiPut } from "@/lib/api-client";
 
 export async function fetchCustomers(): Promise<Customer[]> {
   return apiGet<Customer[]>("/api/catalog/customers");
@@ -125,11 +125,13 @@ export async function fetchBudgetEntries(): Promise<BudgetCashEntry[]> {
   return apiGet<BudgetCashEntry[]>("/api/budget-entries");
 }
 
-export async function createBudgetEntry(body: unknown): Promise<BudgetCashEntry> {
+export async function createBudgetEntry(body: unknown | FormData): Promise<BudgetCashEntry> {
+  if (body instanceof FormData) return apiPostForm<BudgetCashEntry>("/api/budget-entries", body);
   return apiPost<BudgetCashEntry>("/api/budget-entries", body);
 }
 
-export async function updateBudgetEntry(id: string, body: unknown): Promise<BudgetCashEntry> {
+export async function updateBudgetEntry(id: string, body: unknown | FormData): Promise<BudgetCashEntry> {
+  if (body instanceof FormData) return apiPatchForm<BudgetCashEntry>(`/api/budget-entries/${id}`, body);
   return apiPatch<BudgetCashEntry>(`/api/budget-entries/${id}`, body);
 }
 

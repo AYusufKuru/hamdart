@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
-import { jsonCaught, jsonOk, parseBody, requireSession } from "@/lib/server/api-utils";
-import { deleteBudgetCashEntry, updateBudgetCashEntry } from "@/lib/server/budget-cash";
+import { jsonCaught, jsonOk, requireSession } from "@/lib/server/api-utils";
+import {
+  deleteBudgetCashEntry,
+  parseBudgetCashRequest,
+  updateBudgetCashEntry,
+} from "@/lib/server/budget-cash";
 import { budgetCashUpdateSchema } from "@/lib/server/schemas";
 
 export async function PATCH(
@@ -11,9 +15,9 @@ export async function PATCH(
   if (!auth.ok) return auth.response;
   const { id } = await params;
   try {
-    const parsed = await parseBody(req, budgetCashUpdateSchema);
+    const parsed = await parseBudgetCashRequest(req, budgetCashUpdateSchema);
     if (!parsed.ok) return parsed.response;
-    return jsonOk(await updateBudgetCashEntry(id, parsed.data));
+    return jsonOk(await updateBudgetCashEntry(id, parsed.data, parsed.file));
   } catch (e) {
     return jsonCaught(e, "Kasa hareketi güncellenemedi");
   }

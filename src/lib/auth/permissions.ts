@@ -411,6 +411,9 @@ export function getApiPermission(
   if (pathname.startsWith("/api/invoice-docs")) {
     return { kind: "require", permission: "invoices:read" };
   }
+  if (pathname.startsWith("/api/budget-docs")) {
+    return { kind: "require", permission: "budget:read" };
+  }
   if (pathname.startsWith("/api/document-settings")) {
     return { kind: "require", permission: `invoices:${suffix}` };
   }

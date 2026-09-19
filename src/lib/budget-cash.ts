@@ -32,8 +32,10 @@ export const BUDGET_EXPENSE_CATEGORIES = [
   "Diğer gider",
 ] as const;
 
-export function isBudgetDocumented(row: Pick<BudgetCashEntry, "documented" | "invoiceNo">) {
-  return row.documented || Boolean(row.invoiceNo.trim());
+export function isBudgetDocumented(
+  row: Pick<BudgetCashEntry, "documented" | "invoiceNo"> & { fileId?: string }
+) {
+  return row.documented || Boolean(row.invoiceNo.trim()) || Boolean(row.fileId?.trim());
 }
 
 export function isBudgetRealized(row: Pick<BudgetCashEntry, "date">, today = todayIso()) {
@@ -44,7 +46,9 @@ export function isUndocumentedCash(row: BudgetCashEntry, today = todayIso()) {
   return !isBudgetDocumented(row) && isBudgetRealized(row, today);
 }
 
-export function budgetDocumentLabel(row: Pick<BudgetCashEntry, "documented" | "invoiceNo" | "date">) {
+export function budgetDocumentLabel(
+  row: Pick<BudgetCashEntry, "documented" | "invoiceNo" | "date"> & { fileId?: string }
+) {
   if (isBudgetDocumented(row)) return "Belgelendi";
   if (!isBudgetRealized(row)) return "Planlandı";
   return "Belgesiz";
@@ -129,6 +133,10 @@ function invoiceBudgetRows(invoices: Invoice[]): BudgetListRow[] {
       dueDate: row.dueDate,
       description: row.notes,
       invoiceNo: row.invoiceNo,
+      cashAccountId: "",
+      fileId: "",
+      fileName: "",
+      mimeType: "",
       documented: true,
       createdAt: row.issueDate,
       createdBy: row.preparedBy || "",
@@ -158,6 +166,10 @@ function ledgerBudgetRows(ledger: LedgerEntry[]): BudgetListRow[] {
       dueDate: "",
       description: row.description,
       invoiceNo: row.documentNo,
+      cashAccountId: "",
+      fileId: "",
+      fileName: "",
+      mimeType: "",
       documented: true,
       createdAt: row.date,
       createdBy: "",
@@ -182,6 +194,10 @@ function chequeBudgetRows(chequeNotes: ChequeNote[]): BudgetListRow[] {
     dueDate: note.installments[0]?.dueDate ?? "",
     description: note.notes,
     invoiceNo: note.relatedInvoiceNo,
+    cashAccountId: "",
+    fileId: "",
+    fileName: "",
+    mimeType: "",
     documented: Boolean(note.relatedInvoiceNo.trim()),
     createdAt: note.createdAt,
     createdBy: note.createdBy,

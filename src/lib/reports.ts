@@ -131,7 +131,44 @@ export const REPORT_GROUPS: ReportGroup[] = [
 ];
 
 export type ReportColumn = { key: string; header: string; className?: string };
-export type ReportTableRow = { id: string } & Record<string, string | number>;
+export type ReportTableRow = { id: string; href?: string } & Record<string, string | number>;
+
+function samePartyName(a: string, b: string) {
+  return a.trim().toLocaleLowerCase("tr") === b.trim().toLocaleLowerCase("tr");
+}
+
+function invoiceHref(id: string) {
+  return `/invoices/${encodeURIComponent(id)}`;
+}
+
+function orderHref(id: string) {
+  return `/orders/${encodeURIComponent(id)}`;
+}
+
+function invoiceHrefByNo(data: ReportsData, invoiceNo?: string) {
+  const no = invoiceNo?.trim();
+  if (!no || no === "—") return "";
+  const hit = data.invoices.find((row) => row.invoiceNo === no);
+  return hit ? invoiceHref(hit.id) : "";
+}
+
+export function partyHref(data: ReportsData, name?: string) {
+  const n = name?.trim();
+  if (!n || n === "—") return "";
+  const customer = data.customers.find(
+    (row) => samePartyName(row.name, n) || samePartyName(row.invoiceName, n)
+  );
+  if (customer) return `/customers/${encodeURIComponent(customer.id)}`;
+  const supplier = data.suppliers.find(
+    (row) => samePartyName(row.name, n) || samePartyName(row.invoiceName, n)
+  );
+  if (supplier) return `/suppliers/${encodeURIComponent(supplier.id)}`;
+  return "";
+}
+
+function firstHref(...hrefs: (string | undefined)[]) {
+  return hrefs.find((href) => href && href.length > 0) || "";
+}
 
 export type ReportsData = {
   invoices: Invoice[];
@@ -185,7 +222,7 @@ function invoiceByNo(data: ReportsData) {
   return new Map(data.invoices.map((row) => [row.invoiceNo, row]));
 }
 
-function salesByParty(invoices: Invoice[]) {
+function salesByParty(invoices: Invoice[], data: ReportsData) {
   const map = new Map<string, { amount: number; count: number }>();
   for (const row of invoices) {
     if (!isSalesInvoice(row) || isVoid(row)) continue;
@@ -201,10 +238,11 @@ function salesByParty(invoices: Invoice[]) {
       party,
       count: v.count,
       amount: money(v.amount),
+      href: partyHref(data, party),
     }));
 }
 
-function partyBalance(invoices: Invoice[], kind: "sales" | "purchase") {
+function partyBalance(invoices: Invoice[], kind: "sales" | "purchase", data: ReportsData) {
   const map = new Map<string, { amount: number; paid: number; open: number; count: number }>();
   for (const row of invoices) {
     if (isVoid(row)) continue;
@@ -228,6 +266,7 @@ function partyBalance(invoices: Invoice[], kind: "sales" | "purchase") {
       amount: money(v.amount),
       paid: money(v.paid),
       open: money(v.open),
+      href: partyHref(data, party),
     }));
 }
 
@@ -242,6 +281,7 @@ function invoiceRows(rows: Invoice[]) {
     paid: money(row.paidAmount || 0),
     open: money(remaining(row)),
     status: normalizeInvoiceStatus(row.status),
+    href: invoiceHref(row.id),
   }));
 }
 
@@ -279,7 +319,7 @@ export function buildReport(
         { key: "count", header: "Fatura", className: "text-right" },
         { key: "amount", header: "Satış tutarı", className: "text-right font-bold" },
       ],
-      rows: salesByParty(invoices),
+      rows: salesByParty(invoices, data),
       empty: "Satış faturası yok",
     };
   }
@@ -301,6 +341,7 @@ export function buildReport(
           contact: c.contact || "—",
           taxNo: c.taxNo || "—",
           email: c.email || "—",
+          href: `/customers/${encodeURIComponent(c.id)}`,
         })),
       empty: active ? "Müşteri yok" : "Pasif müşteri yok",
     };
@@ -323,6 +364,7 @@ export function buildReport(
           contact: s.contact || s.mobile || "—",
           taxNo: s.taxNo || "—",
           city: s.city || "—",
+          href: `/suppliers/${encodeURIComponent(s.id)}`,
         })),
       empty: active ? "Tedarikçi yok" : "Pasif tedarikçi yok",
     };
@@ -345,6 +387,7 @@ export function buildReport(
           name: c.name,
           contact: c.contact || "—",
           taxNo: c.taxNo || "—",
+          href: `/customers/${encodeURIComponent(c.id)}`,
         })),
       empty: "Satış yapılmayan aktif müşteri yok",
     };
@@ -359,7 +402,7 @@ export function buildReport(
         { key: "paid", header: "Ödenen", className: "text-right" },
         { key: "open", header: "Borç", className: "text-right font-bold" },
       ],
-      rows: partyBalance(invoices, "purchase"),
+      rows: partyBalance(invoices, "purchase", data),
       empty: "Açık alış borcu yok",
     };
   }
@@ -404,7 +447,7 @@ export function buildReport(
         { key: "paid", header: "Tahsil", className: "text-right" },
         { key: "open", header: "Alacak", className: "text-right font-bold" },
       ],
-      rows: partyBalance(invoices, "sales"),
+      rows: partyBalance(invoices, "sales", data),
       empty: "Açık satış alacağı yok",
     };
   }
@@ -464,6 +507,7 @@ export function buildReport(
           party,
           amount: money(v.amount),
           paid: money(v.paid),
+          href: partyHref(data, party),
         })),
       empty: "Hiç ödeme yapmamış müşteri yok",
     };
@@ -492,6 +536,7 @@ export function buildReport(
         id: method,
         method,
         amount: money(amount),
+        href: "/budget",
       })),
       empty: "Tahsilat hareketi yok",
     };
@@ -521,6 +566,7 @@ export function buildReport(
           id: party || String(i),
           party,
           amount: money(amount),
+          href: firstHref(partyHref(data, party), "/budget"),
         })),
       empty: "Cari tahsilatı yok",
     };
@@ -540,6 +586,7 @@ export function buildReport(
         method: event.method || "—",
         amount: money(event.amount),
         note: event.note || "—",
+        href: firstHref(invoiceHref(inv.id), partyHref(data, inv.party)),
       });
     }
     for (const entry of data.ledger) {
@@ -551,6 +598,7 @@ export function buildReport(
         method: entry.status || "—",
         amount: money(entry.amount),
         note: entry.description || "—",
+        href: firstHref(partyHref(data, entry.category), "/budget"),
       });
     }
     for (const entry of data.budgetCashEntries ?? []) {
@@ -566,6 +614,11 @@ export function buildReport(
             : "Kasa / planlandı",
         amount: money(entry.amount),
         note: entry.description || entry.category || "—",
+        href: firstHref(
+          invoiceHrefByNo(data, entry.invoiceNo),
+          partyHref(data, entry.party),
+          "/budget"
+        ),
       });
     }
     return {
@@ -606,6 +659,11 @@ export function buildReport(
         amount: money(row.amount),
         status: row.status,
         invoiceNo: row.invoiceNo || "—",
+        href: firstHref(
+          invoiceHrefByNo(data, row.invoiceNo),
+          partyHref(data, row.party),
+          "/invoices?filter=cheque"
+        ),
       })),
       empty: id === "cheque-notes-due" ? "Vadesi gelen çek / senet yok" : "Çek / senet kaydı yok",
     };
@@ -645,6 +703,11 @@ export function buildReport(
         status: budgetDocumentLabel(row),
         invoiceNo: row.invoiceNo || "—",
         note: row.description || "—",
+        href: firstHref(
+          invoiceHrefByNo(data, row.invoiceNo),
+          partyHref(data, row.party),
+          "/budget"
+        ),
       })),
       empty:
         id === "budget-undocumented-payments"
@@ -693,6 +756,7 @@ export function buildReport(
         date: formatDate(row.orderDate),
         status: row.status,
         value: money(row.value),
+        href: firstHref(orderHref(row.id), partyHref(data, row.customer)),
       })),
       empty: "Satış siparişi yok",
     };
@@ -714,6 +778,7 @@ export function buildReport(
         date: formatDate(row.issueDate),
         amount: money(row.amount),
         status: row.status,
+        href: firstHref(invoiceHref(row.id), partyHref(data, row.party)),
       })),
       empty: "Fiyat teklifi yok",
     };
@@ -737,6 +802,11 @@ export function buildReport(
         date: formatDate(row.shipDate),
         warehouse: row.warehouse,
         status: row.status,
+        href: firstHref(
+          invoiceHrefByNo(data, row.relatedInvoiceNo),
+          partyHref(data, row.party),
+          "/delivery-notes"
+        ),
       })),
       empty: "İrsaliye yok",
     };
@@ -768,6 +838,7 @@ export function buildReport(
           date: formatDate(row.issueDate),
           amount: money(row.amount),
           withholding: money(row.withholding),
+          href: invoiceHref(row.id),
         })),
       empty: "Tevkifatlı satış yok",
     };
@@ -788,6 +859,7 @@ export function buildReport(
         date: inv ? formatDate(inv.issueDate) : "—",
         description: line.description,
         qty: line.quantityLabel || `${line.quantity} ${line.unit}`,
+        href: firstHref(inv ? invoiceHref(inv.id) : "", partyHref(data, inv?.party)),
       });
     }
     const noteMap = new Map(data.deliveryNotes.map((row) => [row.noteNo, row]));
@@ -802,6 +874,11 @@ export function buildReport(
         date: note ? formatDate(note.shipDate) : "—",
         description: line.description,
         qty: line.quantityLabel,
+        href: firstHref(
+          invoiceHrefByNo(data, note?.relatedInvoiceNo),
+          partyHref(data, note?.party),
+          "/delivery-notes"
+        ),
       });
     }
   }

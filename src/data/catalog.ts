@@ -54,6 +54,31 @@ export interface Customer {
   taxNo: string;
   email: string;
   active: boolean;
+  invoiceName: string;
+  accountList: string;
+  currency: string;
+  accountCode: string;
+  onlineTransactions: boolean;
+  notes: string;
+  iban: string;
+  country: string;
+  city: string;
+  district: string;
+  mobile: string;
+  landline: string;
+  accountKind: string;
+  taxOffice: string;
+  nationalId: string;
+  openingBalance: number;
+  openingBalanceType: string;
+  paymentTermDays: number;
+  creditLimit: number;
+  salesPriceList: string;
+  branch: string;
+  assignedPersonnel: string;
+  paymentTaxNo: string;
+  relatives: string;
+  guarantors: string;
 }
 
 export interface FinishedProduct {
@@ -281,6 +306,10 @@ export interface BudgetCashEntry {
   dueDate: string;
   description: string;
   invoiceNo: string;
+  cashAccountId: string;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
   documented: boolean;
   createdAt: string;
   createdBy: string;

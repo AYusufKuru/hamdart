@@ -88,6 +88,8 @@ interface RawMaterialOrderFormSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   supplierHints?: string[];
+  defaultSupplier?: string;
+  lockSupplier?: boolean;
   onCreated?: (order: RawMaterialOrder) => void;
 }
 
@@ -95,6 +97,8 @@ export function RawMaterialOrderFormSheet({
   open,
   onOpenChange,
   supplierHints = [],
+  defaultSupplier = "",
+  lockSupplier = false,
   onCreated,
 }: RawMaterialOrderFormSheetProps) {
   const [form, setForm] = useState(emptyForm);
@@ -129,7 +133,10 @@ export function RawMaterialOrderFormSheet({
     if (!open) return;
     setSaving(false);
     setLoading(true);
-    setForm(emptyForm());
+    setForm({
+      ...emptyForm(),
+      supplier: defaultSupplier.trim(),
+    });
     setMaterialQuery("");
     setMaterialPickerOpen(false);
 
@@ -149,7 +156,7 @@ export function RawMaterialOrderFormSheet({
         setLoading(false);
       }
     })();
-  }, [open, supplierHints]);
+  }, [open, supplierHints, defaultSupplier]);
 
   const previewTotal = useMemo(() => {
     const qty = parseFloat(form.quantity);
@@ -344,6 +351,7 @@ export function RawMaterialOrderFormSheet({
                       list="rmo-supplier-options"
                       placeholder="Tedarikçi adı yazın veya listeden seçin"
                       value={form.supplier}
+                      disabled={lockSupplier}
                       onChange={(e) =>
                         setForm((f) => ({ ...f, supplier: e.target.value }))
                       }

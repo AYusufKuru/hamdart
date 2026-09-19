@@ -1,16 +1,9 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Pencil } from "lucide-react";
-import { PageHeader } from "@/components/shared/page-header";
-import { Button } from "@/components/ui/button";
-import { BudgetCashFormSheet } from "@/components/catalog/budget-cash-form-sheet";
-import { CustomerFormSheet } from "@/components/catalog/customer-form-sheet";
-import { PartyAccountPanel } from "@/components/catalog/party-account-panel";
+import { PartyDetailWorkspace } from "@/components/catalog/party-detail-workspace";
 import type {
-  BudgetCashDirection,
   BudgetCashEntry,
   BudgetCategory,
   ChequeNote,
@@ -39,7 +32,7 @@ export default function CustomerDetailPage({
 }) {
   const { id: rawId } = use(params);
   const id = decodeURIComponent(rawId);
-  const { canRead, canWrite } = useAuth();
+  const { canRead } = useAuth();
   const [customer, setCustomer] = useState<Customer | null | undefined>(undefined);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [events, setEvents] = useState<InvoiceEvent[]>([]);
@@ -47,9 +40,6 @@ export default function CustomerDetailPage({
   const [cheques, setCheques] = useState<ChequeNote[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryNote[]>([]);
   const [categories, setCategories] = useState<BudgetCategory[]>([]);
-  const [editOpen, setEditOpen] = useState(false);
-  const [cashOpen, setCashOpen] = useState(false);
-  const [cashDirection, setCashDirection] = useState<BudgetCashDirection>("gelir");
 
   const refresh = useCallback(async () => {
     const [
@@ -92,6 +82,9 @@ export default function CustomerDetailPage({
             cash,
             cheques,
             deliveries,
+            openingBalance: customer.openingBalance,
+            openingBalanceType: customer.openingBalanceType,
+            aliases: [customer.invoiceName],
           })
         : emptyPartyAccount(),
     [customer, invoices, events, cash, cheques, deliveries]
@@ -103,70 +96,15 @@ export default function CustomerDetailPage({
   if (!customer) notFound();
 
   return (
-    <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
-      <PageHeader
-        badge="Cari kart"
-        title={customer.name}
-        description={
-          [customer.address, customer.contact, customer.taxNo ? `VKN ${customer.taxNo}` : ""]
-            .filter(Boolean)
-            .join(" · ") || "Müşteri hesap ekstresi"
-        }
-        actions={
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" className="rounded-2xl">
-              <Link href="/customers">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Listeye dön
-              </Link>
-            </Button>
-            {canWrite("customers") ? (
-              <Button
-                variant="outline"
-                className="rounded-2xl"
-                onClick={() => setEditOpen(true)}
-              >
-                <Pencil className="mr-2 h-4 w-4" />
-                Kartı düzenle
-              </Button>
-            ) : null}
-          </div>
-        }
-      />
-      <PartyAccountPanel
-        name={customer.name}
-        address={customer.address}
-        contact={[customer.contact, customer.email].filter(Boolean).join(" · ")}
-        active={customer.active}
-        account={account}
-        empty="Bu müşteride henüz hareket yok"
-        avgLabel="Ortalama tahsilat"
-        onIncome={() => {
-          setCashDirection("gelir");
-          setCashOpen(true);
-        }}
-        onExpense={() => {
-          setCashDirection("gider");
-          setCashOpen(true);
-        }}
-      />
-      <CustomerFormSheet
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        editing={customer}
-        onSaved={() => void refresh()}
-      />
-      <BudgetCashFormSheet
-        open={cashOpen}
-        onOpenChange={setCashOpen}
-        direction={cashDirection}
-        defaultParty={customer.name}
-        lockParty
-        categories={categories
-          .filter((row) => row.direction === cashDirection)
-          .map((row) => row.name)}
-        onSaved={() => void refresh()}
-      />
-    </div>
+    <PartyDetailWorkspace
+      role="customer"
+      party={customer}
+      account={account}
+      categories={categories}
+      empty="Bu müşteride henüz hareket yok"
+      avgLabel="Ortalama tahsilat"
+      listHref="/customers"
+      onSaved={() => void refresh()}
+    />
   );
 }

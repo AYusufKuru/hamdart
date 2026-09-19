@@ -11,6 +11,7 @@ export type CashAccount = {
   locked: boolean;
   currency: CashCurrency;
   openingBalance: number;
+  balance: number;
   bankName: string;
   iban: string;
   branch: string;
@@ -33,6 +34,13 @@ export function cashKindLabel(kind: CashAccountKind) {
   return kind === "bank" ? "Banka" : "Kasa";
 }
 
+export function cashAccountLabel(row: Pick<CashAccount, "kind" | "name" | "bankName">) {
+  if (row.kind === "bank") {
+    return row.bankName ? `Banka · ${row.name} · ${row.bankName}` : `Banka · ${row.name}`;
+  }
+  return `Kasa · ${row.name}`;
+}
+
 export function cashLocation(row: Pick<CashAccount, "id" | "name">) {
   const hay = `${row.id} ${row.name}`.toLocaleLowerCase("tr");
   if (hay.includes("istanbul")) return "İstanbul";
@@ -43,6 +51,10 @@ export function cashLocation(row: Pick<CashAccount, "id" | "name">) {
 export function formatIban(value: string) {
   const compact = value.replace(/\s+/g, "").toUpperCase();
   return compact.replace(/(.{4})/g, "$1 ").trim();
+}
+
+export function cashAccountBalance(row: Pick<CashAccount, "openingBalance" | "balance">) {
+  return Number.isFinite(row.balance) ? row.balance : row.openingBalance;
 }
 
 export function currencySymbol(currency: string) {

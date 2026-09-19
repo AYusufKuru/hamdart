@@ -49,7 +49,7 @@ function asNumber(value: unknown): number {
   return 0;
 }
 
-function toCustomer(row: {
+export function toCustomer(row: {
   id: string;
   name: string;
   contact: string;
@@ -57,8 +57,37 @@ function toCustomer(row: {
   taxNo: string;
   email: string;
   active: boolean;
+  invoiceName: string;
+  accountList: string;
+  currency: string;
+  accountCode: string;
+  onlineTransactions: boolean;
+  notes: string;
+  iban: string;
+  country: string;
+  city: string;
+  district: string;
+  mobile: string;
+  landline: string;
+  accountKind: string;
+  taxOffice: string;
+  nationalId: string;
+  openingBalance: unknown;
+  openingBalanceType: string;
+  paymentTermDays: number;
+  creditLimit: unknown;
+  salesPriceList: string;
+  branch: string;
+  assignedPersonnel: string;
+  paymentTaxNo: string;
+  relatives: string;
+  guarantors: string;
 }): Customer {
-  return { ...row };
+  return {
+    ...row,
+    openingBalance: asNumber(row.openingBalance),
+    creditLimit: asNumber(row.creditLimit),
+  };
 }
 
 export function toSupplier(row: {
@@ -142,7 +171,7 @@ function supplierContact(input: SupplierWriteInput) {
   return contact || mobile || landline;
 }
 
-function supplierWriteData(input: SupplierWriteInput) {
+function partyWriteData(input: SupplierWriteInput, defaultAccountList: string) {
   const mobile = input.mobile?.trim() ?? "";
   const address = input.address?.trim() ?? "";
   return {
@@ -150,7 +179,7 @@ function supplierWriteData(input: SupplierWriteInput) {
     contact: supplierContact(input),
     address,
     invoiceName: input.invoiceName?.trim() ?? "",
-    accountList: input.accountList?.trim() || "Tedarikçi",
+    accountList: input.accountList?.trim() || defaultAccountList,
     currency: input.currency?.trim() || "TL",
     accountCode: input.accountCode?.trim() ?? "",
     onlineTransactions: input.onlineTransactions ?? true,
@@ -177,6 +206,14 @@ function supplierWriteData(input: SupplierWriteInput) {
     relatives: serializeRelatives(input.relatives ?? []),
     guarantors: serializeGuarantors(input.guarantors ?? []),
   };
+}
+
+function supplierWriteData(input: SupplierWriteInput) {
+  return partyWriteData(input, "Tedarikçi");
+}
+
+function customerWriteData(input: SupplierWriteInput) {
+  return partyWriteData(input, "Müşteri");
 }
 
 function toPersonnel(row: {
@@ -327,23 +364,14 @@ async function supplierHasLinks(name: string): Promise<boolean> {
 }
 
 export async function dbCreateCustomer(
-  input: {
-    name: string;
-    contact: string;
-    address: string;
-    taxNo: string;
-    email: string;
-  },
+  input: SupplierWriteInput,
   ctx: AuditCtx
 ): Promise<Customer> {
+  const data = customerWriteData(input);
   const row = await prisma.customer.create({
     data: {
       id: `cus-${Date.now()}`,
-      name: input.name,
-      contact: input.contact,
-      address: input.address,
-      taxNo: input.taxNo,
-      email: input.email,
+      ...data,
       active: true,
     },
   });
@@ -362,28 +390,66 @@ export async function dbCreateCustomer(
 
 export async function dbUpdateCustomer(
   id: string,
-  input: Partial<{
-    name: string;
-    contact: string;
-    address: string;
-    taxNo: string;
-    email: string;
-    active: boolean;
-  }>,
+  input: Partial<SupplierWriteInput> & { active?: boolean },
   ctx: AuditCtx
 ): Promise<Customer> {
   const before = await prisma.customer.findUnique({ where: { id } });
   if (!before) throw new FieldError("Müşteri bulunamadı");
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.contact !== undefined) patch.contact = input.contact.trim();
+  if (input.address !== undefined) patch.address = input.address.trim();
+  if (input.active !== undefined) patch.active = input.active;
+  if (input.invoiceName !== undefined) patch.invoiceName = input.invoiceName.trim();
+  if (input.accountList !== undefined) patch.accountList = input.accountList.trim() || "Müşteri";
+  if (input.currency !== undefined) patch.currency = input.currency.trim() || "TL";
+  if (input.accountCode !== undefined) patch.accountCode = input.accountCode.trim();
+  if (input.onlineTransactions !== undefined) {
+    patch.onlineTransactions = input.onlineTransactions;
+  }
+  if (input.notes !== undefined) patch.notes = input.notes.trim();
+  if (input.iban !== undefined) patch.iban = input.iban.trim();
+  if (input.country !== undefined) patch.country = input.country.trim() || "Türkiye";
+  if (input.city !== undefined) patch.city = input.city.trim();
+  if (input.district !== undefined) patch.district = input.district.trim();
+  if (input.mobile !== undefined) patch.mobile = input.mobile.trim();
+  if (input.email !== undefined) patch.email = input.email.trim();
+  if (input.landline !== undefined) patch.landline = input.landline.trim();
+  if (input.accountKind !== undefined) {
+    patch.accountKind = input.accountKind.trim() || "Gerçek kişi / Şahıs Firması";
+  }
+  if (input.taxNo !== undefined) patch.taxNo = input.taxNo.trim();
+  if (input.taxOffice !== undefined) patch.taxOffice = input.taxOffice.trim();
+  if (input.nationalId !== undefined) patch.nationalId = input.nationalId.trim();
+  if (input.openingBalance !== undefined) patch.openingBalance = input.openingBalance;
+  if (input.openingBalanceType !== undefined) {
+    patch.openingBalanceType = input.openingBalanceType.trim() || "Borçlu";
+  }
+  if (input.paymentTermDays !== undefined) patch.paymentTermDays = input.paymentTermDays;
+  if (input.creditLimit !== undefined) patch.creditLimit = input.creditLimit;
+  if (input.salesPriceList !== undefined) {
+    patch.salesPriceList = input.salesPriceList.trim() || "1. Satış Fiyatı";
+  }
+  if (input.branch !== undefined) patch.branch = input.branch.trim() || "Merkez Şube";
+  if (input.assignedPersonnel !== undefined) {
+    patch.assignedPersonnel = input.assignedPersonnel.trim();
+  }
+  if (input.paymentTaxNo !== undefined) patch.paymentTaxNo = input.paymentTaxNo.trim();
+  if (input.relatives !== undefined) patch.relatives = serializeRelatives(input.relatives);
+  if (input.guarantors !== undefined) {
+    patch.guarantors = serializeGuarantors(input.guarantors);
+  }
+  if (input.mobile !== undefined || input.landline !== undefined || input.contact !== undefined) {
+    patch.contact = supplierContact({
+      name: input.name ?? before.name,
+      contact: input.contact ?? before.contact,
+      mobile: input.mobile ?? before.mobile,
+      landline: input.landline ?? before.landline,
+    });
+  }
   const row = await prisma.customer.update({
     where: { id },
-    data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.contact !== undefined ? { contact: input.contact } : {}),
-      ...(input.address !== undefined ? { address: input.address } : {}),
-      ...(input.taxNo !== undefined ? { taxNo: input.taxNo } : {}),
-      ...(input.email !== undefined ? { email: input.email } : {}),
-      ...(input.active !== undefined ? { active: input.active } : {}),
-    },
+    data: patch,
   });
   const mapped = toCustomer(row);
   await logAudit({
