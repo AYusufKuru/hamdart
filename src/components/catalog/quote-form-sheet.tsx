@@ -21,6 +21,11 @@ import {
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
 import { SearchableSelect } from "@/components/shared/searchable-select";
+import { useAuth } from "@/lib/auth/auth-context";
+import {
+  QUOTE_DISCOUNT_LIMIT,
+  maxQuoteDiscountRate,
+} from "@/lib/auth/permissions";
 import type { Customer, Invoice, InvoiceLine } from "@/data/catalog";
 import {
   createCatalog,
@@ -133,6 +138,10 @@ export function QuoteFormSheet({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [recipeProducts, setRecipeProducts] = useState<Recipe[]>([]);
   const [rdOpen, setRdOpen] = useState(false);
+  const { user } = useAuth();
+  const maxDiscount = user
+    ? maxQuoteDiscountRate(user.role)
+    : QUOTE_DISCOUNT_LIMIT;
 
   const partyOptions = useMemo(
     () =>
@@ -269,6 +278,10 @@ export function QuoteFormSheet({
     }
     if (lines.length === 0) {
       toast.error("En az bir kalem girin");
+      return;
+    }
+    if (lines.some((line) => line.discountRate > maxDiscount)) {
+      toast.error(`İskonto en fazla %${maxDiscount} olabilir`);
       return;
     }
     if (rdOpen && rdFeeAmount <= 0) {
@@ -522,11 +535,16 @@ export function QuoteFormSheet({
 
           <FormSection
             title="Teklif kalemleri"
-            description={
+            description={[
               rdOpen
                 ? "Ar-Ge açık: ürün adı elle yazılır. Birim fiyat KDV hariçtir."
-                : "Reçetesi olan hazır ürünler. Birim fiyat KDV hariçtir."
-            }
+                : "Reçetesi olan hazır ürünler. Birim fiyat KDV hariçtir.",
+              maxDiscount < 100
+                ? `İskonto en fazla %${maxDiscount} girilebilir.`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             action={
               <Button
                 type="button"
@@ -630,10 +648,12 @@ export function QuoteFormSheet({
                       }
                     />
                     <Input
-                      placeholder="İsk. %"
+                      placeholder={
+                        maxDiscount < 100 ? `İsk. % (maks ${maxDiscount})` : "İsk. %"
+                      }
                       type="number"
                       min={0}
-                      max={100}
+                      max={maxDiscount}
                       className="bg-white sm:col-span-2"
                       value={line.discountRate}
                       onChange={(e) =>

@@ -32,7 +32,13 @@ import {
   dbCreateSupplier,
   maskPersonnel,
 } from "@/lib/server/catalog-write";
-import { getApiPermission, hasPermission } from "@/lib/auth/permissions";
+import {
+  getApiPermission,
+  hasPermission,
+  maxQuoteDiscountRate,
+  type Role,
+} from "@/lib/auth/permissions";
+import { isQuoteDocument } from "@/lib/invoice-docs";
 import {
   budgetCreateSchema,
   customerCreateSchema,
@@ -77,6 +83,24 @@ const createSchemas: Record<string, ZodType> = {
   ledger: ledgerCreateSchema,
   budget: budgetCreateSchema,
 };
+
+type QuoteDiscountInput = {
+  kind?: string;
+  documentType?: string;
+  lines?: { discountRate?: number }[];
+};
+
+function quoteDiscountProblem(
+  input: QuoteDiscountInput,
+  role: Role
+): string | null {
+  if (!isQuoteDocument(input.kind ?? "", input.documentType)) return null;
+  const limit = maxQuoteDiscountRate(role);
+  const over = (input.lines ?? []).some(
+    (line) => (line.discountRate ?? 0) > limit
+  );
+  return over ? `Teklif iskontosu en fazla %${limit} olabilir` : null;
+}
 
 async function authorize(req: NextRequest, entity: string, method: string) {
   const access = getApiPermission(`/api/catalog/${entity}`, method);
@@ -133,6 +157,13 @@ export async function POST(
     const parsed = await parseBody(req, schema);
     if (!parsed.ok) return parsed.response;
     const ctx = { actor: auth.session.name, ip: getIpFromRequest(req) };
+    if (entity === "invoices") {
+      const problem = quoteDiscountProblem(
+        parsed.data as QuoteDiscountInput,
+        auth.session.role
+      );
+      if (problem) return jsonError(problem, 403);
+    }
     const data = parsed.data as never;
     switch (entity) {
       case "customers":

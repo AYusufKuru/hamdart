@@ -237,6 +237,13 @@ export function isPrivilegedRole(role: Role): boolean {
   return role === "SYSTEM_ADMIN" || isAdminLikeRole(role);
 }
 
+/** Teklif kalemlerinde yönetici olmayan rollerin verebileceği en yüksek iskonto (%) */
+export const QUOTE_DISCOUNT_LIMIT = 10;
+
+export function maxQuoteDiscountRate(role: Role): number {
+  return isPrivilegedRole(role) ? 100 : QUOTE_DISCOUNT_LIMIT;
+}
+
 export function assignableRoles(actor: Role): Role[] {
   if (actor === "SYSTEM_ADMIN") return [...ROLES];
   if (isAdminLikeRole(actor)) {
