@@ -129,8 +129,11 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
     ),
   ],
   SALES: [
-    ...resourcePerms(["customers", "orders", "delivery_notes"], "both"),
-    ...resourcePerms(["factory", "raw_materials", "raw_material_orders"], "read"),
+    ...resourcePerms(
+      ["customers", "orders", "delivery_notes", "raw_material_orders"],
+      "both"
+    ),
+    ...resourcePerms(["factory", "raw_materials", "warehouses", "suppliers"], "read"),
   ],
   HR: [
     ...resourcePerms(BUSINESS_RESOURCES, "read"),
@@ -157,9 +160,14 @@ export function canCreateSalesOrder(role: Role): boolean {
   return canWrite(role, "orders") && role !== "STOCK";
 }
 
-/** Hammadde satın alma talebi — depo yalnızca mal kabul yapar */
-export function canCreatePurchaseOrder(role: Role): boolean {
-  return canWrite(role, "raw_material_orders") && role !== "STOCK";
+/** Depo (ve üretim) hammadde talebi açar. Satış talep açmaz, alım bilgisini girer. */
+export function canCreateMaterialRequest(role: Role): boolean {
+  return canWrite(role, "raw_material_orders") && role !== "SALES";
+}
+
+/** Tedarikçi, fiyat ve planlama — satış ile yönetici roller */
+export function canEditRawMaterialPurchase(role: Role): boolean {
+  return role === "SALES" || role === "SYSTEM_ADMIN" || isAdminLikeRole(role);
 }
 
 /** Stok girişi — depo; üretim depodan talep eder, giriş yapmaz */
@@ -184,6 +192,7 @@ export function canApplyRawMaterialOrderAction(
   action: string
 ): boolean {
   if (!canWrite(role, "raw_material_orders")) return false;
+  if (role === "SALES") return false;
   if (role === "STOCK") {
     return (STOCK_RECEIPT_ACTIONS as readonly string[]).includes(action);
   }
@@ -455,7 +464,7 @@ export const NAV_ITEMS: {
     href: "/warehouses",
     resource: "warehouses",
     label: "Depolar",
-    hiddenFor: ["PRODUCTION"],
+    hiddenFor: ["PRODUCTION", "SALES"],
   },
   {
     title: "Stok",
@@ -477,7 +486,7 @@ export const NAV_ITEMS: {
     href: "/suppliers",
     resource: "suppliers",
     label: "Tedarikçiler",
-    hiddenFor: ["PRODUCTION"],
+    hiddenFor: ["PRODUCTION", "SALES"],
   },
   { title: "Muhasebe", href: "/invoices", resource: "invoices", label: "Faturalar" },
   { title: "Muhasebe", href: "/cash", resource: "budget", label: "Kasa" },

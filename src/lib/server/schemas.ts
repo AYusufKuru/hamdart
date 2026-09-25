@@ -316,6 +316,10 @@ export const rmoPatchSchema = z.object({
     ])
     .optional(),
   targetWarehouseId: optionalText(MAX_ID),
+  source: z
+    .enum([...RMO_SOURCES, "delivery_note"], { error: "Geçersiz kaynak" })
+    .optional(),
+  orderDate: isoDate.optional(),
 });
 
 export const rmoActionSchema = z.object({

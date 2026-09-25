@@ -114,21 +114,26 @@ export function FormDialog({
 export function FormSection({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description?: string;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="space-y-2.5">
-      <div>
-        <h3 className="text-sm font-bold tracking-tight">{title}</h3>
-        {description ? (
-          <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold tracking-tight">{title}</h3>
+          {description ? (
+            <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        {action}
       </div>
       <div className="space-y-3 rounded-2xl border bg-muted/20 p-4">{children}</div>
     </section>

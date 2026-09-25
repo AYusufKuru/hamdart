@@ -1372,6 +1372,16 @@ export async function dbPatchRawMaterialOrder(
   const targetWarehouseId =
     asString(body.targetWarehouseId, "targetWarehouseId", { optional: true }) ??
     existing.targetWarehouseId;
+  const sourceRaw = asString(body.source, "source", { optional: true });
+  const source =
+    sourceRaw === "low_stock" ||
+    sourceRaw === "production_need" ||
+    sourceRaw === "manual" ||
+    sourceRaw === "delivery_note"
+      ? sourceRaw
+      : existing.source;
+  const orderDate =
+    asIsoDate(body.orderDate, "orderDate", { optional: true }) ?? existing.orderDate;
 
   const updated: RawMaterialOrder = {
     ...existing,
@@ -1383,6 +1393,8 @@ export async function dbPatchRawMaterialOrder(
     expectedDelivery,
     sourceNote,
     targetWarehouseId,
+    source,
+    orderDate,
   };
   return dbSaveRawMaterialOrder(updated, ctx);
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { BadgePercent, Plus, Trash2 } from "lucide-react";
+import { BadgePercent, FlaskConical, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +29,8 @@ import {
   fetchInvoices,
   updateCatalog,
 } from "@/lib/catalog-store";
+import { getAllRecipes } from "@/lib/recipe-store";
+import type { Recipe } from "@/data/recipes";
 import {
   calcInvoiceLine,
   COMPANY_PROFILE,
@@ -93,6 +95,8 @@ function emptyForm(quoteNo: string, row?: Invoice, lines?: InvoiceLine[]) {
     notes:
       row?.notes ??
       "Fiyatlar KDV hariçtir. Teklif, geçerlilik tarihine kadar geçerlidir. Stok ve üretim durumuna göre teslim süresi değişebilir.",
+    rdFee: "",
+    rdVatRate: "20",
     lines:
       lines && lines.length > 0
         ? lines.map((l) => ({
@@ -127,6 +131,8 @@ export function QuoteFormSheet({
   const [form, setForm] = useState(() => emptyForm(""));
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [recipeProducts, setRecipeProducts] = useState<Recipe[]>([]);
+  const [rdOpen, setRdOpen] = useState(false);
 
   const partyOptions = useMemo(
     () =>
@@ -141,6 +147,24 @@ export function QuoteFormSheet({
     [customers]
   );
 
+  const productOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return recipeProducts
+      .filter((recipe) => recipe.status === "saved" && recipe.productName.trim())
+      .filter((recipe) => {
+        const key = recipe.productName.trim().toLocaleLowerCase("tr");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((recipe) => ({
+        value: recipe.productName.trim(),
+        label: recipe.productName.trim(),
+        keywords: `${recipe.code ?? ""} ${recipe.productCode ?? ""}`,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "tr"));
+  }, [recipeProducts]);
+
   const calculatedLines = form.lines.map((line) =>
     calcInvoiceLine(
       {
@@ -152,19 +176,38 @@ export function QuoteFormSheet({
       line.unit
     )
   );
-  const subtotal = roundMoney(calculatedLines.reduce((s, l) => s + l.lineNet, 0));
-  const totalVat = roundMoney(calculatedLines.reduce((s, l) => s + l.vatAmount, 0));
+  const rdFeeAmount = rdOpen
+    ? parseFloat(form.rdFee.replace(",", ".")) || 0
+    : 0;
+  const rdCalc = calcInvoiceLine(
+    {
+      quantity: rdFeeAmount > 0 ? 1 : 0,
+      unitPrice: rdFeeAmount,
+      discountRate: 0,
+      vatRate: parseFloat(form.rdVatRate.replace(",", ".")) || 0,
+    },
+    "Adet"
+  );
+  const subtotal = roundMoney(
+    calculatedLines.reduce((s, l) => s + l.lineNet, 0) + (rdOpen ? rdCalc.lineNet : 0)
+  );
+  const totalVat = roundMoney(
+    calculatedLines.reduce((s, l) => s + l.vatAmount, 0) + (rdOpen ? rdCalc.vatAmount : 0)
+  );
   const grandTotal = roundMoney(subtotal + totalVat);
 
   useEffect(() => {
     if (!open) return;
     setSaving(false);
+    setRdOpen(false);
     void Promise.all([
       fetchCustomers().catch(() => [] as Customer[]),
       fetchInvoices().catch(() => [] as Invoice[]),
       fetchDocumentSettings().catch(() => null),
-    ]).then(([c, invoices, settings]) => {
+      getAllRecipes().catch(() => [] as Recipe[]),
+    ]).then(([c, invoices, settings, recipes]) => {
       setCustomers(c);
+      setRecipeProducts(recipes);
       const nextNo = nextDocumentNo(
         invoices.map((inv) => inv.invoiceNo),
         "TKF"
@@ -227,6 +270,24 @@ export function QuoteFormSheet({
     if (lines.length === 0) {
       toast.error("En az bir kalem girin");
       return;
+    }
+    if (rdOpen && rdFeeAmount <= 0) {
+      toast.error("Ar-Ge bedeli girin");
+      return;
+    }
+    if (rdOpen) {
+      lines.push({
+        description: "Ar-Ge bedeli",
+        quantity: 1,
+        unit: "Adet",
+        unitPrice: rdFeeAmount,
+        discountRate: 0,
+        vatRate: parseFloat(form.rdVatRate.replace(",", ".")) || 0,
+        quantityLabel: rdCalc.quantityLabel,
+        lineNet: rdCalc.lineNet,
+        vatAmount: rdCalc.vatAmount,
+        lineTotal: rdCalc.lineTotal,
+      });
     }
     setSaving(true);
     try {
@@ -461,7 +522,23 @@ export function QuoteFormSheet({
 
           <FormSection
             title="Teklif kalemleri"
-            description="Birim fiyat KDV hariçtir."
+            description={
+              rdOpen
+                ? "Ar-Ge açık: ürün adı elle yazılır. Birim fiyat KDV hariçtir."
+                : "Reçetesi olan hazır ürünler. Birim fiyat KDV hariçtir."
+            }
+            action={
+              <Button
+                type="button"
+                size="sm"
+                variant={rdOpen ? "default" : "outline"}
+                className="rounded-xl"
+                onClick={() => setRdOpen((open) => !open)}
+              >
+                <FlaskConical className="mr-1.5 h-4 w-4" />
+                Ar-Ge
+              </Button>
+            }
           >
             <div className="space-y-2">
               {form.lines.map((line, i) => {
@@ -471,18 +548,37 @@ export function QuoteFormSheet({
                     key={i}
                     className="grid grid-cols-1 gap-2 rounded-xl border bg-white p-3 sm:grid-cols-12"
                   >
-                    <Input
-                      placeholder="Ürün / hizmet"
-                      className="bg-white sm:col-span-12"
-                      value={line.description}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const next = [...f.lines];
-                          next[i] = { ...next[i], description: e.target.value };
-                          return { ...f, lines: next };
-                        })
-                      }
-                    />
+                    {rdOpen ? (
+                      <Input
+                        placeholder="Ürün adını yazın"
+                        className="bg-white sm:col-span-12"
+                        value={line.description}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const next = [...f.lines];
+                            next[i] = { ...next[i], description: e.target.value };
+                            return { ...f, lines: next };
+                          })
+                        }
+                      />
+                    ) : (
+                      <div className="sm:col-span-12">
+                        <SearchableSelect
+                          value={line.description || undefined}
+                          onValueChange={(description) =>
+                            setForm((f) => {
+                              const next = [...f.lines];
+                              next[i] = { ...next[i], description };
+                              return { ...f, lines: next };
+                            })
+                          }
+                          placeholder="Reçeteli hazır ürün seçin"
+                          searchPlaceholder="Ürün ara…"
+                          emptyText="Reçeteli hazır ürün yok"
+                          options={productOptions}
+                        />
+                      </div>
+                    )}
                     <Input
                       placeholder="Miktar"
                       type="number"
@@ -605,7 +701,54 @@ export function QuoteFormSheet({
               <Plus className="mr-1.5 h-4 w-4" />
               Kalem ekle
             </Button>
+            {rdOpen ? (
+              <div className="rounded-xl border border-dashed bg-white p-3">
+                <p className="text-sm font-semibold">Ar-Ge bedeli</p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                  Laboratuvarda yeni ürün geliştirme bedeli teklif tutarına eklenir.
+                </p>
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-12">
+                  <Input
+                    placeholder="Ar-Ge bedeli"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="bg-white sm:col-span-8"
+                    value={form.rdFee}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, rdFee: e.target.value }))
+                    }
+                  />
+                  <Select
+                    value={form.rdVatRate}
+                    onValueChange={(rdVatRate) =>
+                      setForm((f) => ({ ...f, rdVatRate }))
+                    }
+                  >
+                    <SelectTrigger className="bg-white sm:col-span-4">
+                      <SelectValue placeholder="KDV" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {VAT_RATES.map((r) => (
+                        <SelectItem key={r} value={String(r)}>
+                          KDV %{r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="mt-2 text-right text-xs text-muted-foreground">
+                  {formatNumber(rdCalc.lineTotal)} ₺
+                </p>
+              </div>
+            ) : null}
             <div className="ml-auto grid max-w-xs gap-1 text-sm">
+              {rdOpen ? (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ar-Ge bedeli</span>
+                  <span>{formatNumber(rdCalc.lineNet)} ₺</span>
+                </div>
+              ) : null}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Matrah</span>
                 <span>{formatNumber(subtotal)} ₺</span>

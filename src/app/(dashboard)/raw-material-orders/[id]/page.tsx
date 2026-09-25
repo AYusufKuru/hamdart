@@ -28,7 +28,11 @@ import { getWarehouses } from "@/lib/warehouse-store";
 import { ifAllowed } from "@/lib/api-client";
 import { CanWrite } from "@/components/auth/can-write";
 import { useAuth } from "@/lib/auth/auth-context";
-import { canApplyRawMaterialOrderAction } from "@/lib/auth/permissions";
+import {
+  canApplyRawMaterialOrderAction,
+  canEditRawMaterialPurchase,
+} from "@/lib/auth/permissions";
+import { PurchaseDetailsForm } from "@/components/raw-material-orders/purchase-details-form";
 import { formatDate, formatNumber } from "@/lib/utils";
 import { ArrowLeft, FileText, FlaskConical, Warehouse } from "lucide-react";
 import { toast } from "sonner";
@@ -43,6 +47,7 @@ export default function RawMaterialOrderDetailPage({
   const [order, setOrder] = useState<RawMaterialOrder | null | undefined>(
     undefined
   );
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,6 +78,9 @@ export default function RawMaterialOrderDetailPage({
   const actions = getAvailableActions(order.status).filter((action) =>
     user ? canApplyRawMaterialOrderAction(user.role, action) : false
   );
+  const canPurchase =
+    Boolean(user && canEditRawMaterialPurchase(user.role)) &&
+    (order.status === "to_order" || order.status === "ordered");
 
   async function handleAction(action: RawMaterialOrderAction) {
     try {
@@ -102,8 +110,29 @@ export default function RawMaterialOrderDetailPage({
         badgeClassName="bg-amber-500/10 text-amber-700 border-amber-500/20"
         title={order.materialName}
         description={`${order.orderNo} · ${order.supplier}`}
-        actions={<Badge variant={status.variant}>{status.label}</Badge>}
+        actions={
+          <>
+            {canPurchase ? (
+              <Button
+                className="rounded-xl bg-gradient-to-r from-indigo-600 to-blue-500 border-none"
+                onClick={() => setPurchaseOpen(true)}
+              >
+                Alım
+              </Button>
+            ) : null}
+            <Badge variant={status.variant}>{status.label}</Badge>
+          </>
+        }
       />
+
+      {canPurchase ? (
+        <PurchaseDetailsForm
+          open={purchaseOpen}
+          onOpenChange={setPurchaseOpen}
+          order={order}
+          onSaved={setOrder}
+        />
+      ) : null}
 
       <Card className="glass-card border-none">
         <CardHeader className="pb-2">

@@ -7,7 +7,10 @@ import {
   parseBody,
   requireSession,
 } from "@/lib/server/api-utils";
-import { canCreatePurchaseOrder } from "@/lib/auth/permissions";
+import {
+  canCreateMaterialRequest,
+  canEditRawMaterialPurchase,
+} from "@/lib/auth/permissions";
 import {
   dbCreateManualRawMaterialOrder,
   dbGetAllRawMaterialOrders,
@@ -33,9 +36,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
-  if (!canCreatePurchaseOrder(auth.session.role)) {
+  if (!canCreateMaterialRequest(auth.session.role)) {
     return jsonError(
-      "Depo hammadde siparişi oluşturamaz; mal kabul yapabilir",
+      "Satış talep açmaz. Talebi depo açar; tedarikçi ve fiyat detayda girilir.",
       403
     );
   }
@@ -55,8 +58,8 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
-  if (!canCreatePurchaseOrder(auth.session.role)) {
-    return jsonError("Bu kaydı yalnızca satın alma güncelleyebilir", 403);
+  if (!canEditRawMaterialPurchase(auth.session.role)) {
+    return jsonError("Tedarikçi ve fiyatı satış girer", 403);
   }
   try {
     const parsed = await parseBody(req, rmoPatchSchema);

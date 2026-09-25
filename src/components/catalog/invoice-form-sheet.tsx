@@ -40,6 +40,8 @@ import {
 } from "@/components/catalog/cheque-plan-fields";
 import { chequeKindFromMethod, parseChequeMoney } from "@/lib/cheque-notes";
 import { formatNumber, todayIso } from "@/lib/utils";
+import { getAllRecipes } from "@/lib/recipe-store";
+import type { Recipe } from "@/data/recipes";
 import {
   calcInvoiceLine,
   COMPANY_PROFILE,
@@ -176,6 +178,7 @@ export function InvoiceFormSheet({
   const [saving, setSaving] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [recipeProducts, setRecipeProducts] = useState<Recipe[]>([]);
 
   const meta = documentTypeMeta(form.documentType);
   const partyOptions = useMemo(() => {
@@ -231,6 +234,24 @@ export function InvoiceFormSheet({
     ];
   }, [customers, suppliers, meta.partyKind]);
 
+  const productOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return recipeProducts
+      .filter((recipe) => recipe.status === "saved" && recipe.productName.trim())
+      .filter((recipe) => {
+        const key = recipe.productName.trim().toLocaleLowerCase("tr");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((recipe) => ({
+        value: recipe.productName.trim(),
+        label: recipe.productName.trim(),
+        keywords: `${recipe.code ?? ""} ${recipe.productCode ?? ""}`,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "tr"));
+  }, [recipeProducts]);
+
   const calculatedLines = form.lines.map((line) =>
     calcInvoiceLine(
       {
@@ -277,7 +298,9 @@ export function InvoiceFormSheet({
       fetchSuppliers().catch(() => [] as Supplier[]),
       fetchInvoices().catch(() => [] as Invoice[]),
       fetchDocumentSettings().catch(() => null),
-    ]).then(([c, s, invoices, settings]) => {
+      getAllRecipes().catch(() => [] as Recipe[]),
+    ]).then(([c, s, invoices, settings, recipes]) => {
+      setRecipeProducts(recipes);
       setCustomers(c);
       setSuppliers(s);
       const type = editing
@@ -913,7 +936,11 @@ export function InvoiceFormSheet({
 
           <FormSection
             title="Mal / hizmet kalemleri"
-            description="Birim fiyat KDV hariçtir. KDV satırdan hesaplanır."
+            description={
+              isSalesDoc(form.documentType)
+                ? "Ürünü yazın veya listeden seçin. Birim fiyat KDV hariçtir."
+                : "Birim fiyat KDV hariçtir. KDV satırdan hesaplanır."
+            }
           >
             <div className="space-y-2">
               {form.lines.map((line, i) => {
@@ -923,18 +950,38 @@ export function InvoiceFormSheet({
                     key={i}
                     className="grid grid-cols-1 gap-2 rounded-xl border bg-white p-3 sm:grid-cols-12"
                   >
-                    <Input
-                      placeholder="Açıklama"
-                      className="bg-white sm:col-span-12"
-                      value={line.description}
-                      onChange={(e) =>
-                        setForm((f) => {
-                          const lines = [...f.lines];
-                          lines[i] = { ...lines[i], description: e.target.value };
-                          return { ...f, lines };
-                        })
-                      }
-                    />
+                    {isSalesDoc(form.documentType) ? (
+                      <div className="sm:col-span-12">
+                        <SearchableSelect
+                          value={line.description}
+                          onValueChange={(description) =>
+                            setForm((f) => {
+                              const lines = [...f.lines];
+                              lines[i] = { ...lines[i], description };
+                              return { ...f, lines };
+                            })
+                          }
+                          placeholder="Ürün yazın veya seçin"
+                          searchPlaceholder="Ürün yazın veya ara…"
+                          emptyText="Reçetede hazır ürün yok"
+                          allowCustom
+                          options={productOptions}
+                        />
+                      </div>
+                    ) : (
+                      <Input
+                        placeholder="Açıklama"
+                        className="bg-white sm:col-span-12"
+                        value={line.description}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const lines = [...f.lines];
+                            lines[i] = { ...lines[i], description: e.target.value };
+                            return { ...f, lines };
+                          })
+                        }
+                      />
+                    )}
                     <Input
                       placeholder="Miktar"
                       type="number"

@@ -29,6 +29,21 @@ export async function saveRawMaterialOrder(
   return apiPut<RawMaterialOrder>("/api/raw-material-orders", order);
 }
 
+export async function updateRawMaterialPurchase(input: {
+  id: string;
+  supplier: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  source: RawMaterialOrderSource;
+  sourceNote?: string | null;
+  targetWarehouseId: string;
+  orderDate: string;
+  expectedDelivery?: string | null;
+}): Promise<RawMaterialOrder> {
+  return apiPut<RawMaterialOrder>("/api/raw-material-orders", input);
+}
+
 export async function createManualRawMaterialOrder(input: {
   materialName: string;
   sku: string;

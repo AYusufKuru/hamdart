@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/page-header";
@@ -26,8 +26,8 @@ import {
 import { getAllRawMaterialOrders, syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { RawMaterialOrderFormSheet } from "@/components/raw-material-orders/raw-material-order-form-sheet";
 import { useAuth } from "@/lib/auth/auth-context";
-import { canCreatePurchaseOrder, isStockRole } from "@/lib/auth/permissions";
-import { formatNumber, selectItemValues } from "@/lib/utils";
+import { canCreateMaterialRequest, isStockRole } from "@/lib/auth/permissions";
+import { formatNumber } from "@/lib/utils";
 import {
   AlertCircle,
   Factory,
@@ -41,7 +41,7 @@ import {
 export default function RawMaterialOrdersPage() {
   const router = useRouter();
   const { user, canWrite } = useAuth();
-  const canCreate = Boolean(user && canCreatePurchaseOrder(user.role));
+  const canCreate = Boolean(user && canCreateMaterialRequest(user.role));
   const receivingOnly = Boolean(user && isStockRole(user.role));
   const [orders, setOrders] = useState<RawMaterialOrder[]>([]);
   const [search, setSearch] = useState("");
@@ -73,13 +73,6 @@ export default function RawMaterialOrdersPage() {
   });
 
   const toOrderCount = orders.filter((o) => o.status === "to_order").length;
-  const supplierHints = useMemo(
-    () =>
-      selectItemValues(orders.map((o) => o.supplier)).sort((a, b) =>
-        a.localeCompare(b, "tr")
-      ),
-    [orders]
-  );
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -89,8 +82,8 @@ export default function RawMaterialOrdersPage() {
         title={receivingOnly ? "Mal Kabul" : "Hammadde Talepleri"}
         description={
           receivingOnly
-            ? "Gelen hammaddeyi teslim alın. Satın alma talebi oluşturmak depo yetkisinde değildir."
-            : "Üretim ve plan ihtiyacı için satın alma talebi oluşturun. Teslim almayı depo yapar."
+            ? "Ürün ve miktarı talep edin. Tedarikçi ve fiyatı satış, talep detayında girer. Gelen malı siz teslim alırsınız."
+            : "Depo ürün talebi açar. Satış, detayda tedarikçi ve fiyatı girer. Teslim almayı depo yapar."
         }
         actions={
           canCreate ? (
@@ -137,8 +130,8 @@ export default function RawMaterialOrdersPage() {
               <div>
                 <p className="font-bold">Manuel talep</p>
                 <p className="text-muted-foreground text-xs mt-1">
-                  Satın alma ekibi &quot;Manuel Talep&quot; ile doğrudan kayıt
-                  açar.
+                  Depo ürün ve miktarı yazar. Satış, kaydın detayında tedarikçi
+                  ve fiyatı girer.
                 </p>
               </div>
             </li>
@@ -277,7 +270,6 @@ export default function RawMaterialOrdersPage() {
       <RawMaterialOrderFormSheet
         open={formOpen}
         onOpenChange={setFormOpen}
-        supplierHints={supplierHints}
         onCreated={(order) => {
           void refresh();
           router.push(`/raw-material-orders/${order.id}`);

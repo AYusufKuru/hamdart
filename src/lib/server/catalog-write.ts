@@ -915,6 +915,43 @@ export async function dbCreateInvoice(
   return mapped;
 }
 
+/** invoiceUpdateSchema .default() ile doldurduğu değerler. İstekte yok sayılır. */
+const INVOICE_PATCH_DEFAULTS: Record<string, string> = {
+  kind: "Satış",
+  documentType: "",
+  bucket: "",
+  eDocument: "e-Arşiv",
+  scenario: "TEMELFATURA",
+  series: "",
+  currency: "TRY",
+  partyTaxNo: "",
+  partyTaxOffice: "",
+  partyAddress: "",
+  partyCity: "",
+  partyDistrict: "",
+  partyPhone: "",
+  partyEmail: "",
+  sellerName: "HamdPharma",
+  sellerTaxNo: "",
+  sellerTaxOffice: "",
+  sellerAddress: "",
+  paymentMethod: "Cari hesap",
+  relatedDispatchNo: "",
+  relatedOrderNo: "",
+  notes: "",
+  validUntil: "",
+  deliveryTerm: "",
+  preparedBy: "",
+};
+
+function explicitInvoicePatchKeys(input: Partial<InvoiceWriteInput>): string[] {
+  return Object.keys(input).filter((key) => {
+    const value = (input as Record<string, unknown>)[key];
+    if (value === undefined) return false;
+    return INVOICE_PATCH_DEFAULTS[key] !== value;
+  });
+}
+
 export async function dbUpdateInvoice(
   id: string,
   input: Partial<InvoiceWriteInput>,
@@ -923,9 +960,7 @@ export async function dbUpdateInvoice(
   const before = await prisma.invoice.findUnique({ where: { id } });
   if (!before) throw new FieldError("Fatura bulunamadı");
   if (documentTypeFromKind(before.kind, before.documentType) === "quote") {
-    const keys = Object.keys(input).filter(
-      (key) => (input as Record<string, unknown>)[key] !== undefined
-    );
+    const keys = explicitInvoicePatchKeys(input);
     if (keys.some((key) => key !== "status")) {
       throw new FieldError(
         "Fiyat teklifi oluşturulduktan sonra yalnızca durum güncellenebilir"

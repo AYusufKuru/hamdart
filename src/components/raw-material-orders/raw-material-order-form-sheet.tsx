@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -20,51 +19,30 @@ import {
   FormSheetBody,
   FormSheetFooter,
 } from "@/components/shared/form-sheet";
-import {
-  rawMaterialOrderSourceLabels,
-  type RawMaterialOrder,
-  type RawMaterialOrderSource,
-} from "@/data/raw-material-orders";
+import type { RawMaterialOrder } from "@/data/raw-material-orders";
 import type { RawMaterial } from "@/data/raw-materials";
-import { WAREHOUSE_IDS, type Warehouse } from "@/data/warehouses";
-import { fetchSuppliers } from "@/lib/catalog-store";
-import { getWarehouses } from "@/lib/warehouse-store";
-import { formatNumber, plusDaysIso, selectItemValues, todayIso } from "@/lib/utils";
+import { WAREHOUSE_IDS } from "@/data/warehouses";
 import {
   getAllRawMaterials,
   RAW_MATERIAL_UNITS,
 } from "@/lib/raw-material-store";
 import { createManualRawMaterialOrder } from "@/lib/raw-material-order-store";
 
-const SOURCE_OPTIONS: RawMaterialOrderSource[] = [
-  "manual",
-  "production_need",
-  "low_stock",
-];
-
+const UNASSIGNED_SUPPLIER = "— Tedarikçi atanacak";
 const MATERIAL_PICKER_LIMIT = 40;
 
 let cachedMaterials: RawMaterial[] | null = null;
-let cachedWarehouses: Warehouse[] | null = null;
 let lookupPromise: Promise<void> | null = null;
 
-async function loadFormLookups() {
-  if (cachedMaterials && cachedWarehouses) {
-    return { materials: cachedMaterials, warehouses: cachedWarehouses };
-  }
+async function loadMaterials() {
+  if (cachedMaterials) return cachedMaterials;
   if (!lookupPromise) {
-    lookupPromise = Promise.all([getAllRawMaterials(), getWarehouses()]).then(
-      ([materials, warehouses]) => {
-        cachedMaterials = materials;
-        cachedWarehouses = warehouses;
-      }
-    );
+    lookupPromise = getAllRawMaterials().then((materials) => {
+      cachedMaterials = materials;
+    });
   }
   await lookupPromise;
-  return {
-    materials: cachedMaterials ?? [],
-    warehouses: cachedWarehouses ?? [],
-  };
+  return cachedMaterials ?? [];
 }
 
 function emptyForm() {
@@ -72,22 +50,14 @@ function emptyForm() {
     catalogId: "__new",
     materialName: "",
     sku: "",
-    supplier: "",
     quantity: "",
     unit: "kg",
-    unitPrice: "",
-    source: "manual" as RawMaterialOrderSource,
-    sourceNote: "",
-    targetWarehouseId: WAREHOUSE_IDS.production as string,
-    orderDate: todayIso(),
-    expectedDelivery: plusDaysIso(14),
   };
 }
 
 interface RawMaterialOrderFormSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  supplierHints?: string[];
   defaultSupplier?: string;
   lockSupplier?: boolean;
   onCreated?: (order: RawMaterialOrder) => void;
@@ -96,7 +66,6 @@ interface RawMaterialOrderFormSheetProps {
 export function RawMaterialOrderFormSheet({
   open,
   onOpenChange,
-  supplierHints = [],
   defaultSupplier = "",
   lockSupplier = false,
   onCreated,
@@ -104,18 +73,9 @@ export function RawMaterialOrderFormSheet({
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [materials, setMaterials] = useState<RawMaterial[]>([]);
-  const [suppliers, setSuppliers] = useState<string[]>([]);
   const [materialQuery, setMaterialQuery] = useState("");
   const [materialPickerOpen, setMaterialPickerOpen] = useState(false);
-
-  const supplierOptions = useMemo(() => {
-    const base = selectItemValues(suppliers);
-    const current = form.supplier.trim();
-    if (current && !base.includes(current)) return [current, ...base];
-    return base;
-  }, [form.supplier, suppliers]);
 
   const filteredMaterials = useMemo(() => {
     const q = materialQuery.trim().toLocaleLowerCase("tr");
@@ -133,37 +93,18 @@ export function RawMaterialOrderFormSheet({
     if (!open) return;
     setSaving(false);
     setLoading(true);
-    setForm({
-      ...emptyForm(),
-      supplier: defaultSupplier.trim(),
-    });
+    setForm(emptyForm());
     setMaterialQuery("");
     setMaterialPickerOpen(false);
 
     void (async () => {
       try {
-        const [{ materials: materialList, warehouses: whList }, catalogSuppliers] =
-          await Promise.all([loadFormLookups(), fetchSuppliers()]);
-        setWarehouses(whList);
-        setMaterials(materialList);
-        setSuppliers(
-          selectItemValues([
-            ...catalogSuppliers.map((s) => s.name),
-            ...supplierHints,
-          ]).sort((a, b) => a.localeCompare(b, "tr"))
-        );
+        setMaterials(await loadMaterials());
       } finally {
         setLoading(false);
       }
     })();
-  }, [open, supplierHints, defaultSupplier]);
-
-  const previewTotal = useMemo(() => {
-    const qty = parseFloat(form.quantity);
-    const price = parseFloat(form.unitPrice);
-    if (!Number.isFinite(qty) || !Number.isFinite(price)) return null;
-    return qty * price;
-  }, [form.quantity, form.unitPrice]);
+  }, [open]);
 
   function applyCatalog(id: string) {
     if (id === "__new") {
@@ -173,7 +114,6 @@ export function RawMaterialOrderFormSheet({
         materialName: "",
         sku: "",
         unit: "kg",
-        unitPrice: "",
       }));
       setMaterialQuery("");
       setMaterialPickerOpen(false);
@@ -187,7 +127,6 @@ export function RawMaterialOrderFormSheet({
       materialName: m.name,
       sku: m.sku,
       unit: m.unit,
-      unitPrice: String(m.unitCost),
     }));
     setMaterialQuery(`${m.name} (${m.sku})`);
     setMaterialPickerOpen(false);
@@ -196,21 +135,12 @@ export function RawMaterialOrderFormSheet({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const quantity = parseFloat(form.quantity);
-    const unitPrice = parseFloat(form.unitPrice);
-    if (!form.materialName.trim() || !form.sku.trim() || !form.supplier.trim()) {
-      toast.error("Hammadde, SKU ve tedarikçi zorunludur");
+    if (!form.materialName.trim() || !form.sku.trim()) {
+      toast.error("Hammadde ve SKU zorunludur");
       return;
     }
     if (!Number.isFinite(quantity) || quantity <= 0) {
       toast.error("Miktar 0'dan büyük olmalıdır");
-      return;
-    }
-    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-      toast.error("Birim fiyat geçerli bir sayı olmalıdır");
-      return;
-    }
-    if (form.expectedDelivery && form.expectedDelivery < form.orderDate) {
-      toast.error("Beklenen teslimat sipariş tarihinden önce olamaz");
       return;
     }
 
@@ -219,18 +149,15 @@ export function RawMaterialOrderFormSheet({
       const created = await createManualRawMaterialOrder({
         materialName: form.materialName.trim(),
         sku: form.sku.trim(),
-        supplier: form.supplier.trim(),
+        supplier: (lockSupplier ? defaultSupplier.trim() : "") || UNASSIGNED_SUPPLIER,
         quantity,
         unit: form.unit,
-        unitPrice,
-        source: form.source,
-        sourceNote: form.sourceNote.trim() || undefined,
-        targetWarehouseId: form.targetWarehouseId,
-        orderDate: form.orderDate,
-        expectedDelivery: form.expectedDelivery || undefined,
+        unitPrice: 0,
+        source: "manual",
+        targetWarehouseId: WAREHOUSE_IDS.production,
       });
 
-      toast.success(`${created.orderNo} — Sipariş Verilecek listesine düştü`);
+      toast.success(`${created.orderNo} oluşturuldu. Alım bilgisi detayda girilecek.`);
       onOpenChange(false);
       onCreated?.(created);
     } catch (err) {
@@ -246,7 +173,7 @@ export function RawMaterialOrderFormSheet({
       onOpenChange={onOpenChange}
       icon={Truck}
       title="Manuel talep"
-      description="Sipariş numarası ve tutar otomatik hesaplanır. Kayıt Sipariş Verilecek durumunda açılır."
+      description="Depo ürün ve miktarı yazar. Tedarikçi, fiyat ve planlama talep detayında girilir."
       className="max-w-2xl"
     >
       {open ? (
@@ -260,7 +187,7 @@ export function RawMaterialOrderFormSheet({
               <>
                 <FormSection
                   title="Hammadde"
-                  description="Katalogdan seçince ad, SKU, birim ve birim fiyat dolar."
+                  description="Katalogdan seçince ad, SKU ve birim dolar."
                 >
                   <FormField label="Katalogdan seç" optional>
                     <div className="relative">
@@ -340,30 +267,6 @@ export function RawMaterialOrderFormSheet({
                       onChange={(e) => setForm((f) => ({ ...f, sku: e.target.value }))}
                     />
                   </FormField>
-                </FormSection>
-
-                <FormSection title="Tedarik ve miktar">
-                  <FormField label="Tedarikçi" htmlFor="rmo-supplier" required>
-                    <Input
-                      id="rmo-supplier"
-                      required
-                      className="bg-white"
-                      list="rmo-supplier-options"
-                      placeholder="Tedarikçi adı yazın veya listeden seçin"
-                      value={form.supplier}
-                      disabled={lockSupplier}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, supplier: e.target.value }))
-                      }
-                    />
-                    {supplierOptions.length > 0 ? (
-                      <datalist id="rmo-supplier-options">
-                        {supplierOptions.map((s) => (
-                          <option key={s} value={s} />
-                        ))}
-                      </datalist>
-                    ) : null}
-                  </FormField>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <FormField label="Miktar" htmlFor="rmo-qty" required>
                       <Input
@@ -405,117 +308,6 @@ export function RawMaterialOrderFormSheet({
                       </Select>
                     </FormField>
                   </div>
-                  <FormField
-                    label="Birim fiyat"
-                    htmlFor="rmo-price"
-                    required
-                    hint={
-                      previewTotal !== null
-                        ? `Tutar (otomatik): ₺${formatNumber(previewTotal)}`
-                        : "Tablodaki Tutar = miktar × birim fiyat."
-                    }
-                  >
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground">
-                        ₺
-                      </span>
-                      <Input
-                        id="rmo-price"
-                        type="number"
-                        required
-                        min={0}
-                        step="0.01"
-                        className="bg-white pl-8"
-                        placeholder="18500"
-                        value={form.unitPrice}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, unitPrice: e.target.value }))
-                        }
-                      />
-                    </div>
-                  </FormField>
-                </FormSection>
-
-                <FormSection title="Planlama">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <FormField label="Kaynak" required>
-                      <Select
-                        value={form.source}
-                        onValueChange={(source) =>
-                          setForm((f) => ({
-                            ...f,
-                            source: source as RawMaterialOrderSource,
-                          }))
-                        }
-                      >
-                        <SelectTrigger className="bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SOURCE_OPTIONS.map((s) => (
-                            <SelectItem key={s} value={s}>
-                              {rawMaterialOrderSourceLabels[s]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormField>
-                    <FormField label="Hedef depo" required>
-                      <Select
-                        value={form.targetWarehouseId}
-                        onValueChange={(targetWarehouseId) =>
-                          setForm((f) => ({ ...f, targetWarehouseId }))
-                        }
-                      >
-                        <SelectTrigger className="bg-white">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {warehouses.map((w) => (
-                            <SelectItem key={w.id} value={w.id}>
-                              {w.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormField>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <FormField label="Sipariş tarihi" htmlFor="rmo-date" required>
-                      <Input
-                        id="rmo-date"
-                        type="date"
-                        required
-                        className="bg-white"
-                        value={form.orderDate}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, orderDate: e.target.value }))
-                        }
-                      />
-                    </FormField>
-                    <FormField label="Beklenen teslimat" htmlFor="rmo-eta" optional>
-                      <Input
-                        id="rmo-eta"
-                        type="date"
-                        className="bg-white"
-                        value={form.expectedDelivery}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, expectedDelivery: e.target.value }))
-                        }
-                      />
-                    </FormField>
-                  </div>
-                  <FormField label="Talep notu" htmlFor="rmo-note" optional>
-                    <Textarea
-                      id="rmo-note"
-                      className="bg-white"
-                      placeholder="Örn: Yeni formülasyon için üretim planı ihtiyacı"
-                      value={form.sourceNote}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, sourceNote: e.target.value }))
-                      }
-                    />
-                  </FormField>
                 </FormSection>
               </>
             )}
