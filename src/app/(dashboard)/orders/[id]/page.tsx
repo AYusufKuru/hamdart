@@ -76,7 +76,7 @@ export default function OrderDetailPage({
   const [docSettings, setDocSettings] = useState<DocumentSettings>(EMPTY_DOCUMENT_SETTINGS);
   const showRecipe = canRead("recipes");
   const canShip = Boolean(user && canWrite("orders"));
-  const stockOnly = Boolean(user && isStockRole(user.role));
+  const stockOnly = Boolean(user && isStockRole(user));
   const canSeeNotes = canRead("delivery_notes");
 
   const loadDeliveryNotes = useCallback(async () => {
@@ -139,7 +139,7 @@ export default function OrderDetailPage({
     : [...SHIPMENT_STATUSES];
 
   async function handleShipment(next: (typeof SHIPMENT_STATUSES)[number]) {
-    if (!order || !user || !canSetOrderStatus(user.role, next)) return;
+    if (!order || !user || !canSetOrderStatus(user, next)) return;
     if (next === "shipped") {
       setShipOpen(true);
       return;

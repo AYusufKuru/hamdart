@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  canOpenPage,
   getApiPermission,
   getFirstAllowedPath,
-  getPageReadPermission,
   hasPermission,
-  type Role,
+  isApiBlockedForRole,
 } from "@/lib/auth/permissions";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import {
@@ -120,7 +120,7 @@ export async function proxy(request: NextRequest) {
   const session = await getSessionFromRequest(request);
 
   if (pathname === "/") {
-    const dest = session ? getFirstAllowedPath(session.role) : "/login";
+    const dest = session ? getFirstAllowedPath(session) : "/login";
     return withSecurityHeaders(
       request,
       NextResponse.redirect(new URL(dest, request.url)),
@@ -173,8 +173,6 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  const role = session.role as Role;
-
   if (pathname.startsWith("/api/")) {
     const access = getApiPermission(pathname, request.method);
     if (access.kind === "deny") {
@@ -185,8 +183,8 @@ export async function proxy(request: NextRequest) {
       );
     }
     if (
-      access.kind === "require" &&
-      !hasPermission(role, access.permission)
+      (access.kind === "require" && !hasPermission(session, access.permission)) ||
+      isApiBlockedForRole(session, pathname, request.method)
     ) {
       return withSecurityHeaders(
         request,
@@ -197,9 +195,8 @@ export async function proxy(request: NextRequest) {
     return nextWithNonce(request, nonce);
   }
 
-  const pagePermission = getPageReadPermission(pathname);
-  if (pagePermission && !hasPermission(role, pagePermission)) {
-    const fallback = getFirstAllowedPath(role);
+  if (!canOpenPage(session, pathname)) {
+    const fallback = getFirstAllowedPath(session);
     const url = new URL(fallback, request.url);
     url.searchParams.set("denied", "1");
     return withSecurityHeaders(request, NextResponse.redirect(url), nonce);

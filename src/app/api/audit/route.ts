@@ -12,7 +12,7 @@ function clampLimit(raw: string | null): number {
 export async function GET(req: NextRequest) {
   const auth = await requireSession(req, "admin:read");
   if (!auth.ok) return auth.response;
-  if (!canViewAuditLogs(auth.session.role)) {
+  if (!canViewAuditLogs(auth.session)) {
     return jsonError("Yetkiniz yok", 403);
   }
 

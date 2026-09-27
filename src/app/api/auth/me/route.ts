@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ROLE_LABELS } from "@/lib/auth/permissions";
+import { toAuthUser } from "@/lib/auth/user";
 import { getLiveSessionFromRequest } from "@/lib/auth/live-session";
 import {
   applyCookie,
@@ -21,16 +21,7 @@ export async function GET(req: NextRequest) {
     return response;
   }
   return NextResponse.json(
-    {
-      user: {
-        userId: session.userId,
-        username: session.username,
-        name: session.name,
-        role: session.role,
-        roleLabel: ROLE_LABELS[session.role] ?? session.role,
-        mustChangePassword: session.mustChangePassword,
-      },
-    },
+    { user: toAuthUser(session) },
     { headers: NO_STORE_HEADERS }
   );
 }

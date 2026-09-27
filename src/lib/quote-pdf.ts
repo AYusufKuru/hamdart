@@ -1,5 +1,5 @@
 import type { DocumentSettings, Invoice, InvoiceLine } from "@/data/catalog";
-import { amountToWordsTr } from "@/lib/invoice-docs";
+import { amountToWordsTr, currencyMeta } from "@/lib/invoice-docs";
 import { companyFooter, companyHeader, PDF_STYLES } from "@/lib/pdf-company";
 import { loadPdfMake, pdfCell as cell, pdfMoney as money } from "@/lib/pdf-make";
 import { formatDate } from "@/lib/utils";
@@ -17,6 +17,7 @@ export async function downloadQuotePdf(
     prev.vat += line.vatAmount;
     vatGroups.set(line.vatRate, prev);
   }
+  const currency = currencyMeta(quote.currency);
 
   const doc: Record<string, unknown> = {
     pageSize: "A4",
@@ -57,8 +58,7 @@ export async function downloadQuotePdf(
                 [cell("Geçerlilik"), cell(formatDate(quote.validUntil || quote.dueDate))],
                 [cell("Teslim"), cell(quote.deliveryTerm || "—")],
                 [cell("Ödeme"), cell(quote.paymentMethod)],
-                [cell("Para birimi"), cell(quote.currency)],
-              ],
+                [cell("Para birimi"), cell(currency?.label ?? quote.currency)],              ],
             },
             layout: "lightHorizontalLines",
           },
@@ -113,7 +113,7 @@ export async function downloadQuotePdf(
                   }
                 : { text: "" },
               {
-                text: `Yalnız: ${amountToWordsTr(quote.amount)}`,
+                text: `Yalnız: ${amountToWordsTr(quote.amount, quote.currency)}`,
                 fontSize: 8,
                 italics: true,
                 margin: [0, 10, 0, 0],
@@ -140,8 +140,7 @@ export async function downloadQuotePdf(
                     bold: true,
                     fillColor: "#e8eef5",
                   }),
-                ],
-              ],
+                ],              ],
             },
             layout: "noBorders",
           },

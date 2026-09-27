@@ -126,7 +126,7 @@ async function collectNotifications(
         id: `rmo-${o.id}`,
         title: `Sipariş verilecek ${o.orderNo}`,
         detail: o.materialName,
-        href: `/raw-material-orders/${o.id}`,
+        href: `/raw-material-tracking/${o.id}`,
       });
     }
   }

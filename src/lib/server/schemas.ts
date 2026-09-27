@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ROLES } from "@/lib/auth/permissions";
+import { ROLE_ACCESS, ROLES } from "@/lib/auth/permissions";
 import { MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH } from "@/lib/auth/password-rules";
 
 export const MAX_TEXT = 200;
@@ -137,6 +137,17 @@ export const changePasswordBodySchema = z.object({
     .max(MAX_PASSWORD_BYTES, `En fazla ${MAX_PASSWORD_BYTES} karakter olabilir`),
 });
 
+const roleGrantsSchema = z
+  .array(
+    z.object({
+      role: z.enum(ROLES, { error: `Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}` }),
+      access: z.enum(ROLE_ACCESS, { error: "Erişim düzeyi view veya edit olmalıdır" }),
+    }),
+    { error: "Rol listesi geçersiz" }
+  )
+  .min(1, "En az bir rol seçin")
+  .max(ROLES.length, "Rol listesi geçersiz");
+
 export const userCreateSchema = z.object({
   username: z
     .string({ error: textMsg })
@@ -153,7 +164,10 @@ export const userCreateSchema = z.object({
     .trim()
     .min(2, "Ad soyad 2-120 karakter olmalıdır")
     .max(120, "Ad soyad 2-120 karakter olmalıdır"),
-  role: z.enum(ROLES, { error: `Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}` }),
+  role: z
+    .enum(ROLES, { error: `Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}` })
+    .optional(),
+  grants: roleGrantsSchema.optional(),
   password: z
     .string({ error: textMsg })
     .min(MIN_PASSWORD_LENGTH, `Şifre en az ${MIN_PASSWORD_LENGTH} karakter olmalıdır`)
@@ -171,6 +185,7 @@ export const userUpdateSchema = z
     role: z
       .enum(ROLES, { error: `Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}` })
       .optional(),
+    grants: roleGrantsSchema.optional(),
     active: z.boolean({ error: boolMsg }).optional(),
     password: z
       .string({ error: textMsg })
@@ -391,6 +406,20 @@ export const stockTransferCreateSchema = z.object({
     )
     .optional()
     .default("manual"),
+  note: optionalText(MAX_NOTE),
+});
+
+export const transferRequestCreateSchema = z.object({
+  fromWarehouseId: text(MAX_ID),
+  toWarehouseId: text(MAX_ID),
+  sku: text(80),
+  quantity: finiteNumber({ positive: true }),
+  note: optionalText(MAX_NOTE),
+});
+
+export const transferRequestRespondSchema = z.object({
+  action: z.enum(["approve", "reject"], { error: "Geçersiz talep yanıtı" }),
+  sourceItemId: optionalText(MAX_ID),
   note: optionalText(MAX_NOTE),
 });
 

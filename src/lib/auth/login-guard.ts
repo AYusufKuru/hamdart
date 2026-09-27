@@ -61,6 +61,7 @@ export type LoginOk = {
     username: string;
     name: string;
     role: string;
+    roleGrants: unknown;
     active: boolean;
     mustChangePassword: boolean;
     tokenVersion: number;
@@ -210,6 +211,7 @@ export async function authenticateLogin(
       username: user.username,
       name: user.name,
       role: user.role,
+      roleGrants: user.roleGrants,
       active: user.active,
       mustChangePassword: user.mustChangePassword,
       tokenVersion: user.tokenVersion,

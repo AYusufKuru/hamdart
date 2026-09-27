@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { ROLE_LABELS, useAuth, type AuthUser } from "@/lib/auth/auth-context";
+import { useAuth, type AuthUser } from "@/lib/auth/auth-context";
 import { getFirstAllowedPath } from "@/lib/auth/permissions";
 import { csrfHeader } from "@/lib/auth/csrf-client";
 import { toast } from "sonner";
 
-function nextPathFromLocation(role?: AuthUser["role"]): string {
-  const fallback = role ? getFirstAllowedPath(role) : "/";
+function nextPathFromLocation(user?: AuthUser | null): string {
+  const fallback = user ? getFirstAllowedPath(user) : "/";
   if (typeof window === "undefined") return fallback;
   const next = new URLSearchParams(window.location.search).get("next");
   if (next === "/" || next === "/dashboard") return fallback;
@@ -31,7 +31,7 @@ export default function LoginPage() {
     if (authLoading || !user) return;
     const dest = user.mustChangePassword
       ? "/change-password"
-      : nextPathFromLocation(user.role);
+      : nextPathFromLocation(user);
     router.replace(dest);
   }, [authLoading, user, router]);
 
@@ -52,27 +52,10 @@ export default function LoginPage() {
         );
       }
       toast.success("Giriş başarılı");
-      const payload = data as {
-        user?: {
-          id: string;
-          username: string;
-          name: string;
-          role: AuthUser["role"];
-          mustChangePassword?: boolean;
-        };
-      };
-      if (payload.user) {
-        hydrateUser({
-          userId: payload.user.id,
-          username: payload.user.username,
-          name: payload.user.name,
-          role: payload.user.role,
-          roleLabel: ROLE_LABELS[payload.user.role] ?? payload.user.role,
-          mustChangePassword: Boolean(payload.user.mustChangePassword),
-        });
-      }
+      const payload = data as { user?: AuthUser };
+      if (payload.user) hydrateUser(payload.user);
       const mustChange = Boolean(payload.user?.mustChangePassword);
-      router.push(mustChange ? "/change-password" : nextPathFromLocation(payload.user?.role));
+      router.push(mustChange ? "/change-password" : nextPathFromLocation(payload.user));
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Giriş başarısız");

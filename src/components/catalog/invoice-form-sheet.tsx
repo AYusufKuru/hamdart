@@ -57,7 +57,6 @@ import {
   nextDocumentNo,
   PAYMENT_METHODS,
   roundMoney,
-  VAT_RATES,
   type InvoiceDocumentType,
 } from "@/lib/invoice-docs";
 
@@ -1047,27 +1046,25 @@ export function InvoiceFormSheet({
                         })
                       }
                     />
-                    <Select
-                      value={line.vatRate}
-                      onValueChange={(vatRate) =>
-                        setForm((f) => {
-                          const lines = [...f.lines];
-                          lines[i] = { ...lines[i], vatRate };
-                          return { ...f, lines };
-                        })
-                      }
-                    >
-                      <SelectTrigger className="bg-white sm:col-span-2">
-                        <SelectValue placeholder="KDV" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {VAT_RATES.map((r) => (
-                          <SelectItem key={r} value={String(r)}>
-                            KDV %{r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex items-center gap-1.5 sm:col-span-2">
+                      <span className="shrink-0 text-xs text-muted-foreground">KDV %</span>
+                      <Input
+                        aria-label="KDV oranı"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        className="bg-white"
+                        value={line.vatRate}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const lines = [...f.lines];
+                            lines[i] = { ...lines[i], vatRate: e.target.value };
+                            return { ...f, lines };
+                          })
+                        }
+                      />
+                    </div>
                     <div className="flex items-center justify-between gap-2 sm:col-span-3">
                       <p className="text-xs text-muted-foreground">
                         {formatNumber(calc.lineTotal)} ₺

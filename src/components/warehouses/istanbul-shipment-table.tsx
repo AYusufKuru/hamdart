@@ -32,10 +32,12 @@ function statusVariant(status: string) {
 export function IstanbulShipmentTable({
   transfers,
   canAct,
+  canActOn,
   onChanged,
 }: {
   transfers: StockTransfer[];
   canAct: boolean;
+  canActOn?: (row: StockTransfer, action: IstanbulShipmentAction) => boolean;
   onChanged?: () => void;
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -98,7 +100,7 @@ export function IstanbulShipmentTable({
                   {formatDate(row.createdAt)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {canAct && next ? (
+                  {canAct && next && (!canActOn || canActOn(row, next.action)) ? (
                     <Button
                       type="button"
                       size="sm"

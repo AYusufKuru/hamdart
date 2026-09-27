@@ -6,7 +6,7 @@
  * her istekte DB'ye gitmeyi önler; tokenVersion artınca önbellek düşer.
  */
 import { prisma } from "@/lib/db";
-import { ROLES, type Role, type SessionUser } from "@/lib/auth/permissions";
+import { normalizeGrants, type SessionUser } from "@/lib/auth/permissions";
 import {
   getSessionFromRequest,
   verifySessionToken,
@@ -30,6 +30,7 @@ type DbUser = {
   username: string;
   name: string;
   role: string;
+  roleGrants: unknown;
   active: boolean;
   mustChangePassword: boolean;
   tokenVersion: number;
@@ -37,12 +38,14 @@ type DbUser = {
 
 function toSession(user: DbUser): SessionUser | null {
   if (!user.active) return null;
-  if (!ROLES.includes(user.role as Role)) return null;
+  const grants = normalizeGrants(user.roleGrants, user.role);
+  if (grants.length === 0) return null;
   return {
     userId: user.id,
     username: user.username,
     name: user.name,
-    role: user.role as Role,
+    role: grants[0].role,
+    grants,
     mustChangePassword: user.mustChangePassword,
     tokenVersion: user.tokenVersion,
   };
@@ -64,19 +67,17 @@ async function hydrate(jwt: SessionPayload): Promise<SessionUser | null> {
       username: true,
       name: true,
       role: true,
+      roleGrants: true,
       active: true,
       mustChangePassword: true,
       tokenVersion: true,
     },
   });
 
-  if (!user || user.tokenVersion !== jwt.tokenVersion) {
-    cache.set(jwt.userId, { expiresAt: now + CACHE_TTL_MS, session: null });
-    return null;
-  }
-
-  const session = toSession(user);
+  // Önbellek veritabanındaki güncel durumu tutar; eski token'ın sürümü ayrıca karşılaştırılır.
+  const session = user ? toSession(user) : null;
   cache.set(jwt.userId, { expiresAt: now + CACHE_TTL_MS, session });
+  if (!session || session.tokenVersion !== jwt.tokenVersion) return null;
   return session;
 }
 

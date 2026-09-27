@@ -18,7 +18,7 @@ import type {
 } from "@/data/catalog";
 import type { Warehouse } from "@/data/warehouses";
 import type { CashAccount } from "@/lib/cash-accounts";
-import type { Role } from "@/lib/auth/permissions";
+import type { Role, RoleGrant } from "@/lib/auth/permissions";
 import { apiDelete, apiGet, apiPatch, apiPatchForm, apiPost, apiPostForm, apiPut } from "@/lib/api-client";
 
 export async function fetchCustomers(): Promise<Customer[]> {
@@ -230,6 +230,7 @@ export type UserRow = {
   username: string;
   name: string;
   role: Role;
+  grants: RoleGrant[];
   active: boolean;
   mustChangePassword: boolean;
   passwordChangedAt: string | null;
@@ -243,7 +244,7 @@ export async function fetchUsers(): Promise<UserRow[]> {
 export async function createUser(input: {
   username: string;
   name: string;
-  role: Role;
+  grants: RoleGrant[];
   password: string;
 }): Promise<UserRow> {
   const { apiPost } = await import("@/lib/api-client");
@@ -254,7 +255,7 @@ export async function updateUser(
   id: string,
   patch: {
     name?: string;
-    role?: Role;
+    grants?: RoleGrant[];
     active?: boolean;
     password?: string;
   }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { ROLES, type Role } from "@/lib/auth/permissions";
+import { normalizeGrants } from "@/lib/auth/permissions";
+import { toAuthUser } from "@/lib/auth/user";
 import { authenticateLogin } from "@/lib/auth/login-guard";
 import {
   applyCookie,
@@ -40,31 +41,26 @@ export async function POST(req: NextRequest) {
     }
 
     const user = result.user;
-    if (!ROLES.includes(user.role as Role)) {
+    const grants = normalizeGrants(user.roleGrants, user.role);
+    if (grants.length === 0) {
       return jsonError(
         "Hesap rolü geçersiz. Sistem yöneticisine başvurun.",
         403
       );
     }
 
-    const token = await createSessionToken({
+    const session = {
       userId: user.id,
       username: user.username,
       name: user.name,
-      role: user.role as Role,
+      role: grants[0].role,
+      grants,
       mustChangePassword: user.mustChangePassword,
       tokenVersion: user.tokenVersion,
-    });
+    };
+    const token = await createSessionToken(session);
 
-    const response = NextResponse.json({
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        role: user.role,
-        mustChangePassword: user.mustChangePassword,
-      },
-    });
+    const response = NextResponse.json({ user: toAuthUser(session) });
     applyCookie(response, sessionCookieOptions(token));
     applyCsrfCookie(response, createCsrfToken());
     return response;

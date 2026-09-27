@@ -55,11 +55,11 @@ function AdminContent() {
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [confirmFilename, setConfirmFilename] = useState("");
   const [restoring, setRestoring] = useState(false);
-  const canSeeAudit = Boolean(user && canViewAuditLogs(user.role));
+  const canSeeAudit = Boolean(user && canViewAuditLogs(user));
   const canSeeUsers = canRead("users");
   const canSeeBackups = canRead("backups");
   const canManageBackups = canWrite("backups");
-  const canManageDepartments = user ? isPrivilegedRole(user.role) : false;
+  const canManageDepartments = user ? isPrivilegedRole(user) : false;
 
   const refresh = useCallback(async () => {
     setLoading(true);

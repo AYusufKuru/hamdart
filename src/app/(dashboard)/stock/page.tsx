@@ -38,7 +38,7 @@ const statusMap = {
 export default function StockPage() {
   const router = useRouter();
   const { user, canWrite } = useAuth();
-  const canEnterStock = Boolean(user && canCreateStockEntry(user.role));
+  const canEnterStock = Boolean(user && canCreateStockEntry(user));
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "alert">("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");

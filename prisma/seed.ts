@@ -9,7 +9,7 @@
  *
  * Veritabanını sıfırdan yüklemek için: npm run db:reset -- --confirm
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import {
   PASSWORD_RULES_TEXT,
@@ -147,7 +147,7 @@ async function remapLegacyRoles(): Promise<void> {
     if (!next || next === user.role) continue;
     await prisma.user.update({
       where: { id: user.id },
-      data: { role: next, tokenVersion: { increment: 1 } },
+      data: { role: next, roleGrants: Prisma.DbNull, tokenVersion: { increment: 1 } },
     });
     console.log(`  ${user.username}: ${user.role} → ${next}`);
     updated += 1;
@@ -167,7 +167,11 @@ async function seedAdminUser(): Promise<void> {
     if (existing.role !== "SYSTEM_ADMIN") {
       await prisma.user.update({
         where: { id: existing.id },
-        data: { role: "SYSTEM_ADMIN", tokenVersion: { increment: 1 } },
+        data: {
+          role: "SYSTEM_ADMIN",
+          roleGrants: Prisma.DbNull,
+          tokenVersion: { increment: 1 },
+        },
       });
       console.log(
         `  ${ADMIN_USERNAME}: rol SYSTEM_ADMIN olarak güncellendi`

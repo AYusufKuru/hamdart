@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "orders:write");
   if (!auth.ok) return auth.response;
-  if (!canCreateSalesOrder(auth.session.role)) {
+  if (!canCreateSalesOrder(auth.session)) {
     return jsonError("Depo satış siparişi oluşturamaz", 403);
   }
   try {

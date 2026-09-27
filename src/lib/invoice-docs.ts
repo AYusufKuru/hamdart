@@ -185,6 +185,26 @@ export const PAYMENT_METHODS = [
   "Çek",
   "Senet",
 ] as const;
+export const QUOTE_CURRENCIES = [
+  { value: "TRY", label: "TL (₺)", symbol: "₺", unit: "Türk Lirası", subunit: "Kuruş" },
+  { value: "USD", label: "Dolar ($)", symbol: "$", unit: "Amerikan Doları", subunit: "Sent" },
+  { value: "EUR", label: "Euro (€)", symbol: "€", unit: "Euro", subunit: "Sent" },
+] as const;
+
+export type QuoteCurrency = (typeof QUOTE_CURRENCIES)[number]["value"];
+
+export function currencyMeta(code?: string | null) {
+  const value = (code ?? "").trim().toUpperCase();
+  return (
+    QUOTE_CURRENCIES.find((c) => c.value === value) ??
+    (value === "TL" || value === "" ? QUOTE_CURRENCIES[0] : null)
+  );
+}
+
+export function currencySymbol(code?: string | null) {
+  return currencyMeta(code)?.symbol ?? (code || "₺");
+}
+
 export const QUOTE_STATUSES = [
   "Taslak",
   "Gönderildi",
@@ -325,13 +345,14 @@ export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function amountToWordsTr(value: number): string {
+export function amountToWordsTr(value: number, currency = "TRY"): string {
+  const meta = currencyMeta(currency) ?? QUOTE_CURRENCIES[0];
   const safe = roundMoney(Math.max(0, value));
   const lira = Math.floor(safe);
   const kurus = Math.round((safe - lira) * 100);
-  const liraPart = `${tripletToWords(lira)} Türk Lirası`;
-  if (kurus === 0) return `${liraPart}`.trim() || "Sıfır Türk Lirası";
-  return `${liraPart} ${tripletToWords(kurus)} Kuruş`;
+  const liraPart = `${tripletToWords(lira)} ${meta.unit}`;
+  if (kurus === 0) return liraPart;
+  return `${liraPart} ${tripletToWords(kurus)} ${meta.subunit}`;
 }
 
 function tripletToWords(n: number): string {

@@ -20,7 +20,11 @@ import {
 import { EMPTY_DOCUMENT_SETTINGS } from "@/lib/document-company";
 import { useAuth } from "@/lib/auth/auth-context";
 import { downloadQuotePdf } from "@/lib/quote-pdf";
-import { documentTypeFromKind, normalizeQuoteStatus } from "@/lib/invoice-docs";
+import {
+  currencySymbol,
+  documentTypeFromKind,
+  normalizeQuoteStatus,
+} from "@/lib/invoice-docs";
 import { formatDate, formatNumber } from "@/lib/utils";
 
 function statusVariant(status: string) {
@@ -108,7 +112,7 @@ export function QuotesWorkspace() {
       key: "amount",
       header: "Tutar",
       className: "text-right font-bold",
-      render: (r) => `${formatNumber(r.amount)} ${r.currency || "₺"}`,
+      render: (r) => `${formatNumber(r.amount)} ${currencySymbol(r.currency)}`,
     },
     {
       key: "status",

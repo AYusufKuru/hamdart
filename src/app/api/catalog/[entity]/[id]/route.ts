@@ -10,7 +10,9 @@ import {
 import {
   dbEnqueueQcFromDeliveryNote,
   dbGetDeliveryNoteLines,
+  dbGetInvoices,
 } from "@/lib/server/data-service";
+import { isQuoteDocument } from "@/lib/invoice-docs";
 import {
   dbDeleteBudget,
   dbDeleteCustomer,
@@ -27,7 +29,7 @@ import {
   dbUpdatePersonnel,
   dbUpdateSupplier,
 } from "@/lib/server/catalog-write";
-import { getApiPermission } from "@/lib/auth/permissions";
+import { getApiPermission, isQuoteOnlyRole, type Principal } from "@/lib/auth/permissions";
 import {
   budgetUpdateSchema,
   customerUpdateSchema,
@@ -59,6 +61,28 @@ const updateSchemas: Record<string, ZodType> = {
   budget: budgetUpdateSchema,
 };
 
+/** Yalnızca teklif düzenleyebilen rolde kaydın teklif olduğunu doğrular */
+async function quoteOnlyProblem(
+  principal: Principal,
+  entity: string,
+  id: string,
+  payload?: { kind?: string; documentType?: string }
+): Promise<string | null> {
+  if (entity !== "invoices" || !isQuoteOnlyRole(principal)) return null;
+  const existing = (await dbGetInvoices()).find((row) => row.id === id);
+  if (!existing || !isQuoteDocument(existing.kind, existing.documentType)) {
+    return "Yalnızca fiyat tekliflerini düzenleyebilirsiniz";
+  }
+  if (
+    payload &&
+    (payload.kind !== undefined || payload.documentType !== undefined) &&
+    !isQuoteDocument(payload.kind ?? existing.kind, payload.documentType ?? existing.documentType)
+  ) {
+    return "Teklif başka belge türüne çevrilemez";
+  }
+  return null;
+}
+
 async function authorize(req: NextRequest, entity: string, method: string) {
   const access = getApiPermission(`/api/catalog/${entity}`, method);
   if (access.kind === "require") {
@@ -86,6 +110,13 @@ export async function PATCH(
   try {
     const parsed = await parseBody(req, schema);
     if (!parsed.ok) return parsed.response;
+    const problem = await quoteOnlyProblem(
+      auth.session,
+      entity,
+      id,
+      parsed.data as { kind?: string; documentType?: string }
+    );
+    if (problem) return jsonError(problem, 403);
     const ctx = { actor: auth.session.name, ip: getIpFromRequest(req) };
     const data = parsed.data as never;
     switch (entity) {
@@ -129,6 +160,8 @@ export async function DELETE(
     return jsonError("Bu varlık arayüzden silinemez", 404);
   }
   try {
+    const problem = await quoteOnlyProblem(auth.session, entity, id);
+    if (problem) return jsonError(problem, 403);
     const ctx = { actor: auth.session.name, ip: getIpFromRequest(req) };
     switch (entity) {
       case "customers":

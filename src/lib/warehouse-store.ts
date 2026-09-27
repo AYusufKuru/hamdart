@@ -26,6 +26,29 @@ export async function createStockTransfer(
   return apiPost<StockTransfer>("/api/stock/transfers", input);
 }
 
+export async function getTransferRequestOptions(
+  warehouseId: string
+): Promise<{ sku: string; name: string; unit: string }[]> {
+  return apiGet(`/api/stock/transfer-requests?warehouseId=${encodeURIComponent(warehouseId)}`);
+}
+
+export async function createTransferRequest(input: {
+  fromWarehouseId: string;
+  toWarehouseId: string;
+  sku: string;
+  quantity: number;
+  note?: string;
+}): Promise<StockTransfer> {
+  return apiPost<StockTransfer>("/api/stock/transfer-requests", input);
+}
+
+export async function respondTransferRequest(
+  id: string,
+  input: { action: "approve" | "reject"; sourceItemId?: string; note?: string }
+): Promise<StockTransfer> {
+  return apiPatch<StockTransfer>(`/api/stock/transfer-requests/${id}`, input);
+}
+
 export async function advanceStockTransfer(
   id: string,
   action: IstanbulShipmentAction

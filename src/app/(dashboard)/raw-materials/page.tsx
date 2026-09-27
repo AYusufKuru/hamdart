@@ -13,6 +13,7 @@ import { RawMaterialFormSheet } from "@/components/raw-materials/raw-material-fo
 import { SearchTable, type Column } from "@/components/shared/search-table";
 import { CanWrite } from "@/components/auth/can-write";
 import { useAuth } from "@/lib/auth/auth-context";
+import { hasRole } from "@/lib/auth/permissions";
 import { formatMoney } from "@/lib/recipe-calculations";
 import { Plus } from "lucide-react";
 
@@ -36,7 +37,7 @@ export default function RawMaterialsPage() {
   const router = useRouter();
   const { user, canRead } = useAuth();
   const canOpenPurchaseOrders = canRead("raw_material_orders");
-  const showPurchasePrice = user?.role === "SALES";
+  const showPurchasePrice = Boolean(user && hasRole(user, "SALES"));
   const columns = useMemo(() => {
     if (!showPurchasePrice) return baseColumns;
     return [

@@ -15,13 +15,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   FormDialog,
   FormField,
   FormSheetBody,
@@ -36,12 +29,11 @@ import {
 } from "@/lib/catalog-store";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
-  ROLES,
-  ROLE_LABELS,
   assignableRoles,
   canManageUser,
-  type Role,
+  type RoleGrant,
 } from "@/lib/auth/permissions";
+import { RoleGrantBadges, RoleGrantsField } from "@/components/admin/role-grants-field";
 import {
   PASSWORD_RULES_TEXT,
   validatePassword,
@@ -53,14 +45,27 @@ import { toast } from "sonner";
 const EMPTY_FORM = {
   username: "",
   name: "",
-  role: "STOCK" as Role,
+  grants: [] as RoleGrant[],
   password: "",
 };
+
+function targetRoles(u: UserRow) {
+  return u.grants.map((g) => g.role);
+}
+
+function sameGrants(a: RoleGrant[], b: RoleGrant[]) {
+  const key = (list: RoleGrant[]) =>
+    list
+      .map((g) => `${g.role}:${g.access}`)
+      .sort()
+      .join(",");
+  return key(a) === key(b);
+}
 
 export function UsersPanel() {
   const { user: currentUser, canWrite } = useAuth();
   const canManage = canWrite("users");
-  const roles = currentUser ? assignableRoles(currentUser.role) : [];
+  const roles = currentUser ? assignableRoles(currentUser) : [];
 
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +77,7 @@ export function UsersPanel() {
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [editTarget, setEditTarget] = useState<UserRow | null>(null);
   const [editName, setEditName] = useState("");
+  const [editGrants, setEditGrants] = useState<RoleGrant[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -93,8 +99,12 @@ export function UsersPanel() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!currentUser || !roles.includes(form.role)) {
-      toast.error("Bu rolü atama yetkiniz yok");
+    if (form.grants.length === 0) {
+      toast.error("En az bir rol seçin");
+      return;
+    }
+    if (!currentUser || !form.grants.every((g) => roles.includes(g.role))) {
+      toast.error("Seçilen rollerden birini atama yetkiniz yok");
       return;
     }
     setSaving(true);
@@ -115,31 +125,11 @@ export function UsersPanel() {
     }
   }
 
-  async function handleRoleChange(u: UserRow, role: Role) {
-    if (
-      !currentUser ||
-      u.id === currentUser.userId ||
-      !canManageUser(currentUser.role, u.role) ||
-      !roles.includes(role)
-    ) {
-      toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
-      return;
-    }
-    try {
-      await updateUser(u.id, { role });
-      toast.success(`${u.username} rolü ${ROLE_LABELS[role]} olarak güncellendi`);
-      await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Rol güncellenemedi");
-      await refresh();
-    }
-  }
-
   async function handleToggleActive(u: UserRow) {
     if (
       !currentUser ||
       u.id === currentUser.userId ||
-      !canManageUser(currentUser.role, u.role)
+      !canManageUser(currentUser, targetRoles(u))
     ) {
       toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
       return;
@@ -158,24 +148,37 @@ export function UsersPanel() {
   }
 
   function openEditDialog(u: UserRow) {
-    if (!currentUser || !canManageUser(currentUser.role, u.role)) {
+    if (!currentUser || !canManageUser(currentUser, targetRoles(u))) {
       toast.error("Bu kullanıcıyı düzenleyemezsiniz");
       return;
     }
     setEditTarget(u);
     setEditName(u.name);
+    setEditGrants(u.grants);
   }
 
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault();
     if (!editTarget) return;
-    if (!currentUser || !canManageUser(currentUser.role, editTarget.role)) {
+    if (!currentUser || !canManageUser(currentUser, targetRoles(editTarget))) {
       toast.error("Bu kullanıcıyı düzenleyemezsiniz");
+      return;
+    }
+    const grantsChanged = !sameGrants(editGrants, editTarget.grants);
+    if (grantsChanged && editGrants.length === 0) {
+      toast.error("En az bir rol seçin");
+      return;
+    }
+    if (grantsChanged && !editGrants.every((g) => roles.includes(g.role))) {
+      toast.error("Seçilen rollerden birini atama yetkiniz yok");
       return;
     }
     setEditSaving(true);
     try {
-      await updateUser(editTarget.id, { name: capitalizeWordsTr(editName) });
+      await updateUser(editTarget.id, {
+        name: capitalizeWordsTr(editName),
+        ...(grantsChanged ? { grants: editGrants } : {}),
+      });
       toast.success(`${editTarget.username} güncellendi`);
       setEditTarget(null);
       await refresh();
@@ -187,7 +190,7 @@ export function UsersPanel() {
   }
 
   function openPasswordDialog(u: UserRow) {
-    if (!currentUser || !canManageUser(currentUser.role, u.role)) {
+    if (!currentUser || !canManageUser(currentUser, targetRoles(u))) {
       toast.error("Bu kullanıcının şifresini değiştiremezsiniz");
       return;
     }
@@ -213,7 +216,7 @@ export function UsersPanel() {
     }
     if (
       !currentUser ||
-      !canManageUser(currentUser.role, passwordTarget.role)
+      !canManageUser(currentUser, targetRoles(passwordTarget))
     ) {
       toast.error("Bu kullanıcının şifresini değiştiremezsiniz");
       return;
@@ -240,7 +243,7 @@ export function UsersPanel() {
     if (
       !currentUser ||
       deleteTarget.id === currentUser.userId ||
-      !canManageUser(currentUser.role, deleteTarget.role)
+      !canManageUser(currentUser, targetRoles(deleteTarget))
     ) {
       toast.error("Bu kullanıcı üzerinde işlem yapamazsınız");
       return;
@@ -270,7 +273,7 @@ export function UsersPanel() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreate} className="space-y-3">
-              <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(10rem,0.9fr)_minmax(0,1fr)_auto]">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
                 <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
                   <Label htmlFor="new-username" className="self-end truncate">
                     Kullanıcı adı
@@ -308,28 +311,6 @@ export function UsersPanel() {
                   />
                 </div>
                 <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
-                  <Label htmlFor="new-role" className="self-end truncate">
-                    Rol
-                  </Label>
-                  <Select
-                    value={form.role}
-                    onValueChange={(role) =>
-                      setForm((f) => ({ ...f, role: role as Role }))
-                    }
-                  >
-                    <SelectTrigger id="new-role" className="h-10 rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.map((role) => (
-                        <SelectItem key={role} value={role}>
-                          {ROLE_LABELS[role]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid grid-rows-[1.25rem_2.5rem] gap-2">
                   <Label htmlFor="new-password" className="self-end truncate">
                     Geçici şifre
                   </Label>
@@ -355,6 +336,18 @@ export function UsersPanel() {
                     {saving ? "Ekleniyor..." : "Kullanıcı Ekle"}
                   </Button>
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Roller ve erişim</Label>
+                <RoleGrantsField
+                  value={form.grants}
+                  onChange={(grants) => setForm((f) => ({ ...f, grants }))}
+                  roles={roles}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Birden fazla rol seçebilirsiniz. “Görüntüleme” seçilen rolde kullanıcı
+                  sayfaları görür ama değişiklik yapamaz.
+                </p>
               </div>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {PASSWORD_RULES_TEXT} Kullanıcı ilk girişinde bu şifreyi
@@ -382,7 +375,7 @@ export function UsersPanel() {
                 <TableRow>
                   <TableHead>Kullanıcı adı</TableHead>
                   <TableHead>Ad soyad</TableHead>
-                  <TableHead>Rol</TableHead>
+                  <TableHead>Roller</TableHead>
                   <TableHead>Durum</TableHead>
                   <TableHead>Oluşturma</TableHead>
                   <TableHead sortable={false}>İşlem</TableHead>
@@ -391,11 +384,9 @@ export function UsersPanel() {
               <TableBody>
                 {users.map((u) => {
                   const isSelf = u.id === currentUser?.userId;
-                  const roleKnown = ROLES.includes(u.role);
                   const canActOnUser = Boolean(
-                    currentUser && canManageUser(currentUser.role, u.role)
+                    currentUser && canManageUser(currentUser, targetRoles(u))
                   );
-                  const canEditRole = canManage && canActOnUser && !isSelf;
                   const canEditUser = canManage && canActOnUser;
                   const canDisableOrDelete =
                     canManage && canActOnUser && !isSelf;
@@ -410,32 +401,8 @@ export function UsersPanel() {
                         )}
                       </TableCell>
                       <TableCell>{u.name}</TableCell>
-                      <TableCell>
-                        {canEditRole ? (
-                          <Select
-                            value={roleKnown ? u.role : undefined}
-                            onValueChange={(role) =>
-                              void handleRoleChange(u, role as Role)
-                            }
-                          >
-                            <SelectTrigger className="rounded-lg h-8 w-44">
-                              <SelectValue
-                                placeholder={ROLE_LABELS[u.role] ?? u.role}
-                              />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {roles.map((role) => (
-                                <SelectItem key={role} value={role}>
-                                  {ROLE_LABELS[role]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <span className="text-sm">
-                            {ROLE_LABELS[u.role] ?? u.role}
-                          </span>
-                        )}
+                      <TableCell className="max-w-md">
+                        <RoleGrantBadges grants={u.grants} />
                       </TableCell>
                       <TableCell className="space-x-1 whitespace-nowrap">
                         <Badge variant={u.active ? "success" : "secondary"}>
@@ -528,9 +495,10 @@ export function UsersPanel() {
         title="Kullanıcıyı düzenle"
         description={
           editTarget
-            ? `${editTarget.username} için görünen adı güncelleyin. Kullanıcı adı giriş içindir, değişmez.`
+            ? `${editTarget.username} için adı, rolleri ve erişim düzeyini güncelleyin. Kullanıcı adı giriş içindir, değişmez.`
             : undefined
         }
+        className="max-w-3xl"
       >
         <form onSubmit={(e) => void handleEdit(e)}>
           <FormSheetBody>
@@ -553,6 +521,21 @@ export function UsersPanel() {
                 }}
                 className="rounded-xl"
                 required
+              />
+            </FormField>
+            <FormField
+              label="Roller ve erişim"
+              hint={
+                editTarget?.id === currentUser?.userId
+                  ? "Kendi rollerinizi değiştiremezsiniz."
+                  : "Rol değişince kullanıcının oturumu kapanır, yeniden giriş yapar."
+              }
+            >
+              <RoleGrantsField
+                value={editGrants}
+                onChange={setEditGrants}
+                roles={roles}
+                disabled={editTarget?.id === currentUser?.userId}
               />
             </FormField>
           </FormSheetBody>

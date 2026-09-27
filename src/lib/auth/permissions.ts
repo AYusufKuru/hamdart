@@ -7,9 +7,80 @@ export const ROLES = [
   "PRODUCTION",
   "SALES",
   "HR",
+  "EXECUTIVE",
+  "STOCK_FACTORY",
+  "STOCK_INTERNET",
+  "STOCK_ISTANBUL",
 ] as const;
 
 export type Role = (typeof ROLES)[number];
+
+export const ROLE_ACCESS = ["view", "edit"] as const;
+export type RoleAccess = (typeof ROLE_ACCESS)[number];
+
+export const ROLE_ACCESS_LABELS: Record<RoleAccess, string> = {
+  view: "Görüntüleme",
+  edit: "Değişiklik",
+};
+
+/** Kullanıcıya verilen rol ve o roldeki erişim düzeyi */
+export type RoleGrant = { role: Role; access: RoleAccess };
+
+/** Tek rol (değişiklik erişimiyle) veya rol listesi taşıyan kullanıcı */
+export type Principal = Role | { role: Role; grants?: readonly RoleGrant[] };
+
+export function isRole(value: unknown): value is Role {
+  return typeof value === "string" && (ROLES as readonly string[]).includes(value);
+}
+
+/**
+ * Ham rol listesini doğrular: tekrar eden rolde "edit" kazanır, sistem yöneticisi
+ * her zaman "edit"tir, sıra ROLES sırasıdır (ilk eleman birincil roldür).
+ * Liste boşsa yedek rol "edit" erişimiyle kullanılır.
+ */
+export function normalizeGrants(raw: unknown, fallbackRole?: string): RoleGrant[] {
+  const byRole = new Map<Role, RoleAccess>();
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const role = (item as { role?: unknown })?.role;
+      const access = (item as { access?: unknown })?.access;
+      if (!isRole(role)) continue;
+      const next: RoleAccess =
+        role === "SYSTEM_ADMIN" || access !== "view" ? "edit" : "view";
+      if (byRole.get(role) !== "edit") byRole.set(role, next);
+    }
+  }
+  if (byRole.size === 0 && isRole(fallbackRole)) {
+    byRole.set(fallbackRole, "edit");
+  }
+  return ROLES.filter((role) => byRole.has(role)).map((role) => ({
+    role,
+    access: byRole.get(role)!,
+  }));
+}
+
+export function grantsOf(principal: Principal): readonly RoleGrant[] {
+  if (typeof principal === "string") return [{ role: principal, access: "edit" }];
+  return principal.grants && principal.grants.length > 0
+    ? principal.grants
+    : [{ role: principal.role, access: "edit" }];
+}
+
+function editGrants(principal: Principal): RoleGrant[] {
+  return grantsOf(principal).filter((g) => g.access === "edit");
+}
+
+export function hasRole(principal: Principal, role: Role): boolean {
+  return grantsOf(principal).some((g) => g.role === role);
+}
+
+export function grantsLabel(grants: readonly RoleGrant[]): string {
+  return grants
+    .map((g) =>
+      g.access === "view" ? `${ROLE_LABELS[g.role]} (görüntüleme)` : ROLE_LABELS[g.role]
+    )
+    .join(", ");
+}
 
 export const RESOURCES = [
   "dashboard",
@@ -41,7 +112,9 @@ export type SessionUser = {
   userId: string;
   username: string;
   name: string;
+  /** Birincil rol (grants içindeki ilk rol) */
   role: Role;
+  grants: RoleGrant[];
   /** true ise kullanıcı şifresini değiştirene kadar uygulamaya erişemez */
   mustChangePassword: boolean;
   /** Kullanıcı kaydındaki tokenVersion ile eşleşmezse oturum geçersizdir */
@@ -57,7 +130,108 @@ export const ROLE_LABELS: Record<Role, string> = {
   PRODUCTION: "Üretim",
   SALES: "Satış Pazarlama",
   HR: "İK",
+  EXECUTIVE: "Yönetim",
+  STOCK_FACTORY: "Fabrika Depo",
+  STOCK_INTERNET: "İnternet Depo",
+  STOCK_ISTANBUL: "İstanbul Depo",
 };
+
+/** Yalnızca belirli depoları görebilen roller → depo kimlikleri */
+const ROLE_WAREHOUSE_SCOPE: Partial<Record<Role, readonly string[]>> = {
+  STOCK_FACTORY: ["wh-mamul-fabrika"],
+  STOCK_INTERNET: ["wh-mamul-internet"],
+  STOCK_ISTANBUL: ["wh-mamul-istanbul"],
+};
+
+/** Depoya bağlı rollerin birbirine mamul aktarabildiği depolar */
+const FINISHED_TRANSFER_WAREHOUSES: readonly string[] = [
+  "wh-mamul-fabrika",
+  "wh-mamul-internet",
+  "wh-mamul-istanbul",
+];
+
+function roleWarehouseScope(role: Role): readonly string[] | null {
+  return ROLE_WAREHOUSE_SCOPE[role] ?? null;
+}
+
+/** Kaynağı okuyabilen rollerin depo kapsamlarının birleşimi; kapsamsız rol varsa null */
+function scopeFor(principal: Principal, resource: Resource): readonly string[] | null {
+  const relevant = grantsOf(principal).filter((g) =>
+    grantHasPermission(g, `${resource}:read`)
+  );
+  if (relevant.length === 0) return null;
+  const ids = new Set<string>();
+  for (const g of relevant) {
+    const scope = roleWarehouseScope(g.role);
+    if (!scope) return null;
+    for (const id of scope) ids.add(id);
+  }
+  return [...ids];
+}
+
+/** Stok ve aktarımları görebildiği depolar; null: tüm depolar */
+export function warehouseScope(principal: Principal): readonly string[] | null {
+  return scopeFor(principal, "stock");
+}
+
+/** Depo listesinde görebildiği depolar (aktarım hedefleri dahil); null: tüm depolar */
+export function warehouseListScope(principal: Principal): readonly string[] | null {
+  return scopeFor(principal, "warehouses") ? FINISHED_TRANSFER_WAREHOUSES : null;
+}
+
+/** Depoya bağlı rol aktarımı: kaynak kendi deposu, hedef diğer mamul depoları */
+export function canTransferBetween(
+  principal: Principal,
+  fromWarehouseId: string,
+  toWarehouseId: string
+): boolean {
+  return editGrants(principal).some((g) => {
+    if (!grantHasPermission(g, "stock:write")) return false;
+    const scope = roleWarehouseScope(g.role);
+    if (!scope) return true;
+    return (
+      scope.includes(fromWarehouseId) && FINISHED_TRANSFER_WAREHOUSES.includes(toWarehouseId)
+    );
+  });
+}
+
+/** Mamul transfer talebi: kendi deposuna (kapsamlı rol) veya herhangi bir mamul deposuna */
+export function canRequestStockTransfer(principal: Principal, toWarehouseId?: string): boolean {
+  return editGrants(principal).some((g) => {
+    if (!grantHasPermission(g, "stock:write") || g.role === "PRODUCTION") return false;
+    const scope = roleWarehouseScope(g.role);
+    if (!scope) return true;
+    return toWarehouseId === undefined || scope.includes(toWarehouseId);
+  });
+}
+
+/** Talebi gönderen depo yanıtlar (onay / ret) */
+export function canRespondTransferRequest(
+  principal: Principal,
+  request: { fromWarehouseId: string }
+): boolean {
+  return editGrants(principal).some((g) => {
+    if (!grantHasPermission(g, "stock:write") || g.role === "PRODUCTION") return false;
+    const scope = roleWarehouseScope(g.role);
+    return !scope || scope.includes(request.fromWarehouseId);
+  });
+}
+
+/** İstanbul sevkiyat adımı: onay ve çıkış gönderen depoda, varış alan depoda */
+export function canAdvanceStockTransfer(
+  principal: Principal,
+  transfer: { fromWarehouseId: string; toWarehouseId: string },
+  action: string
+): boolean {
+  return editGrants(principal).some((g) => {
+    if (!grantHasPermission(g, "stock:write")) return false;
+    const scope = roleWarehouseScope(g.role);
+    if (!scope) return true;
+    return action === "arrive"
+      ? scope.includes(transfer.toWarehouseId)
+      : scope.includes(transfer.fromWarehouseId);
+  });
+}
 
 /** Eski kurulumlarda kalan rol adları → yeni roller (ADMIN ayrı ele alınır) */
 export const LEGACY_ROLE_MAP: Record<string, Role> = {
@@ -112,11 +286,19 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
   ],
   ACCOUNTING: [
     ...resourcePerms(
-      ["invoices", "delivery_notes", "ledger", "budget", "suppliers", "personnel"],
+      [
+        "invoices",
+        "delivery_notes",
+        "ledger",
+        "budget",
+        "suppliers",
+        "personnel",
+        "raw_material_orders",
+      ],
       "both"
     ),
     ...resourcePerms(
-      ["customers", "orders", "raw_materials", "products", "warehouses", "raw_material_orders"],
+      ["customers", "orders", "raw_materials", "products", "warehouses"],
       "read"
     ),
   ],
@@ -130,7 +312,7 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
   ],
   SALES: [
     ...resourcePerms(
-      ["customers", "orders", "delivery_notes", "raw_material_orders"],
+      ["customers", "orders", "delivery_notes", "raw_material_orders", "invoices"],
       "both"
     ),
     ...resourcePerms(["factory", "raw_materials", "warehouses", "suppliers"], "read"),
@@ -140,44 +322,160 @@ const ROLE_PERMISSIONS: Record<Exclude<Role, "SYSTEM_ADMIN">, Permission[]> = {
     ...resourcePerms(["admin"], "read"),
     ...resourcePerms(["users"], "both"),
   ],
+  EXECUTIVE: resourcePerms(
+    [
+      "customers",
+      "invoices",
+      "stock",
+      "factory",
+      "recipes",
+      "raw_material_orders",
+      "raw_materials",
+      "warehouses",
+    ],
+    "read"
+  ),
+  STOCK_FACTORY: [...resourcePerms(["stock"], "both"), ...resourcePerms(["warehouses"], "read")],
+  STOCK_INTERNET: [...resourcePerms(["stock"], "both"), ...resourcePerms(["warehouses"], "read")],
+  STOCK_ISTANBUL: [...resourcePerms(["stock"], "both"), ...resourcePerms(["warehouses"], "read")],
 };
 
-export function isSystemAdmin(role: Role): boolean {
-  return role === "SYSTEM_ADMIN";
+const SCOPED_STOCK_PAGES = ["/stock", "/warehouses"];
+
+/** Rapor ve dashboard yalnızca sistem yöneticisine açık */
+const SYSTEM_ADMIN_PAGES = ["/dashboard", "/ledger"];
+
+/** Yalnızca listelenen sayfaları açabilen roller; diğer sayfalar okuma izni olsa da kapalıdır */
+const ROLE_PAGES: Partial<Record<Role, readonly string[]>> = {
+  HR: ["/personnel", "/admin"],
+  PRODUCTION: ["/factory", "/recipes", "/rd-lab"],
+  STOCK: [
+    "/raw-materials",
+    "/products",
+    "/stock",
+    "/warehouses",
+    "/raw-material-orders",
+    "/orders",
+  ],
+  SALES: ["/customers", "/quotes", "/orders"],
+  ACCOUNTING: [
+    "/suppliers",
+    "/invoices",
+    "/quotes",
+    "/delivery-notes",
+    "/raw-material-tracking",
+    "/cash",
+    "/budget",
+    "/document-settings",
+  ],
+  EXECUTIVE: [
+    "/customers",
+    "/quotes",
+    "/stock",
+    "/factory",
+    "/recipes",
+    "/raw-material-orders",
+    "/raw-material-tracking",
+  ],
+  STOCK_FACTORY: SCOPED_STOCK_PAGES,
+  STOCK_INTERNET: SCOPED_STOCK_PAGES,
+  STOCK_ISTANBUL: SCOPED_STOCK_PAGES,
+};
+
+function matchesPage(pages: readonly string[], pathname: string): boolean {
+  return pages.some((page) => pathname === page || pathname.startsWith(`${page}/`));
+}
+
+function isRolePage(role: Role, pathname: string): boolean {
+  if (role === "SYSTEM_ADMIN") return true;
+  if (matchesPage(SYSTEM_ADMIN_PAGES, pathname)) return false;
+  const pages = ROLE_PAGES[role];
+  return !pages || matchesPage(pages, pathname);
+}
+
+export function isSystemAdmin(principal: Principal): boolean {
+  return hasRole(principal, "SYSTEM_ADMIN");
 }
 
 /** Denetim kaydı yalnızca sistem yöneticisine açık */
-export function canViewAuditLogs(role: Role): boolean {
-  return role === "SYSTEM_ADMIN";
+export function canViewAuditLogs(principal: Principal): boolean {
+  return hasRole(principal, "SYSTEM_ADMIN");
 }
 
-export function isStockRole(role: Role): boolean {
-  return role === "STOCK";
+/** Depo rolüyle sınırlı kullanıcı: sevkiyatta yalnızca depo adımlarını görür */
+export function isStockRole(principal: Principal): boolean {
+  return (
+    hasRole(principal, "STOCK") &&
+    !editGrants(principal).some(
+      (g) => g.role !== "STOCK" && grantHasPermission(g, "orders:write")
+    )
+  );
 }
 
 /** Satış siparişi oluşturma — depo yalnızca sevkiyat yapar */
-export function canCreateSalesOrder(role: Role): boolean {
-  return canWrite(role, "orders") && role !== "STOCK";
+export function canCreateSalesOrder(principal: Principal): boolean {
+  return editGrants(principal).some(
+    (g) => g.role !== "STOCK" && grantHasPermission(g, "orders:write")
+  );
 }
 
-/** Depo (ve üretim) hammadde talebi açar. Satış talep açmaz, alım bilgisini girer. */
-export function canCreateMaterialRequest(role: Role): boolean {
-  return canWrite(role, "raw_material_orders") && role !== "SALES";
+/** Depo (ve üretim) hammadde talebi açar. Satış ve muhasebe talep açmaz. */
+export function canCreateMaterialRequest(principal: Principal): boolean {
+  return editGrants(principal).some(
+    (g) =>
+      g.role !== "SALES" &&
+      g.role !== "ACCOUNTING" &&
+      grantHasPermission(g, "raw_material_orders:write")
+  );
 }
 
-/** Tedarikçi, fiyat ve planlama — satış ile yönetici roller */
-export function canEditRawMaterialPurchase(role: Role): boolean {
-  return role === "SALES" || role === "SYSTEM_ADMIN" || isAdminLikeRole(role);
+const PURCHASE_ROLES: readonly Role[] = ["SALES", "ACCOUNTING", "SYSTEM_ADMIN", "ADMIN", "MANAGER"];
+
+/** Tedarikçi, fiyat ve planlama — satış, muhasebe ve yönetici roller */
+export function canEditRawMaterialPurchase(principal: Principal): boolean {
+  return editGrants(principal).some((g) => PURCHASE_ROLES.includes(g.role));
 }
 
-/** Stok girişi — depo; üretim depodan talep eder, giriş yapmaz */
-export function canCreateStockEntry(role: Role): boolean {
-  return canWrite(role, "stock") && role !== "PRODUCTION";
+/** Fatura, çek/senet gibi teklif dışı muhasebe belgeleri */
+export function canCreateInvoiceDocuments(principal: Principal): boolean {
+  return editGrants(principal).some(
+    (g) => g.role !== "SALES" && grantHasPermission(g, "invoices:write")
+  );
+}
+
+/** Fatura kayıtlarına yalnızca satış rolüyle yazabilen kullanıcı: yalnızca teklif */
+export function isQuoteOnlyRole(principal: Principal): boolean {
+  return canWrite(principal, "invoices") && !canCreateInvoiceDocuments(principal);
+}
+
+/** Yol bazlı yetkiden sonra rol bazlı ek API kısıtları */
+export function isApiBlockedForRole(
+  principal: Principal,
+  pathname: string,
+  method: string
+): boolean {
+  const write = ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase());
+  if (write && isQuoteOnlyRole(principal)) {
+    return ["/api/invoice-events", "/api/cheque-notes", "/api/document-settings"].some(
+      (prefix) => pathname.startsWith(prefix)
+    );
+  }
+  return false;
+}
+
+/** Stok girişi — depo; üretim depodan talep eder, depoya bağlı roller giriş yapmaz */
+export function canCreateStockEntry(principal: Principal): boolean {
+  return editGrants(principal).some(
+    (g) =>
+      g.role !== "PRODUCTION" &&
+      !roleWarehouseScope(g.role) &&
+      grantHasPermission(g, "stock:write")
+  );
 }
 
 /** Depolar arası aktarım / depodan hammadde talebi */
-export function canCreateStockTransfer(role: Role): boolean {
-  return canWrite(role, "stock");
+export function canCreateStockTransfer(principal: Principal): boolean {
+  return canWrite(principal, "stock");
 }
 
 export const STOCK_RECEIPT_ACTIONS = [
@@ -187,11 +485,8 @@ export const STOCK_RECEIPT_ACTIONS = [
   "reject_qc",
 ] as const;
 
-export function canApplyRawMaterialOrderAction(
-  role: Role,
-  action: string
-): boolean {
-  if (!canWrite(role, "raw_material_orders")) return false;
+function roleCanApplyRawMaterialOrderAction(role: Role, action: string): boolean {
+  if (!roleHasPermission(role, "raw_material_orders:write")) return false;
   if (role === "SALES") return false;
   if (role === "STOCK") {
     return (STOCK_RECEIPT_ACTIONS as readonly string[]).includes(action);
@@ -202,14 +497,25 @@ export function canApplyRawMaterialOrderAction(
   return true;
 }
 
+export function canApplyRawMaterialOrderAction(
+  principal: Principal,
+  action: string
+): boolean {
+  return editGrants(principal).some((g) => roleCanApplyRawMaterialOrderAction(g.role, action));
+}
+
 export const SHIPMENT_STATUSES = ["picking", "shipped", "delivered"] as const;
 
-export function canSetOrderStatus(role: Role, status: string): boolean {
-  if (!canWrite(role, "orders")) return false;
+function roleCanSetOrderStatus(role: Role, status: string): boolean {
+  if (!roleHasPermission(role, "orders:write")) return false;
   if (role === "STOCK") {
     return (SHIPMENT_STATUSES as readonly string[]).includes(status);
   }
   return true;
+}
+
+export function canSetOrderStatus(principal: Principal, status: string): boolean {
+  return editGrants(principal).some((g) => roleCanSetOrderStatus(g.role, status));
 }
 
 /** Depo için sıradaki sevkiyat adımı (bilgi girişinden teslime) */
@@ -232,19 +538,21 @@ export function isProtectedUserRole(role: string): boolean {
   return role === "SYSTEM_ADMIN" || role === "ADMIN" || role === "MANAGER";
 }
 
-/** Sistem yöneticisi veya yönetici/müdür */
-export function isPrivilegedRole(role: Role): boolean {
-  return role === "SYSTEM_ADMIN" || isAdminLikeRole(role);
+/** Sistem yöneticisi veya yönetici/müdür (değişiklik erişimiyle) */
+export function isPrivilegedRole(principal: Principal): boolean {
+  return editGrants(principal).some(
+    (g) => g.role === "SYSTEM_ADMIN" || isAdminLikeRole(g.role)
+  );
 }
 
 /** Teklif kalemlerinde yönetici olmayan rollerin verebileceği en yüksek iskonto (%) */
 export const QUOTE_DISCOUNT_LIMIT = 10;
 
-export function maxQuoteDiscountRate(role: Role): number {
-  return isPrivilegedRole(role) ? 100 : QUOTE_DISCOUNT_LIMIT;
+export function maxQuoteDiscountRate(principal: Principal): number {
+  return isPrivilegedRole(principal) ? 100 : QUOTE_DISCOUNT_LIMIT;
 }
 
-export function assignableRoles(actor: Role): Role[] {
+function roleAssignableRoles(actor: Role): Role[] {
   if (actor === "SYSTEM_ADMIN") return [...ROLES];
   if (isAdminLikeRole(actor)) {
     return ROLES.filter((role) => role !== "SYSTEM_ADMIN");
@@ -255,18 +563,36 @@ export function assignableRoles(actor: Role): Role[] {
   return [];
 }
 
-/**
- * Hedef kullanıcının mevcut rolü üzerinde işlem (rol, şifre, kapatma, silme).
- * İK yalnızca kendi rolü ve alt roller; korumalı rollere asla.
- */
-export function canManageUser(actor: Role, targetRole: string): boolean {
+export function assignableRoles(actor: Principal): Role[] {
+  const allowed = new Set<Role>();
+  for (const g of editGrants(actor)) {
+    for (const role of roleAssignableRoles(g.role)) allowed.add(role);
+  }
+  return ROLES.filter((role) => allowed.has(role));
+}
+
+function roleCanManageUser(actor: Role, targetRole: string): boolean {
   if (actor === "SYSTEM_ADMIN") return true;
   if (isAdminLikeRole(actor)) return targetRole !== "SYSTEM_ADMIN";
   if (actor === "HR") return !isProtectedUserRole(targetRole);
   return false;
 }
 
-export function canAssignRole(actor: Role, targetRole: Role): boolean {
+/**
+ * Hedef kullanıcının rolleri üzerinde işlem (rol, şifre, kapatma, silme).
+ * Hedefin tüm rollerini yönetebilen bir rol gerekir; İK korumalı rollere asla dokunamaz.
+ */
+export function canManageUser(
+  actor: Principal,
+  targetRoles: string | readonly string[]
+): boolean {
+  const targets = typeof targetRoles === "string" ? [targetRoles] : targetRoles;
+  return editGrants(actor).some((g) =>
+    targets.every((target) => roleCanManageUser(g.role, target))
+  );
+}
+
+export function canAssignRole(actor: Principal, targetRole: Role): boolean {
   return assignableRoles(actor).includes(targetRole);
 }
 
@@ -275,7 +601,7 @@ export function rolePermissions(role: Role): Permission[] | "*" {
   return ROLE_PERMISSIONS[role] ?? [];
 }
 
-export function hasPermission(role: Role, permission: Permission): boolean {
+function roleHasPermission(role: Role, permission: Permission): boolean {
   const perms = rolePermissions(role);
   if (perms === "*") return true;
   if (perms.includes(permission)) return true;
@@ -286,12 +612,22 @@ export function hasPermission(role: Role, permission: Permission): boolean {
   return false;
 }
 
-export function canRead(role: Role, resource: Resource): boolean {
-  return hasPermission(role, `${resource}:read`);
+/** Görüntüleme erişimli rol yalnızca okuma izni verir */
+function grantHasPermission(grant: RoleGrant, permission: Permission): boolean {
+  if (grant.access === "view" && permission.endsWith(":write")) return false;
+  return roleHasPermission(grant.role, permission);
 }
 
-export function canWrite(role: Role, resource: Resource): boolean {
-  return hasPermission(role, `${resource}:write`);
+export function hasPermission(principal: Principal, permission: Permission): boolean {
+  return grantsOf(principal).some((g) => grantHasPermission(g, permission));
+}
+
+export function canRead(principal: Principal, resource: Resource): boolean {
+  return hasPermission(principal, `${resource}:read`);
+}
+
+export function canWrite(principal: Principal, resource: Resource): boolean {
+  return hasPermission(principal, `${resource}:write`);
 }
 
 /** Sayfa yolu → kaynak */
@@ -301,6 +637,7 @@ export function pathToResource(pathname: string): Resource | null {
   if (pathname.startsWith("/factory")) return "factory";
   if (pathname.startsWith("/recipes")) return "recipes";
   if (pathname.startsWith("/raw-material-orders")) return "raw_material_orders";
+  if (pathname.startsWith("/raw-material-tracking")) return "raw_material_orders";
   if (pathname.startsWith("/raw-materials")) return "raw_materials";
   if (pathname.startsWith("/products")) return "products";
   if (pathname.startsWith("/stock")) return "stock";
@@ -324,6 +661,15 @@ export function getPageReadPermission(pathname: string): Permission | null {
   const resource = pathToResource(pathname);
   if (!resource) return null;
   return `${resource}:read`;
+}
+
+/** Sayfa açılabilir mi — rollerden biri sayfayı listeler ve kaynağı okuyabilir */
+export function canOpenPage(principal: Principal, pathname: string): boolean {
+  const permission = getPageReadPermission(pathname);
+  if (!permission) return true;
+  return grantsOf(principal).some(
+    (g) => isRolePage(g.role, pathname) && grantHasPermission(g, permission)
+  );
 }
 
 const CATALOG_ENTITY_RESOURCE: Record<string, Resource> = {
@@ -451,6 +797,7 @@ export const NAV_ITEMS: {
   resource: Resource;
   label: string;
   hiddenFor?: Role[];
+  onlyFor?: Role[];
 }[] = [
   {
     title: "Genel",
@@ -485,9 +832,23 @@ export const NAV_ITEMS: {
     href: "/orders",
     resource: "orders",
     label: "Sevkiyat",
-    hiddenFor: ["PRODUCTION"],
+    hiddenFor: ["PRODUCTION", "SALES"],
   },
   { title: "Satış", href: "/customers", resource: "customers", label: "Müşteriler" },
+  {
+    title: "Satış",
+    href: "/quotes",
+    resource: "invoices",
+    label: "Fiyat Teklifi",
+    onlyFor: ["EXECUTIVE", "SALES"],
+  },
+  {
+    title: "Satış",
+    href: "/orders",
+    resource: "orders",
+    label: "Sevkiyat",
+    onlyFor: ["SALES"],
+  },
   {
     title: "Muhasebe",
     href: "/suppliers",
@@ -496,6 +857,12 @@ export const NAV_ITEMS: {
     hiddenFor: ["PRODUCTION", "SALES"],
   },
   { title: "Muhasebe", href: "/invoices", resource: "invoices", label: "Faturalar" },
+  {
+    title: "Muhasebe",
+    href: "/raw-material-tracking",
+    resource: "raw_material_orders",
+    label: "Hammadde Talep Takip",
+  },
   { title: "Muhasebe", href: "/cash", resource: "budget", label: "Kasa" },
   { title: "Muhasebe", href: "/ledger", resource: "ledger", label: "Rapor" },
   { title: "Muhasebe", href: "/budget", resource: "budget", label: "Bütçe" },
@@ -510,21 +877,34 @@ const ROLE_HOME: Record<Role, string> = {
   STOCK: "/stock",
   ACCOUNTING: "/invoices",
   PRODUCTION: "/factory",
-  SALES: "/orders",
+  SALES: "/customers",
   HR: "/personnel",
+  EXECUTIVE: "/customers",
+  STOCK_FACTORY: "/stock",
+  STOCK_INTERNET: "/stock",
+  STOCK_ISTANBUL: "/stock",
 };
 
-export function isNavItemVisible(role: Role, item: (typeof NAV_ITEMS)[number]): boolean {
-  if (item.hiddenFor?.includes(role)) return false;
-  return canRead(role, item.resource);
+export function isNavItemVisible(
+  principal: Principal,
+  item: (typeof NAV_ITEMS)[number]
+): boolean {
+  return grantsOf(principal).some(
+    (g) =>
+      !item.hiddenFor?.includes(g.role) &&
+      (!item.onlyFor || item.onlyFor.includes(g.role)) &&
+      isRolePage(g.role, item.href) &&
+      grantHasPermission(g, `${item.resource}:read`)
+  );
 }
 
-export function getFirstAllowedPath(role: Role): string {
-  const home = ROLE_HOME[role];
-  const homeResource = pathToResource(home);
-  if (homeResource && canRead(role, homeResource)) return home;
+export function getFirstAllowedPath(principal: Principal): string {
+  for (const g of grantsOf(principal)) {
+    const home = ROLE_HOME[g.role];
+    if (canOpenPage(principal, home)) return home;
+  }
   for (const item of NAV_ITEMS) {
-    if (isNavItemVisible(role, item)) return item.href;
+    if (isNavItemVisible(principal, item)) return item.href;
   }
   return "/login";
 }

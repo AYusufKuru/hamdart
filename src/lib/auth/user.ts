@@ -1,10 +1,11 @@
-import { ROLE_LABELS, type Role } from "@/lib/auth/permissions";
+import { grantsLabel, type Role, type RoleGrant } from "@/lib/auth/permissions";
 
 export type AuthUser = {
   userId: string;
   username: string;
   name: string;
   role: Role;
+  grants: RoleGrant[];
   roleLabel: string;
   mustChangePassword: boolean;
 };
@@ -14,6 +15,7 @@ export function toAuthUser(session: {
   username: string;
   name: string;
   role: Role;
+  grants: RoleGrant[];
   mustChangePassword: boolean;
 }): AuthUser {
   return {
@@ -21,7 +23,8 @@ export function toAuthUser(session: {
     username: session.username,
     name: session.name,
     role: session.role,
-    roleLabel: ROLE_LABELS[session.role] ?? session.role,
+    grants: session.grants,
+    roleLabel: grantsLabel(session.grants),
     mustChangePassword: session.mustChangePassword,
   };
 }

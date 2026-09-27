@@ -38,6 +38,7 @@ import type {
   Supplier,
 } from "@/data/catalog";
 import { useAuth } from "@/lib/auth/auth-context";
+import { canCreateInvoiceDocuments } from "@/lib/auth/permissions";
 import type { InvoiceDocumentType } from "@/lib/invoice-docs";
 import { moneyTry, type PartyAccountSummary } from "@/lib/party-account";
 import { parseGuarantors, parseRelatives } from "@/lib/supplier-card";
@@ -129,7 +130,8 @@ export function PartyDetailWorkspace({
   listHref: string;
   onSaved: () => void;
 }) {
-  const { canWrite } = useAuth();
+  const { canWrite, user } = useAuth();
+  const canInvoice = Boolean(user && canCreateInvoiceDocuments(user));
   const [editOpen, setEditOpen] = useState(false);
   const [sheet, setSheet] = useState<SheetKey | null>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceDocumentType>("sales");
@@ -336,13 +338,15 @@ export function PartyDetailWorkspace({
           <CanWrite resource="invoices">
             {isCustomer ? (
               <>
-                <ActionCard
-                  icon={Receipt}
-                  title="Satış faturası"
-                  hint="Bu müşteriye fatura kes"
-                  tone="indigo"
-                  onClick={() => openInvoice("sales")}
-                />
+                {canInvoice ? (
+                  <ActionCard
+                    icon={Receipt}
+                    title="Satış faturası"
+                    hint="Bu müşteriye fatura kes"
+                    tone="indigo"
+                    onClick={() => openInvoice("sales")}
+                  />
+                ) : null}
                 <ActionCard
                   icon={FileText}
                   title="Fiyat teklifi"
@@ -350,29 +354,33 @@ export function PartyDetailWorkspace({
                   tone="sky"
                   onClick={() => setSheet("quote")}
                 />
-                <ActionCard
-                  icon={Receipt}
-                  title="Peşin satış"
-                  hint="Nakit satış belgesi"
-                  tone="emerald"
-                  onClick={() => openInvoice("cash_sale")}
-                />
-                <ActionCard
-                  icon={Receipt}
-                  title="İade faturası"
-                  hint="Satış iadesi düzenle"
-                  tone="amber"
-                  onClick={() => openInvoice("return")}
-                />
-                <ActionCard
-                  icon={ScrollText}
-                  title="Çek / senet al"
-                  hint="Müşteriden alınan evrak"
-                  tone="amber"
-                  onClick={() => setSheet("cheque")}
-                />
+                {canInvoice ? (
+                  <>
+                    <ActionCard
+                      icon={Receipt}
+                      title="Peşin satış"
+                      hint="Nakit satış belgesi"
+                      tone="emerald"
+                      onClick={() => openInvoice("cash_sale")}
+                    />
+                    <ActionCard
+                      icon={Receipt}
+                      title="İade faturası"
+                      hint="Satış iadesi düzenle"
+                      tone="amber"
+                      onClick={() => openInvoice("return")}
+                    />
+                    <ActionCard
+                      icon={ScrollText}
+                      title="Çek / senet al"
+                      hint="Müşteriden alınan evrak"
+                      tone="amber"
+                      onClick={() => setSheet("cheque")}
+                    />
+                  </>
+                ) : null}
               </>
-            ) : (
+            ) : canInvoice ? (
               <>
                 <ActionCard
                   icon={Receipt}
@@ -389,7 +397,7 @@ export function PartyDetailWorkspace({
                   onClick={() => setSheet("cheque")}
                 />
               </>
-            )}
+            ) : null}
           </CanWrite>
           <CanWrite resource="delivery_notes">
             <ActionCard

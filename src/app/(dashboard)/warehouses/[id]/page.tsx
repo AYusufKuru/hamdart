@@ -38,10 +38,13 @@ import { getStockTransfers, getWarehouses } from "@/lib/warehouse-store";
 import { StockFormSheet } from "@/components/stock/stock-form-sheet";
 import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
 import { IstanbulShipmentTable } from "@/components/warehouses/istanbul-shipment-table";
+import { TransferRequestsCard } from "@/components/warehouses/transfer-requests-card";
 import { useAuth } from "@/lib/auth/auth-context";
 import {
+  canAdvanceStockTransfer,
   canCreateStockEntry,
   canCreateStockTransfer,
+  warehouseScope,
 } from "@/lib/auth/permissions";
 import { formatDate, formatNumber } from "@/lib/utils";
 import {
@@ -62,8 +65,10 @@ export default function WarehouseDetailPage({
 }) {
   const { id } = use(params);
   const { user } = useAuth();
-  const canEnterStock = Boolean(user && canCreateStockEntry(user.role));
-  const canTransfer = Boolean(user && canCreateStockTransfer(user.role));
+  const canEnterStock = Boolean(user && canCreateStockEntry(user));
+  const scope = user ? warehouseScope(user) : null;
+  const canTransfer =
+    Boolean(user && canCreateStockTransfer(user)) && (!scope || scope.includes(id));
   const [warehouse, setWarehouse] = useState<Warehouse | null | undefined>(
     undefined
   );
@@ -94,18 +99,6 @@ export default function WarehouseDetailPage({
     void refreshStock();
   }, [refreshStock]);
 
-  if (warehouse === undefined) {
-    return (
-      <div className="p-10 text-sm text-muted-foreground">Depo yükleniyor…</div>
-    );
-  }
-  if (!warehouse) notFound();
-
-  const config =
-    warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
-  const Icon = config.icon;
-  const utilization = occupancyPercent(warehouse.used, warehouse.capacity);
-
   const stats = useMemo(() => {
     const alerts = items.filter(
       (i) =>
@@ -127,6 +120,18 @@ export default function WarehouseDetailPage({
       lowLab: lowLab.length,
     };
   }, [items, categories.length]);
+
+  if (warehouse === undefined) {
+    return (
+      <div className="p-10 text-sm text-muted-foreground">Depo yükleniyor…</div>
+    );
+  }
+  if (!warehouse || (scope && !scope.includes(warehouse.id))) notFound();
+
+  const config =
+    warehouseTypeConfig[warehouse.type] ?? warehouseTypeConfig.production;
+  const Icon = config.icon;
+  const utilization = occupancyPercent(warehouse.used, warehouse.capacity);
 
   return (
     <div className="p-10 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 min-h-full">
@@ -259,6 +264,16 @@ export default function WarehouseDetailPage({
       </Card>
 
       {isFinishedWarehouseType(warehouse.type) ? (
+        <TransferRequestsCard
+          warehouses={warehouses}
+          stock={items}
+          transfers={transfers}
+          focusWarehouseId={id}
+          onChanged={() => void refreshStock()}
+        />
+      ) : null}
+
+      {isFinishedWarehouseType(warehouse.type) ? (
         <Card className="glass-card border-none">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -270,6 +285,9 @@ export default function WarehouseDetailPage({
             <IstanbulShipmentTable
               transfers={transfers}
               canAct={canTransfer}
+              canActOn={(row, action) =>
+                Boolean(user && canAdvanceStockTransfer(user, row, action))
+              }
               onChanged={() => void refreshStock()}
             />
           </CardContent>

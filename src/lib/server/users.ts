@@ -1,10 +1,15 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
-  ROLES,
   canAssignRole,
   canManageUser,
+  grantsLabel,
+  isRole,
   isSystemAdmin,
+  normalizeGrants,
+  ROLES,
   type Role,
+  type RoleGrant,
   type SessionUser,
 } from "@/lib/auth/permissions";
 import { hashPassword, validatePassword } from "@/lib/auth/password";
@@ -16,7 +21,9 @@ export type UserRow = {
   id: string;
   username: string;
   name: string;
+  /** Birincil rol */
   role: Role;
+  grants: RoleGrant[];
   active: boolean;
   mustChangePassword: boolean;
   passwordChangedAt: string | null;
@@ -29,6 +36,7 @@ const SAFE_SELECT = {
   username: true,
   name: true,
   role: true,
+  roleGrants: true,
   active: true,
   mustChangePassword: true,
   passwordChangedAt: true,
@@ -40,18 +48,40 @@ type SafeUser = {
   username: string;
   name: string;
   role: string;
+  roleGrants: unknown;
   active: boolean;
   mustChangePassword: boolean;
   passwordChangedAt: Date | null;
   createdAt: Date;
 };
 
+function grantsOfUser(u: { role: string; roleGrants: unknown }): RoleGrant[] {
+  return normalizeGrants(u.roleGrants, u.role);
+}
+
+function rolesOf(grants: readonly RoleGrant[]): Role[] {
+  return grants.map((g) => g.role);
+}
+
+function hasSystemAdmin(grants: readonly RoleGrant[]): boolean {
+  return grants.some((g) => g.role === "SYSTEM_ADMIN");
+}
+
+function sameGrants(a: readonly RoleGrant[], b: readonly RoleGrant[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((g, i) => g.role === b[i].role && g.access === b[i].access)
+  );
+}
+
 function toRow(u: SafeUser): UserRow {
+  const grants = grantsOfUser(u);
   return {
     id: u.id,
     username: u.username,
     name: u.name,
-    role: u.role as Role,
+    role: grants[0]?.role ?? (u.role as Role),
+    grants,
     active: u.active,
     mustChangePassword: u.mustChangePassword,
     passwordChangedAt: u.passwordChangedAt?.toISOString() ?? null,
@@ -89,17 +119,27 @@ function normalizeName(raw: unknown): string {
   return name;
 }
 
-function normalizeRole(raw: unknown): Role {
-  if (typeof raw !== "string" || !ROLES.includes(raw as Role)) {
-    throw new UserInputError(
-      `Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}`
-    );
+/** `grants` listesi veya tek `role` alanından rol listesi */
+function readGrantsInput(body: Record<string, unknown>): RoleGrant[] {
+  if (Array.isArray(body.grants)) {
+    const grants = normalizeGrants(body.grants);
+    if (grants.length === 0) {
+      throw new UserInputError("En az bir rol seçin");
+    }
+    return grants;
   }
-  return raw as Role;
+  if (isRole(body.role)) return [{ role: body.role, access: "edit" }];
+  throw new UserInputError(`Geçersiz rol. Geçerli roller: ${ROLES.join(", ")}`);
 }
 
-function assertCanManageTarget(actor: SessionUser, targetRole: string): void {
-  if (!canManageUser(actor.role, targetRole)) {
+function assertCanAssign(actor: SessionUser, grants: readonly RoleGrant[]): void {
+  if (!grants.every((g) => canAssignRole(actor, g.role))) {
+    throw new UserInputError("Seçilen rollerden birini atama yetkiniz yok");
+  }
+}
+
+function assertCanManageTarget(actor: SessionUser, targetGrants: readonly RoleGrant[]): void {
+  if (!canManageUser(actor, rolesOf(targetGrants))) {
     throw new UserInputError("Bu kullanıcı üzerinde işlem yapamazsınız");
   }
 }
@@ -110,8 +150,9 @@ async function assertNotLastActiveSystemAdmin(
   action: string
 ): Promise<void> {
   const target = await prisma.user.findUnique({ where: { id: userId } });
-  if (!target || target.role !== "SYSTEM_ADMIN" || !target.active) return;
+  if (!target || !target.active || !hasSystemAdmin(grantsOfUser(target))) return;
 
+  // Birincil rol, rol listesindeki en yetkili roldür; sistem yöneticisi her zaman öndedir.
   const activeCount = await prisma.user.count({
     where: { role: "SYSTEM_ADMIN", active: true },
   });
@@ -127,10 +168,8 @@ export async function listUsers(actor: SessionUser): Promise<UserRow[]> {
     select: SAFE_SELECT,
     orderBy: [{ active: "desc" }, { username: "asc" }],
   });
-  const visible = isSystemAdmin(actor.role)
-    ? rows
-    : rows.filter((u) => u.role !== "SYSTEM_ADMIN");
-  return visible.map(toRow);
+  const mapped = rows.map(toRow);
+  return isSystemAdmin(actor) ? mapped : mapped.filter((u) => !hasSystemAdmin(u.grants));
 }
 
 export async function createUser(
@@ -142,10 +181,8 @@ export async function createUser(
 
   const username = normalizeUsername(body.username);
   const name = normalizeName(body.name);
-  const role = normalizeRole(body.role);
-  if (!canAssignRole(actor.role, role)) {
-    throw new UserInputError("Bu rolü atama yetkiniz yok");
-  }
+  const grants = readGrantsInput(body);
+  assertCanAssign(actor, grants);
   const password = typeof body.password === "string" ? body.password : "";
 
   const problem = validatePassword(password, { username, name });
@@ -160,7 +197,8 @@ export async function createUser(
     data: {
       username,
       name,
-      role,
+      role: grants[0].role,
+      roleGrants: grants as unknown as Prisma.InputJsonValue,
       passwordHash: await hashPassword(password, { username, name }),
       // Yönetici belirlediği şifreyi kullanıcı ilk girişte değiştirmek zorunda
       mustChangePassword: true,
@@ -173,8 +211,8 @@ export async function createUser(
     action: "CREATE",
     entityType: "User",
     entityId: created.id,
-    summary: `Kullanıcı oluşturuldu: ${username} (${role})`,
-    after: { username, name, role },
+    summary: `Kullanıcı oluşturuldu: ${username} (${grantsLabel(grants)})`,
+    after: { username, name, grants },
     ipAddress: ip,
   });
 
@@ -196,36 +234,39 @@ export async function updateUser(
   if (!before) {
     throw new UserInputError("Kullanıcı bulunamadı");
   }
-  assertCanManageTarget(actor, before.role);
+  const beforeGrants = grantsOfUser(before);
+  assertCanManageTarget(actor, beforeGrants);
 
   const data: {
     name?: string;
     role?: Role;
+    roleGrants?: Prisma.InputJsonValue;
     active?: boolean;
     passwordHash?: string;
     mustChangePassword?: boolean;
     passwordChangedAt?: Date | null;
     tokenVersion?: { increment: number };
   } = {};
+  let nextGrants: RoleGrant[] | null = null;
 
   if (body.name !== undefined) {
     data.name = normalizeName(body.name);
   }
 
-  if (body.role !== undefined) {
-    const role = normalizeRole(body.role);
-    if (!canAssignRole(actor.role, role)) {
-      throw new UserInputError("Bu rolü atama yetkiniz yok");
-    }
-    if (role !== before.role) {
+  if (body.grants !== undefined || body.role !== undefined) {
+    const grants = readGrantsInput(body);
+    assertCanAssign(actor, grants);
+    if (!sameGrants(grants, beforeGrants)) {
       if (userId === actor.userId) {
-        throw new UserInputError("Kendi rolünüzü değiştiremezsiniz");
+        throw new UserInputError("Kendi rollerinizi değiştiremezsiniz");
       }
-      if (before.role === "SYSTEM_ADMIN") {
+      if (hasSystemAdmin(beforeGrants) && !hasSystemAdmin(grants)) {
         await assertNotLastActiveSystemAdmin(userId, "rolü değiştirilemez");
       }
+      nextGrants = grants;
+      data.role = grants[0].role;
+      data.roleGrants = grants as unknown as Prisma.InputJsonValue;
     }
-    data.role = role;
   }
 
   if (body.active !== undefined) {
@@ -258,12 +299,19 @@ export async function updateUser(
     data.passwordChangedAt = null;
   }
 
-  if (Object.keys(data).length === 0) {
+  if (
+    Object.keys(data).length === 0 &&
+    body.grants === undefined &&
+    body.role === undefined
+  ) {
     throw new UserInputError("Güncellenecek alan belirtilmedi");
+  }
+  if (Object.keys(data).length === 0) {
+    return toRow(before);
   }
 
   const invalidatesSession =
-    (data.role !== undefined && data.role !== before.role) ||
+    nextGrants !== null ||
     (data.active !== undefined && data.active !== before.active) ||
     Boolean(data.passwordHash);
 
@@ -283,8 +331,8 @@ export async function updateUser(
 
   const changes: string[] = [];
   if (data.name !== undefined && data.name !== before.name) changes.push("ad");
-  if (data.role !== undefined && data.role !== before.role) {
-    changes.push(`rol (${before.role} → ${data.role})`);
+  if (nextGrants) {
+    changes.push(`roller (${grantsLabel(beforeGrants)} → ${grantsLabel(nextGrants)})`);
   }
   if (data.active !== undefined && data.active !== before.active) {
     changes.push(data.active ? "hesap açıldı" : "hesap kapatıldı");
@@ -299,8 +347,8 @@ export async function updateUser(
     summary: `Kullanıcı güncellendi: ${before.username} — ${
       changes.join(", ") || "değişiklik yok"
     }`,
-    before: { name: before.name, role: before.role, active: before.active },
-    after: { name: updated.name, role: updated.role, active: updated.active },
+    before: { name: before.name, grants: beforeGrants, active: before.active },
+    after: { name: updated.name, grants: grantsOfUser(updated), active: updated.active },
     ipAddress: ip,
   });
 
@@ -322,7 +370,8 @@ export async function deleteUser(
   if (userId === actor.userId) {
     throw new UserInputError("Kendi hesabınızı silemezsiniz");
   }
-  assertCanManageTarget(actor, target.role);
+  const targetGrants = grantsOfUser(target);
+  assertCanManageTarget(actor, targetGrants);
   await assertNotLastActiveSystemAdmin(userId, "silinemez");
 
   await prisma.user.delete({ where: { id: userId } });
@@ -333,11 +382,11 @@ export async function deleteUser(
     action: "DELETE",
     entityType: "User",
     entityId: userId,
-    summary: `Kullanıcı silindi: ${target.username} (${target.role})`,
+    summary: `Kullanıcı silindi: ${target.username} (${grantsLabel(targetGrants)})`,
     before: {
       username: target.username,
       name: target.name,
-      role: target.role,
+      grants: targetGrants,
     },
     ipAddress: ip,
   });

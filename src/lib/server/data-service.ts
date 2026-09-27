@@ -3073,7 +3073,8 @@ export async function dbCreateStockTransfer(
     reason: StockTransfer["reason"];
     note?: string;
   },
-  ctx: AuditCtx
+  ctx: AuditCtx,
+  canTransfer?: (fromWarehouseId: string, toWarehouseId: string) => boolean
 ): Promise<StockTransfer> {
   const sourceItemId = input.sourceItemId.trim();
   const toWarehouseId = input.toWarehouseId.trim();
@@ -3089,6 +3090,9 @@ export async function dbCreateStockTransfer(
     }
     if (source.warehouseId === toWarehouseId) {
       throw new FieldError("Kaynak ve hedef depo aynı olamaz");
+    }
+    if (canTransfer && !canTransfer(source.warehouseId, toWarehouseId)) {
+      throw new FieldError("Yalnızca kendi deponuzdan diğer mamul depolarına aktarım yapabilirsiniz");
     }
     const [sourceWarehouse, destWarehouse] = await Promise.all([
       tx.warehouse.findUnique({ where: { id: source.warehouseId } }),
@@ -3165,13 +3169,203 @@ export async function dbCreateStockTransfer(
   return mapped;
 }
 
+/** Talep edilebilecek mamuller: kaynak depodaki stoklu kalemler (miktar gösterilmez) */
+export async function dbGetTransferRequestOptions(
+  warehouseId: string
+): Promise<{ sku: string; name: string; unit: string }[]> {
+  const warehouse = await prisma.warehouse.findUnique({ where: { id: warehouseId } });
+  if (!warehouse || !isFinishedWarehouseType(warehouse.type)) {
+    throw new FieldError("Kaynak mamul deposu bulunamadı");
+  }
+  const items = await prisma.warehouseStockItem.findMany({
+    where: { warehouseId, quantity: { gt: 0 } },
+    orderBy: { name: "asc" },
+  });
+  const bySku = new Map<string, { sku: string; name: string; unit: string }>();
+  for (const item of items) {
+    if (!bySku.has(item.sku)) bySku.set(item.sku, { sku: item.sku, name: item.name, unit: item.unit });
+  }
+  return [...bySku.values()];
+}
+
+export async function dbCreateTransferRequest(
+  input: {
+    fromWarehouseId: string;
+    toWarehouseId: string;
+    sku: string;
+    quantity: number;
+    note?: string;
+  },
+  ctx: AuditCtx
+): Promise<StockTransfer> {
+  const fromWarehouseId = input.fromWarehouseId.trim();
+  const toWarehouseId = input.toWarehouseId.trim();
+  const sku = input.sku.trim();
+  if (fromWarehouseId === toWarehouseId) {
+    throw new FieldError("Kaynak ve hedef depo aynı olamaz");
+  }
+  if (!(input.quantity > 0)) {
+    throw new FieldError("Miktar pozitif olmalıdır");
+  }
+  const [fromWarehouse, toWarehouse] = await Promise.all([
+    prisma.warehouse.findUnique({ where: { id: fromWarehouseId } }),
+    prisma.warehouse.findUnique({ where: { id: toWarehouseId } }),
+  ]);
+  if (
+    !fromWarehouse ||
+    !toWarehouse ||
+    !isFinishedWarehouseType(fromWarehouse.type) ||
+    !isFinishedWarehouseType(toWarehouse.type)
+  ) {
+    throw new FieldError("Transfer talebi yalnızca mamul depoları arasında yapılır");
+  }
+  const sample = await prisma.warehouseStockItem.findFirst({
+    where: { warehouseId: fromWarehouseId, sku, quantity: { gt: 0 } },
+  });
+  if (!sample) {
+    throw new FieldError("Bu ürün kaynak depoda stokta yok");
+  }
+
+  const created = await prisma.stockTransfer.create({
+    data: {
+      fromWarehouseId,
+      toWarehouseId,
+      sourceItemId: "",
+      materialName: sample.name,
+      sku,
+      quantity: input.quantity,
+      unit: sample.unit,
+      reason: "finished_request",
+      status: "requested",
+      note: input.note?.trim() || null,
+    },
+  });
+  const mapped = toStockTransfer(created);
+  await logAudit({
+    actor: ctx.actor,
+    action: "CREATE",
+    entityType: "StockTransfer",
+    entityId: mapped.id,
+    summary: `Transfer talebi: ${mapped.quantity} ${mapped.unit} ${mapped.materialName} (${getWarehouseName(fromWarehouseId)} → ${getWarehouseName(toWarehouseId)})`,
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
+}
+
+/**
+ * Talebi gönderen depo yanıtlar. Onayda seçilen lottan stok düşer; İstanbul'a
+ * giden talep sevkiyat akışına girer, diğerleri hedef depoya hemen geçer.
+ */
+export async function dbRespondTransferRequest(
+  id: string,
+  input: { action: "approve" | "reject"; sourceItemId?: string; note?: string },
+  ctx: AuditCtx,
+  canRespond?: (request: { fromWarehouseId: string; toWarehouseId: string }) => boolean
+): Promise<StockTransfer> {
+  const existing = await prisma.stockTransfer.findUnique({ where: { id } });
+  if (!existing || existing.reason !== "finished_request") {
+    throw new FieldError("Transfer talebi bulunamadı");
+  }
+  if (existing.status !== "requested") {
+    throw new FieldError("Bu talep zaten yanıtlanmış");
+  }
+  if (canRespond && !canRespond(existing)) {
+    throw new FieldError("Talebi yalnızca gönderen depo yanıtlayabilir");
+  }
+  const responseNote = input.note?.trim();
+  const note = [existing.note, responseNote ? `Yanıt: ${responseNote}` : ""]
+    .filter(Boolean)
+    .join(" · ");
+
+  if (input.action === "reject") {
+    const rejected = await prisma.stockTransfer.update({
+      where: { id },
+      data: { status: "rejected", completedAt: new Date(), note: note || null },
+    });
+    const mapped = toStockTransfer(rejected);
+    await logAudit({
+      actor: ctx.actor,
+      action: "UPDATE",
+      entityType: "StockTransfer",
+      entityId: id,
+      summary: `Transfer talebi reddedildi: ${mapped.materialName}`,
+      before: toStockTransfer(existing),
+      after: mapped,
+      ipAddress: ctx.ip,
+    });
+    return mapped;
+  }
+
+  const sourceItemId = input.sourceItemId?.trim();
+  if (!sourceItemId) throw new FieldError("Gönderilecek lotu seçin");
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const source = await tx.warehouseStockItem.findUnique({ where: { id: sourceItemId } });
+    if (!source || source.warehouseId !== existing.fromWarehouseId) {
+      throw new FieldError("Seçilen lot gönderen depoda değil");
+    }
+    if (source.sku !== existing.sku) {
+      throw new FieldError("Seçilen lot talep edilen ürünle eşleşmiyor");
+    }
+    if (existing.quantity > source.quantity) {
+      throw new FieldError(
+        `Seçilen lotta yeterli stok yok (en fazla ${source.quantity} ${source.unit})`
+      );
+    }
+    const remaining = source.quantity - existing.quantity;
+    await tx.warehouseStockItem.update({
+      where: { id: source.id },
+      data: {
+        quantity: remaining,
+        status: deriveStockStatus(remaining, source.minStock, source.expiryDate),
+      },
+    });
+    const istanbul = needsIstanbulShipment(existing.toWarehouseId);
+    if (!istanbul) {
+      await creditWarehouseStock(tx, source, existing.toWarehouseId, existing.quantity);
+    }
+    return tx.stockTransfer.update({
+      where: { id },
+      data: {
+        sourceItemId: source.id,
+        reason: istanbul ? "istanbul_shipment" : "finished_direct",
+        status: istanbul ? "allocated" : "completed",
+        completedAt: istanbul ? null : new Date(),
+        note: ["Talep ile", note].filter(Boolean).join(" · "),
+      },
+    });
+  });
+
+  const mapped = toStockTransfer(updated);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "StockTransfer",
+    entityId: id,
+    summary: `Transfer talebi onaylandı: ${mapped.quantity} ${mapped.unit} ${mapped.materialName}`,
+    before: toStockTransfer(existing),
+    after: mapped,
+    ipAddress: ctx.ip,
+  });
+  return mapped;
+}
+
 export async function dbAdvanceStockTransfer(
   id: string,
   action: "approve" | "depart" | "arrive",
-  ctx: AuditCtx
+  ctx: AuditCtx,
+  canAdvance?: (transfer: { fromWarehouseId: string; toWarehouseId: string }) => boolean
 ): Promise<StockTransfer> {
   const existing = await prisma.stockTransfer.findUnique({ where: { id } });
   if (!existing) throw new FieldError("Aktarım bulunamadı");
+  if (canAdvance && !canAdvance(existing)) {
+    throw new FieldError(
+      action === "arrive"
+        ? "Varışı yalnızca hedef depo işleyebilir"
+        : "Onay ve çıkışı yalnızca gönderen depo işleyebilir"
+    );
+  }
   if (existing.reason !== "istanbul_shipment") {
     throw new FieldError("Bu kayıt İstanbul sevkiyatı değil");
   }

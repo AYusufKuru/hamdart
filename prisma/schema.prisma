@@ -560,7 +560,10 @@ model User {
   username           String    @unique
   name               String
   passwordHash       String
+  /// Birincil rol (roleGrants içindeki en yetkili rol)
   role               String
+  /// [{ role, access: "view" | "edit" }]; boşsa role alanı "edit" erişimiyle kullanılır
+  roleGrants         Json?
   active             Boolean   @default(true)
   /// true ise kullanıcı giriş yaptığında şifre değiştirme ekranına zorlanır
   mustChangePassword Boolean   @default(false)

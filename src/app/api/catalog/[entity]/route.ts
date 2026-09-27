@@ -35,8 +35,10 @@ import {
 import {
   getApiPermission,
   hasPermission,
+  isQuoteOnlyRole,
   maxQuoteDiscountRate,
-  type Role,
+  warehouseListScope,
+  type Principal,
 } from "@/lib/auth/permissions";
 import { isQuoteDocument } from "@/lib/invoice-docs";
 import {
@@ -92,10 +94,10 @@ type QuoteDiscountInput = {
 
 function quoteDiscountProblem(
   input: QuoteDiscountInput,
-  role: Role
+  principal: Principal
 ): string | null {
   if (!isQuoteDocument(input.kind ?? "", input.documentType)) return null;
-  const limit = maxQuoteDiscountRate(role);
+  const limit = maxQuoteDiscountRate(principal);
   const over = (input.lines ?? []).some(
     (line) => (line.discountRate ?? 0) > limit
   );
@@ -129,8 +131,14 @@ export async function GET(
   }
   try {
     const data = await handler();
+    if (entity === "warehouses" && Array.isArray(data)) {
+      const scope = warehouseListScope(auth.session);
+      if (scope) {
+        return jsonOk((data as { id: string }[]).filter((w) => scope.includes(w.id)));
+      }
+    }
     if (entity === "personnel" && Array.isArray(data)) {
-      if (!hasPermission(auth.session.role, "personnel:write")) {
+      if (!hasPermission(auth.session, "personnel:write")) {
         return jsonOk(
           (data as Personnel[]).map((row) => maskPersonnel(row))
         );
@@ -158,9 +166,16 @@ export async function POST(
     if (!parsed.ok) return parsed.response;
     const ctx = { actor: auth.session.name, ip: getIpFromRequest(req) };
     if (entity === "invoices") {
+      const input = parsed.data as QuoteDiscountInput;
+      if (
+        isQuoteOnlyRole(auth.session) &&
+        !isQuoteDocument(input.kind ?? "", input.documentType)
+      ) {
+        return jsonError("Yalnızca fiyat teklifi oluşturabilirsiniz", 403);
+      }
       const problem = quoteDiscountProblem(
         parsed.data as QuoteDiscountInput,
-        auth.session.role
+        auth.session
       );
       if (problem) return jsonError(problem, 403);
     }

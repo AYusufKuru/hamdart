@@ -6,7 +6,7 @@
  * Üretimde çalışmayı reddeder. Bu hesaplar zayıf şifreler kullanır ve
  * sunucuya asla kurulmaz; rol yetkilerini yerelde denemek içindir.
  */
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { LEGACY_ROLE_MAP } from "../src/lib/auth/permissions";
 
@@ -64,7 +64,7 @@ async function main() {
       if (existing.role !== u.role) {
         await prisma.user.update({
           where: { id: existing.id },
-          data: { role: u.role, tokenVersion: { increment: 1 } },
+          data: { role: u.role, roleGrants: Prisma.DbNull, tokenVersion: { increment: 1 } },
         });
         console.log(`  ${u.username}: rol ${existing.role} → ${u.role}`);
       } else {

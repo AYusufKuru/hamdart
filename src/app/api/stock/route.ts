@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { canCreateStockEntry } from "@/lib/auth/permissions";
+import { canCreateStockEntry, warehouseScope } from "@/lib/auth/permissions";
 import {
   getIpFromRequest,
   jsonCaught,
@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
   const auth = await requireSession(req, "stock:read");
   if (!auth.ok) return auth.response;
   try {
-    return jsonOk(await dbGetAllWarehouseStockItems());
+    const items = await dbGetAllWarehouseStockItems();
+    const scope = warehouseScope(auth.session);
+    return jsonOk(scope ? items.filter((item) => scope.includes(item.warehouseId)) : items);
   } catch (e) {
     return jsonCaught(e, "Stok yüklenemedi");
   }
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "stock:write");
   if (!auth.ok) return auth.response;
-  if (!canCreateStockEntry(auth.session.role)) {
+  if (!canCreateStockEntry(auth.session)) {
     return jsonError("Stok girişi depo yetkisindedir", 403);
   }
   try {

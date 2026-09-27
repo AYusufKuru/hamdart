@@ -9,5 +9,5 @@ export default async function Home() {
   } catch {
     redirect("/login");
   }
-  redirect(session ? getFirstAllowedPath(session.role) : "/login");
+  redirect(session ? getFirstAllowedPath(session) : "/login");
 }

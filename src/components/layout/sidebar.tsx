@@ -69,7 +69,7 @@ export function useSidebarSections() {
       (item) =>
         item.title === title &&
         canRead(item.resource) &&
-        (!user || isNavItemVisible(user.role, item))
+        (!user || isNavItemVisible(user, item))
     ).map((item) => ({
       icon:
         item.href === "/document-settings"

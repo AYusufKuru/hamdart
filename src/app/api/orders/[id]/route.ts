@@ -39,7 +39,7 @@ export async function PATCH(
     if (!parsed.ok) return parsed.response;
     if (
       parsed.data.status &&
-      !canSetOrderStatus(auth.session.role, parsed.data.status)
+      !canSetOrderStatus(auth.session, parsed.data.status)
     ) {
       return jsonError("Bu sevkiyat durumunu güncelleme yetkiniz yok", 403);
     }

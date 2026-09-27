@@ -39,12 +39,13 @@ import type { Recipe } from "@/data/recipes";
 import {
   calcInvoiceLine,
   COMPANY_PROFILE,
+  currencyMeta,
   LINE_UNITS,
   nextDocumentNo,
   PAYMENT_METHODS,
+  QUOTE_CURRENCIES,
   QUOTE_STATUSES,
   roundMoney,
-  VAT_RATES,
   normalizeQuoteStatus,
 } from "@/lib/invoice-docs";
 import { formatNumber, todayIso } from "@/lib/utils";
@@ -82,8 +83,7 @@ function emptyForm(quoteNo: string, row?: Invoice, lines?: InvoiceLine[]) {
     issueDate: row?.issueDate || todayIso(),
     validUntil: row?.validUntil || row?.dueDate || plusDays(todayIso(), 14),
     status: row?.status ?? "Taslak",
-    currency: row?.currency || "TRY",
-    partyTaxNo: row?.partyTaxNo ?? "",
+    currency: currencyMeta(row?.currency)?.value ?? row?.currency ?? "TRY",    partyTaxNo: row?.partyTaxNo ?? "",
     partyTaxOffice: row?.partyTaxOffice ?? "",
     partyAddress: row?.partyAddress ?? "",
     partyCity: row?.partyCity ?? "",
@@ -140,7 +140,7 @@ export function QuoteFormSheet({
   const [rdOpen, setRdOpen] = useState(false);
   const { user } = useAuth();
   const maxDiscount = user
-    ? maxQuoteDiscountRate(user.role)
+    ? maxQuoteDiscountRate(user)
     : QUOTE_DISCOUNT_LIMIT;
 
   const partyOptions = useMemo(
@@ -204,6 +204,8 @@ export function QuoteFormSheet({
     calculatedLines.reduce((s, l) => s + l.vatAmount, 0) + (rdOpen ? rdCalc.vatAmount : 0)
   );
   const grandTotal = roundMoney(subtotal + totalVat);
+  const currency = currencyMeta(form.currency) ?? QUOTE_CURRENCIES[0];
+  const money = (value: number) => `${formatNumber(value)} ${currency.symbol}`;
 
   useEffect(() => {
     if (!open) return;
@@ -287,8 +289,7 @@ export function QuoteFormSheet({
     if (rdOpen && rdFeeAmount <= 0) {
       toast.error("Ar-Ge bedeli girin");
       return;
-    }
-    if (rdOpen) {
+    }    if (rdOpen) {
       lines.push({
         description: "Ar-Ge bedeli",
         quantity: 1,
@@ -317,7 +318,7 @@ export function QuoteFormSheet({
         status: form.status,
         eDocument: "Proforma",
         scenario: "TEKLIF",
-        currency: form.currency,
+        currency: currency.value,
         fxRate: 1,
         partyTaxNo: form.partyTaxNo.trim(),
         partyTaxOffice: form.partyTaxOffice.trim(),
@@ -423,6 +424,27 @@ export function QuoteFormSheet({
                   }
                 />
               </FormField>
+              <FormField
+                label="Para birimi"
+                required
+                hint="Teklif fiyatları bu para biriminde yazılır."
+              >
+                <Select
+                  value={currency.value}
+                  onValueChange={(value) => setForm((f) => ({ ...f, currency: value }))}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {QUOTE_CURRENCIES.map((c) => (
+                      <SelectItem key={c.value} value={c.value}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FormField>
             </div>
           </FormSection>
 
@@ -514,19 +536,6 @@ export function QuoteFormSheet({
                   value={form.preparedBy}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, preparedBy: e.target.value }))
-                  }
-                />
-              </FormField>
-              <FormField label="Para birimi" htmlFor="qt-cur">
-                <Input
-                  id="qt-cur"
-                  className="bg-white"
-                  value={form.currency}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      currency: e.target.value.toUpperCase(),
-                    }))
                   }
                 />
               </FormField>
@@ -664,30 +673,28 @@ export function QuoteFormSheet({
                         })
                       }
                     />
-                    <Select
-                      value={line.vatRate}
-                      onValueChange={(vatRate) =>
-                        setForm((f) => {
-                          const next = [...f.lines];
-                          next[i] = { ...next[i], vatRate };
-                          return { ...f, lines: next };
-                        })
-                      }
-                    >
-                      <SelectTrigger className="bg-white sm:col-span-2">
-                        <SelectValue placeholder="KDV" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {VAT_RATES.map((r) => (
-                          <SelectItem key={r} value={String(r)}>
-                            KDV %{r}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="flex items-center gap-1.5 sm:col-span-2">
+                      <span className="shrink-0 text-xs text-muted-foreground">KDV %</span>
+                      <Input
+                        aria-label="KDV oranı"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        className="bg-white"
+                        value={line.vatRate}
+                        onChange={(e) =>
+                          setForm((f) => {
+                            const next = [...f.lines];
+                            next[i] = { ...next[i], vatRate: e.target.value };
+                            return { ...f, lines: next };
+                          })
+                        }
+                      />
+                    </div>
                     <div className="flex items-center justify-between gap-2 sm:col-span-1">
                       <p className="text-xs text-muted-foreground">
-                        {formatNumber(calc.lineTotal)}
+                        {money(calc.lineTotal)}
                       </p>
                       <Button
                         type="button"
@@ -739,26 +746,24 @@ export function QuoteFormSheet({
                       setForm((f) => ({ ...f, rdFee: e.target.value }))
                     }
                   />
-                  <Select
-                    value={form.rdVatRate}
-                    onValueChange={(rdVatRate) =>
-                      setForm((f) => ({ ...f, rdVatRate }))
-                    }
-                  >
-                    <SelectTrigger className="bg-white sm:col-span-4">
-                      <SelectValue placeholder="KDV" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {VAT_RATES.map((r) => (
-                        <SelectItem key={r} value={String(r)}>
-                          KDV %{r}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-1.5 sm:col-span-4">
+                    <span className="shrink-0 text-xs text-muted-foreground">KDV %</span>
+                    <Input
+                      aria-label="Ar-Ge KDV oranı"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="0.01"
+                      className="bg-white"
+                      value={form.rdVatRate}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, rdVatRate: e.target.value }))
+                      }
+                    />
+                  </div>
                 </div>
                 <p className="mt-2 text-right text-xs text-muted-foreground">
-                  {formatNumber(rdCalc.lineTotal)} ₺
+                  {money(rdCalc.lineTotal)}
                 </p>
               </div>
             ) : null}
@@ -766,22 +771,21 @@ export function QuoteFormSheet({
               {rdOpen ? (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Ar-Ge bedeli</span>
-                  <span>{formatNumber(rdCalc.lineNet)} ₺</span>
+                  <span>{money(rdCalc.lineNet)}</span>
                 </div>
               ) : null}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Matrah</span>
-                <span>{formatNumber(subtotal)} ₺</span>
+                <span>{money(subtotal)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">KDV</span>
-                <span>{formatNumber(totalVat)} ₺</span>
+                <span>{money(totalVat)}</span>
               </div>
               <div className="flex justify-between font-bold">
                 <span>Teklif tutarı</span>
-                <span>{formatNumber(grandTotal)} ₺</span>
-              </div>
-            </div>
+                <span>{money(grandTotal)}</span>
+              </div>            </div>
           </FormSection>
 
           <FormSection title="Teklif şartları">

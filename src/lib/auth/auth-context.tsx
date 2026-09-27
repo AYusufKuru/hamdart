@@ -119,8 +119,8 @@ export function AuthProvider({
       refresh,
       hydrateUser,
       logout,
-      canRead: (resource) => (user ? canRead(user.role, resource) : false),
-      canWrite: (resource) => (user ? canWrite(user.role, resource) : false),
+      canRead: (resource) => (user ? canRead(user, resource) : false),
+      canWrite: (resource) => (user ? canWrite(user, resource) : false),
     }),
     [user, loading, refresh, hydrateUser, logout]
   );

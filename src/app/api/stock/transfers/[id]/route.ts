@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { canCreateStockTransfer } from "@/lib/auth/permissions";
+import { canAdvanceStockTransfer, canCreateStockTransfer } from "@/lib/auth/permissions";
 import {
   getIpFromRequest,
   jsonCaught,
@@ -17,18 +17,22 @@ export async function PATCH(
 ) {
   const auth = await requireSession(req, "stock:write");
   if (!auth.ok) return auth.response;
-  if (!canCreateStockTransfer(auth.session.role)) {
+  if (!canCreateStockTransfer(auth.session)) {
     return jsonError("Sevkiyat güncellemek için yetkiniz yok", 403);
   }
   const { id } = await params;
   try {
     const parsed = await parseBody(req, stockTransferAdvanceSchema);
     if (!parsed.ok) return parsed.response;
+    const session = auth.session;
+    const action = parsed.data.action;
     return jsonOk(
-      await dbAdvanceStockTransfer(id, parsed.data.action, {
-        actor: auth.session.name,
-        ip: getIpFromRequest(req),
-      })
+      await dbAdvanceStockTransfer(
+        id,
+        action,
+        { actor: auth.session.name, ip: getIpFromRequest(req) },
+        (transfer) => canAdvanceStockTransfer(session, transfer, action)
+      )
     );
   } catch (e) {
     return jsonCaught(e, "Sevkiyat güncellenemedi");

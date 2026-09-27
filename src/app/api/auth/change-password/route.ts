@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import type { Role } from "@/lib/auth/permissions";
+import { normalizeGrants } from "@/lib/auth/permissions";
 import { invalidateSessionCache } from "@/lib/auth/live-session";
 import {
   hashPassword,
@@ -91,11 +91,13 @@ export async function POST(req: NextRequest) {
       ipAddress: getIpFromRequest(req),
     });
 
+    const grants = normalizeGrants(user.roleGrants, user.role);
     const token = await createSessionToken({
       userId: user.id,
       username: user.username,
       name: user.name,
-      role: user.role as Role,
+      role: grants[0]?.role ?? session.role,
+      grants: grants.length > 0 ? grants : session.grants,
       mustChangePassword: false,
       tokenVersion: updated.tokenVersion,
     });

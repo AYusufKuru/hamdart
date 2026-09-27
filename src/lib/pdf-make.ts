@@ -1,3 +1,5 @@
+import { currencySymbol } from "@/lib/invoice-docs";
+
 type PdfMake = {
   addVirtualFileSystem: (vfs: unknown) => void;
   createPdf: (doc: Record<string, unknown>) => {
@@ -37,8 +39,7 @@ export async function loadPdfMake(): Promise<PdfMake> {
 
 export function pdfMoney(value: number, currency = "TRY") {
   const formatted = Number(value.toFixed(2)).toLocaleString("tr-TR");
-  if (currency === "TRY" || currency === "TL") return `${formatted} ₺`;
-  return `${formatted} ${currency}`;
+  return `${formatted} ${currencySymbol(currency)}`;
 }
 
 export function pdfCell(text: string, extra?: Record<string, unknown>) {

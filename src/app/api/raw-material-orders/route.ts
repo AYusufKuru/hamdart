@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
-  if (!canCreateMaterialRequest(auth.session.role)) {
+  if (!canCreateMaterialRequest(auth.session)) {
     return jsonError(
       "Satış talep açmaz. Talebi depo açar; tedarikçi ve fiyat detayda girilir.",
       403
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const auth = await requireSession(req, "raw_material_orders:write");
   if (!auth.ok) return auth.response;
-  if (!canEditRawMaterialPurchase(auth.session.role)) {
+  if (!canEditRawMaterialPurchase(auth.session)) {
     return jsonError("Tedarikçi ve fiyatı satış girer", 403);
   }
   try {

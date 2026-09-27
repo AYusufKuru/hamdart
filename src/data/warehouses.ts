@@ -41,13 +41,16 @@ export type StockTransferReason =
   | "direct_lab"
   | "manual"
   | "finished_direct"
-  | "istanbul_shipment";
+  | "istanbul_shipment"
+  | "finished_request";
 export type StockTransferStatus =
   | "pending"
   | "allocated"
   | "approved"
   | "in_transit"
-  | "completed";
+  | "completed"
+  | "requested"
+  | "rejected";
 export type IstanbulShipmentAction = "approve" | "depart" | "arrive";
 
 export interface StockTransfer {
@@ -153,6 +156,8 @@ export const ISTANBUL_SHIPMENT_STATUS_LABEL: Record<string, string> = {
   in_transit: "Yolda",
   completed: "İstanbul deposunda",
   pending: "Bekliyor",
+  requested: "Onay bekliyor",
+  rejected: "Reddedildi",
 };
 
 export const ISTANBUL_SHIPMENT_NEXT: Record<
@@ -164,6 +169,8 @@ export const ISTANBUL_SHIPMENT_NEXT: Record<
   in_transit: { action: "arrive", label: "İstanbul'a geldi" },
   completed: null,
   pending: null,
+  requested: null,
+  rejected: null,
 };
 
 export function transferReasonLabel(reason: string) {
@@ -171,6 +178,7 @@ export function transferReasonLabel(reason: string) {
   if (reason === "direct_lab") return "Doğrudan lab girişi";
   if (reason === "finished_direct") return "Mamul aktarım";
   if (reason === "istanbul_shipment") return "İstanbul sevkiyatı";
+  if (reason === "finished_request") return "Transfer talebi";
   return "Manuel";
 }
 

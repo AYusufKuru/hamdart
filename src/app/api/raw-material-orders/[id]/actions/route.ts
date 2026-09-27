@@ -21,7 +21,7 @@ export async function POST(
     const { id } = await params;
     const parsed = await parseBody(req, rmoActionSchema);
     if (!parsed.ok) return parsed.response;
-    if (!canApplyRawMaterialOrderAction(auth.session.role, parsed.data.action)) {
+    if (!canApplyRawMaterialOrderAction(auth.session, parsed.data.action)) {
       return jsonError("Bu adımı uygulama yetkiniz yok", 403);
     }
     const order = await dbApplyRawMaterialOrderAction(id, parsed.data.action, {

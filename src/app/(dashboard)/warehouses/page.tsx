@@ -34,8 +34,13 @@ import { syncReplenishmentOrders } from "@/lib/raw-material-order-store";
 import { ifAllowed } from "@/lib/api-client";
 import { StockTransferFormSheet } from "@/components/warehouses/stock-transfer-form-sheet";
 import { IstanbulShipmentTable } from "@/components/warehouses/istanbul-shipment-table";
+import { TransferRequestsCard } from "@/components/warehouses/transfer-requests-card";
 import { useAuth } from "@/lib/auth/auth-context";
-import { canCreateStockTransfer } from "@/lib/auth/permissions";
+import {
+  canAdvanceStockTransfer,
+  canCreateStockTransfer,
+  warehouseScope,
+} from "@/lib/auth/permissions";
 import { cn, formatDate } from "@/lib/utils";
 import {
   ArrowRight,
@@ -157,8 +162,10 @@ function WarehouseCards({
 
 export default function WarehousesPage() {
   const { user, canWrite } = useAuth();
-  const canTransfer = Boolean(user && canCreateStockTransfer(user.role));
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const canTransfer = Boolean(user && canCreateStockTransfer(user));
+  const scope = user ? warehouseScope(user) : null;
+  const [selectedTab, setActiveTab] = useState<string>("all");
+  const activeTab = scope ? "finished" : selectedTab;
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [stock, setStock] = useState<WarehouseStockItem[]>([]);
   const [transfers, setTransfers] = useState<StockTransfer[]>([]);
@@ -196,18 +203,21 @@ export default function WarehousesPage() {
   const istanbulOpen = transfers.filter(
     (t) => t.reason === "istanbul_shipment" && t.status !== "completed"
   );
-  const rawWarehouses = warehouses.filter((w) => !isFinishedWarehouseType(w.type));
-  const finishedWarehouses = warehouses.filter((w) => isFinishedWarehouseType(w.type));
+  const visibleWarehouses = scope
+    ? warehouses.filter((w) => scope.includes(w.id))
+    : warehouses;
+  const rawWarehouses = visibleWarehouses.filter((w) => !isFinishedWarehouseType(w.type));
+  const finishedWarehouses = visibleWarehouses.filter((w) => isFinishedWarehouseType(w.type));
 
   const filteredWarehouses =
     activeTab === "all"
-      ? warehouses
+      ? visibleWarehouses
       : activeTab === "finished"
         ? finishedWarehouses
-        : warehouses.filter((w) => w.type === activeTab);
+        : visibleWarehouses.filter((w) => w.type === activeTab);
 
-  const totalCapacity = warehouses.reduce((s, w) => s + w.capacity, 0);
-  const totalUsed = warehouses.reduce((s, w) => s + w.used, 0);
+  const totalCapacity = visibleWarehouses.reduce((s, w) => s + w.capacity, 0);
+  const totalUsed = visibleWarehouses.reduce((s, w) => s + w.used, 0);
   const avgUtilization = occupancyPercent(totalUsed, totalCapacity);
   const totalSkus = stock.length;
 
@@ -229,7 +239,11 @@ export default function WarehousesPage() {
               onClick={() => setTransferOpen(true)}
             >
               <ArrowRightLeft className="w-4 h-4 mr-2" />
-              {user?.role === "PRODUCTION" ? "Depodan Talep" : "Stok Aktar"}
+              {user?.role === "PRODUCTION"
+                ? "Depodan Talep"
+                : scope
+                  ? "Mamul Aktar"
+                  : "Stok Aktar"}
             </Button>
           ) : null
         }
@@ -262,7 +276,7 @@ export default function WarehousesPage() {
 
       <div className="grid gap-4 md:grid-cols-4">
         {[
-          { label: "Depo Sayısı", value: warehouses.length, icon: Box },
+          { label: "Depo Sayısı", value: visibleWarehouses.length, icon: Box },
           { label: "Toplam SKU", value: totalSkus, icon: Package },
           { label: "Ort. Doluluk", value: `%${avgUtilization}`, icon: Factory },
           {
@@ -287,15 +301,17 @@ export default function WarehousesPage() {
         ))}
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="all">Tümü</TabsTrigger>
-          <TabsTrigger value="packaging">Paketleme</TabsTrigger>
-          <TabsTrigger value="production">Üretim Malzemeleri</TabsTrigger>
-          <TabsTrigger value="laboratory">Laboratuvar</TabsTrigger>
-          <TabsTrigger value="finished">Mamul stok</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {scope ? null : (
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="flex-wrap h-auto">
+            <TabsTrigger value="all">Tümü</TabsTrigger>
+            <TabsTrigger value="packaging">Paketleme</TabsTrigger>
+            <TabsTrigger value="production">Üretim Malzemeleri</TabsTrigger>
+            <TabsTrigger value="laboratory">Laboratuvar</TabsTrigger>
+            <TabsTrigger value="finished">Mamul stok</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
 
       {activeTab === "all" || activeTab === "finished" ? (
         <div className="space-y-8">
@@ -319,6 +335,12 @@ export default function WarehousesPage() {
               stockByWarehouse={stockByWarehouse}
             />
           </section>
+          <TransferRequestsCard
+            warehouses={warehouses}
+            stock={stock}
+            transfers={transfers}
+            onChanged={() => void refresh()}
+          />
           <Card className="glass-card border-none">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -330,6 +352,9 @@ export default function WarehousesPage() {
               <IstanbulShipmentTable
                 transfers={transfers}
                 canAct={canTransfer}
+                canActOn={(row, action) =>
+                  Boolean(user && canAdvanceStockTransfer(user, row, action))
+                }
                 onChanged={() => void refresh()}
               />
             </CardContent>
@@ -363,7 +388,7 @@ export default function WarehousesPage() {
             </TableHeader>
             <TableBody>
               {transfers.filter(
-                  (t) => t.reason !== "istanbul_shipment" && t.reason !== "finished_direct"
+                  (t) => t.reason !== "istanbul_shipment" && t.reason !== "finished_direct" && t.reason !== "finished_request"
                 ).length === 0 ? (
                 <TableRow>
                   <TableCell
@@ -376,7 +401,7 @@ export default function WarehousesPage() {
               ) : (
                 transfers
                   .filter(
-                    (t) => t.reason !== "istanbul_shipment" && t.reason !== "finished_direct"
+                    (t) => t.reason !== "istanbul_shipment" && t.reason !== "finished_direct" && t.reason !== "finished_request"
                   )
                   .slice(0, 5)
                   .map((tr) => (

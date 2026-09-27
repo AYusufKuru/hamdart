@@ -44,7 +44,7 @@ export async function requireSession(
       ),
     };
   }
-  if (permission && !hasPermission(session.role, permission)) {
+  if (permission && !hasPermission(session, permission)) {
     return { ok: false, response: jsonError("Yetkiniz yok", 403) };
   }
   return { ok: true, session };
@@ -54,7 +54,7 @@ export async function requireSession(
 export async function requireAdmin(req: NextRequest): Promise<SessionCheck> {
   const auth = await requireSession(req);
   if (!auth.ok) return auth;
-  if (!isPrivilegedRole(auth.session.role)) {
+  if (!isPrivilegedRole(auth.session)) {
     return {
       ok: false,
       response: jsonError("Yalnızca yönetici erişebilir", 403),
