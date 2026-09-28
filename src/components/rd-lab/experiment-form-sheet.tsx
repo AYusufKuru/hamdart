@@ -15,23 +15,16 @@ import {
 import { SearchableSelect } from "@/components/shared/searchable-select";
 import {
   createLabExperiment,
+  getLabExperimentMaterials,
   getLabPeople,
   nextExperimentCode,
+  labMaterialTitle,
+  type LabPickableMaterial,
 } from "@/lib/lab-store";
 import { nextRecipeCode } from "@/lib/recipe-store";
-import { getAllWarehouseStockItems } from "@/lib/stock-store";
-import { getWarehouseName, type WarehouseStockItem } from "@/data/warehouses";
-import { ifAllowed } from "@/lib/api-client";
-import { useAuth } from "@/lib/auth/auth-context";
+import { getWarehouseName } from "@/data/warehouses";
 import { formatNumber, selectItemValues, todayIso } from "@/lib/utils";
 import { PersonField } from "@/components/rd-lab/person-field";
-
-function isMamul(item: WarehouseStockItem) {
-  return (
-    item.category.trim().toLocaleLowerCase("tr").replace(/[İIıi]/g, "i") ===
-    "mamul"
-  );
-}
 
 type MaterialLine = {
   key: string;
@@ -50,6 +43,14 @@ function emptyForm() {
   };
 }
 
+function materialLabel(item: LabPickableMaterial) {
+  const title = labMaterialTitle(item);
+  if (item.source === "lot") {
+    return `${title} · ${item.lotNo} · ${getWarehouseName(item.warehouseId)} (${formatNumber(item.quantity)} ${item.unit})`;
+  }
+  return title === item.sku ? item.sku : `${title} · ${item.sku}`;
+}
+
 export function ExperimentFormSheet({
   open,
   onOpenChange,
@@ -59,23 +60,14 @@ export function ExperimentFormSheet({
   onOpenChange: (open: boolean) => void;
   onCreated?: () => void;
 }) {
-  const { canRead } = useAuth();
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [researchers, setResearchers] = useState<string[]>([]);
-  const [stockItems, setStockItems] = useState<WarehouseStockItem[]>([]);
+  const [materials, setMaterials] = useState<LabPickableMaterial[]>([]);
 
   const researcherOptions = useMemo(
     () => selectItemValues(researchers),
     [researchers]
-  );
-
-  const materialStock = useMemo(
-    () =>
-      stockItems
-        .filter((item) => item.quantity > 0 && !isMamul(item))
-        .sort((a, b) => a.name.localeCompare(b.name, "tr")),
-    [stockItems]
   );
 
   useEffect(() => {
@@ -83,21 +75,21 @@ export function ExperimentFormSheet({
     setSaving(false);
     setForm(emptyForm());
     void (async () => {
-      const [people, stock, expCode, recCode] = await Promise.all([
-        getLabPeople("researcher"),
-        ifAllowed(
-          canRead("stock"),
-          () => getAllWarehouseStockItems(),
-          [] as WarehouseStockItem[]
-        ),
-        nextExperimentCode(),
-        nextRecipeCode(),
+      const [people, catalog, expCode, recCode] = await Promise.all([
+        getLabPeople("researcher").catch(() => [] as string[]),
+        getLabExperimentMaterials().catch(() => [] as LabPickableMaterial[]),
+        nextExperimentCode().catch(() => ""),
+        nextRecipeCode().catch(() => "REC-001"),
       ]);
       setResearchers(selectItemValues(people));
-      setStockItems(stock);
-      setForm((f) => ({ ...f, code: expCode, recipeCode: recCode }));
+      setMaterials(catalog);
+      setForm((f) => ({
+        ...f,
+        code: expCode || f.code,
+        recipeCode: recCode,
+      }));
     })();
-  }, [open, canRead]);
+  }, [open]);
 
   function updateLine(key: string, patch: Partial<MaterialLine>) {
     setForm((f) => ({
@@ -118,7 +110,7 @@ export function ExperimentFormSheet({
       toast.error("Araştırmacı seçin");
       return;
     }
-    const materials: { stockItemId: string; quantity: number }[] = [];
+    const chosen: { stockItemId: string; quantity: number }[] = [];
     for (const line of form.materials) {
       if (!line.stockItemId) continue;
       const quantity = parseFloat(line.quantity.replace(",", "."));
@@ -126,16 +118,16 @@ export function ExperimentFormSheet({
         toast.error("Her hammadde için geçerli miktar girin");
         return;
       }
-      const item = materialStock.find((s) => s.id === line.stockItemId);
-      if (item && quantity > item.quantity) {
+      const item = materials.find((s) => s.id === line.stockItemId);
+      if (item?.source === "lot" && quantity > item.quantity) {
         toast.error(
           `${item.name}: en fazla ${formatNumber(item.quantity)} ${item.unit}`
         );
         return;
       }
-      materials.push({ stockItemId: line.stockItemId, quantity });
+      chosen.push({ stockItemId: line.stockItemId, quantity });
     }
-    if (materials.length === 0) {
+    if (chosen.length === 0) {
       toast.error("En az bir hammadde seçin");
       return;
     }
@@ -148,10 +140,10 @@ export function ExperimentFormSheet({
         recipeCode: form.recipeCode,
         researcher: form.researcher,
         startDate: form.startDate,
-        materials,
+        materials: chosen,
       });
       toast.success(
-        `${created.code} başlatıldı — hammaddeler stoktan düşüldü`
+        `${created.code} başlatıldı — Adım 1 hammaddeleri kaydedildi`
       );
       onOpenChange(false);
       onCreated?.();
@@ -168,7 +160,7 @@ export function ExperimentFormSheet({
       onOpenChange={onOpenChange}
       icon={Microscope}
       title="Yeni deney (reçete geliştirme)"
-      description="Ürün ve reçete bilgisini girin, deneme formülasyonu için hammaddeleri stoktan alın."
+      description="Ürün ve reçete bilgisini girin, deneme formülasyonu için hammaddeleri seçin."
       className="max-w-2xl"
     >
       <form className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={handleSubmit}>
@@ -234,13 +226,11 @@ export function ExperimentFormSheet({
 
           <FormSection
             title="Formülasyon hammaddeleri"
-            description="Seçilen miktarlar kayıtta stoktan düşülür."
+            description="Stok Durumu’ndaki ürünlerden seçin. Seçilen miktar o lotun stoğundan düşülür."
           >
             <div className="space-y-3">
               {form.materials.map((line, index) => {
-                const selected = materialStock.find(
-                  (s) => s.id === line.stockItemId
-                );
+                const selected = materials.find((s) => s.id === line.stockItemId);
                 return (
                   <div
                     key={line.key}
@@ -255,20 +245,26 @@ export function ExperimentFormSheet({
                         onValueChange={(stockItemId) =>
                           updateLine(line.key, { stockItemId })
                         }
-                        placeholder="Stoktan hammadde seçin"
-                        searchPlaceholder="Hammadde ara…"
-                        emptyText="Eşleşen hammadde yok"
-                        options={materialStock.map((item) => ({
+                        placeholder="Stoktan ürün seçin"
+                        searchPlaceholder="Ürün, SKU veya lot ara…"
+                        emptyText="Stokta eşleşen ürün yok"
+                        options={materials.map((item) => ({
                           value: item.id,
-                          label: `${item.name} · ${item.lotNo} · ${getWarehouseName(item.warehouseId)} (${formatNumber(item.quantity)} ${item.unit})`,
-                          keywords: `${item.name} ${item.lotNo} ${getWarehouseName(item.warehouseId)}`,
+                          label: materialLabel(item),
+                          keywords: `${item.name} ${item.sku} ${item.lotNo}`,
                         }))}
                       />
                     </FormField>
                     <FormField
                       label={index === 0 ? "Miktar" : undefined}
                       required={index === 0}
-                      hint={selected ? selected.unit : undefined}
+                      hint={
+                        selected
+                          ? selected.source === "lot"
+                            ? `${selected.unit} · stokta ${formatNumber(selected.quantity)}`
+                            : selected.unit
+                          : undefined
+                      }
                     >
                       <Input
                         type="number"
@@ -304,9 +300,9 @@ export function ExperimentFormSheet({
                 );
               })}
             </div>
-            {materialStock.length === 0 ? (
+            {materials.length === 0 ? (
               <p className="text-sm text-amber-700">
-                Hammadde stoğunda kullanılabilir kalem yok.
+                Stok Durumu’nda miktarı olan ürün yok.
               </p>
             ) : (
               <Button

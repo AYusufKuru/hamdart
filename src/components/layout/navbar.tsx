@@ -204,7 +204,7 @@ async function findSearchTarget(
       s.product.toLowerCase().includes(q) ||
       s.batchNo.toLowerCase().includes(q)
   );
-  if (sample) return "/rd-lab?tab=samples";
+  if (sample) return sample.disposition === "scrap" ? "/sample-records?tab=scrap" : "/sample-records";
 
   const experiment = experiments.find(
     (e) =>

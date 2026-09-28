@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { CheckCircle2, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -15,9 +14,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { FormDialog, FormField } from "@/components/shared/form-sheet";
+import { ExperimentUsageLog } from "@/components/rd-lab/experiment-usage-log";
 import type { LabExperiment } from "@/data/mock";
 import { completeLabExperiment } from "@/lib/lab-store";
-import { formatDate, formatNumber } from "@/lib/utils";
+import { latestFormulaTotals, consumedMaterialTotals } from "@/lib/lab-experiment-steps";
+import { formatNumber } from "@/lib/utils";
 
 export function ExperimentCompleteDialog({
   open,
@@ -33,30 +34,17 @@ export function ExperimentCompleteDialog({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const totals = useMemo(() => {
-    const map = new Map<
-      string,
-      { materialName: string; unit: string; quantity: number }
-    >();
-    for (const u of experiment?.materialUsages ?? []) {
-      const key = `${u.materialName}|${u.unit}`;
-      const prev = map.get(key);
-      if (prev) prev.quantity += u.quantity;
-      else {
-        map.set(key, {
-          materialName: u.materialName,
-          unit: u.unit,
-          quantity: u.quantity,
-        });
-      }
-    }
-    return [...map.values()].sort((a, b) =>
-      a.materialName.localeCompare(b.materialName, "tr")
-    );
-  }, [experiment]);
+  const totals = useMemo(
+    () => latestFormulaTotals(experiment?.materialUsages ?? []),
+    [experiment]
+  );
+  const consumed = useMemo(
+    () => consumedMaterialTotals(experiment?.materialUsages ?? []),
+    [experiment]
+  );
 
   const usages = experiment?.materialUsages ?? [];
-  const alreadyDone = experiment?.status === "approved" && Boolean(experiment.recipeId);
+  const alreadyDone = experiment?.status === "approved";
 
   async function submit() {
     if (!experiment) return;
@@ -65,9 +53,7 @@ export function ExperimentCompleteDialog({
       const updated = await completeLabExperiment(experiment.id, {
         completionNote: note.trim() || undefined,
       });
-      toast.success(
-        `Reçete oluşturuldu: ${updated.recipeCode ?? updated.productName}`
-      );
+      toast.success(`Deney tamamlandı: ${updated.code}`);
       onOpenChange(false);
       setNote("");
       onCompleted?.(updated);
@@ -95,7 +81,7 @@ export function ExperimentCompleteDialog({
     >
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
         <div className="rounded-xl bg-muted/40 p-4 text-sm">
-          <p className="font-semibold">Oluşturulacak reçete</p>
+          <p className="font-semibold">Son formül</p>
           <p className="mt-1 text-muted-foreground">
             Ürün: <span className="font-medium text-foreground">{experiment?.productName}</span>
             {" · "}
@@ -113,13 +99,13 @@ export function ExperimentCompleteDialog({
 
         <div>
           <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            Toplam harcanan hammadde
+            Reçeteye gidecek miktar (son adım)
           </p>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Hammadde</TableHead>
-                <TableHead className="text-right">Toplam</TableHead>
+                <TableHead className="text-right">Reçete</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -137,35 +123,33 @@ export function ExperimentCompleteDialog({
 
         <div>
           <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
-            Kullanım kayıtları ve notlar
+            Toplam kullanılan (tüm adımlar)
           </p>
-          <div className="space-y-2">
-            {usages.map((u) => (
-              <div
-                key={u.id}
-                className="rounded-xl border px-3 py-2 text-sm"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{u.materialName}</span>
-                  <Badge variant={u.kind === "extra" ? "warning" : "info"}>
-                    {u.kind === "extra" ? "Ek" : "Başlangıç"}
-                  </Badge>
-                  <span className="font-bold">
-                    {formatNumber(u.quantity)} {u.unit}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatDate(u.addedAt)} · {u.lotNo}
-                  </span>
-                </div>
-                {u.reason ? (
-                  <p className="mt-1 text-muted-foreground">{u.reason}</p>
-                ) : null}
-              </div>
-            ))}
-            {usages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Kayıt yok</p>
-            ) : null}
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Hammadde</TableHead>
+                <TableHead className="text-right">Toplam</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {consumed.map((row) => (
+                <TableRow key={`used-${row.materialName}-${row.unit}`}>
+                  <TableCell className="font-medium">{row.materialName}</TableCell>
+                  <TableCell className="text-right font-bold">
+                    {formatNumber(row.quantity)} {row.unit}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        <div>
+          <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-muted-foreground">
+            Adım adım kullanım
+          </p>
+          <ExperimentUsageLog usages={usages} showNet={false} />
         </div>
 
         {!alreadyDone ? (
@@ -198,7 +182,7 @@ export function ExperimentCompleteDialog({
             onClick={() => void submit()}
           >
             <CheckCircle2 className="mr-2 h-4 w-4" />
-            Reçeteyi oluştur ve tamamla
+            Deneyi tamamla
           </Button>
         ) : null}
       </div>

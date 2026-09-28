@@ -23,6 +23,7 @@ import {
   Boxes,
   Shield,
   Stamp,
+  TestTube,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -72,7 +73,9 @@ export function useSidebarSections() {
         (!user || isNavItemVisible(user, item))
     ).map((item) => ({
       icon:
-        item.href === "/document-settings"
+        item.href === "/sample-records"
+          ? TestTube
+          : item.href === "/document-settings"
           ? Stamp
           : item.href === "/cash"
             ? Landmark

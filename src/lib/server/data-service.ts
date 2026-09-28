@@ -43,7 +43,8 @@ import {
   parseQuantityLabel,
   PRODUCTION_SHIPMENT_CUSTOMER,
 } from "@/lib/shipment";
-import type { CreateExperimentInput, CreateSampleInput } from "@/lib/lab-store";
+import type { CreateExperimentInput, CreateSampleInput, LabPickableMaterial } from "@/lib/lab-store";
+import { nextExperimentStep, withUsageSteps, latestFormulaTotals } from "@/lib/lab-experiment-steps";
 import type { RawMaterialOrderAction } from "@/lib/raw-material-order-flow";
 import {
   FieldError,
@@ -2306,7 +2307,7 @@ function parseExperimentUsages(raw: string | null | undefined): LabExperimentMat
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as LabExperimentMaterialUsage[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? withUsageSteps(parsed) : [];
   } catch {
     return [];
   }
@@ -2440,6 +2441,127 @@ export async function dbNextSampleNo(): Promise<string> {
   return `SMP-${year}-${String(max + 1).padStart(4, "0")}`;
 }
 
+function labLotRank(warehouseId: string) {
+  if (warehouseId === WAREHOUSE_IDS.laboratory) return 0;
+  if (warehouseId === WAREHOUSE_IDS.production) return 1;
+  return 2;
+}
+
+type LabUsageDraft = Pick<
+  LabExperimentMaterialUsage,
+  "stockItemId" | "materialName" | "sku" | "lotNo" | "quantity" | "unit"
+>;
+
+async function deductWarehouseLot(
+  tx: Prisma.TransactionClient,
+  item: {
+    id: string;
+    name: string;
+    sku: string;
+    lotNo: string;
+    unit: string;
+    quantity: number;
+    minStock: number;
+    expiryDate: string;
+    category: string;
+  },
+  quantity: number
+): Promise<LabUsageDraft> {
+  if (quantity > item.quantity + 1e-9) {
+    throw new FieldError(
+      `Yetersiz stok: ${item.name} · ${item.quantity} ${item.unit} kaldı`
+    );
+  }
+  const remaining = item.quantity - quantity;
+  await tx.warehouseStockItem.update({
+    where: { id: item.id },
+    data: {
+      quantity: remaining,
+      status: deriveStockStatus(remaining, item.minStock, item.expiryDate),
+    },
+  });
+  return {
+    stockItemId: item.id,
+    materialName: item.name,
+    sku: item.sku,
+    lotNo: item.lotNo,
+    quantity,
+    unit: item.unit,
+  };
+}
+
+/** Depo lotu veya hammadde kataloğu — lot varsa stoktan düşer, yoksa katalog kaydı yazar */
+async function consumeLabMaterial(
+  tx: Prisma.TransactionClient,
+  materialId: string,
+  quantity: number
+): Promise<LabUsageDraft[]> {
+  const item = await tx.warehouseStockItem.findUnique({
+    where: { id: materialId },
+  });
+  if (item) {
+    return [await deductWarehouseLot(tx, item, quantity)];
+  }
+
+  const material = await tx.rawMaterial.findUnique({
+    where: { id: materialId },
+  });
+  if (!material) throw new FieldError("Hammadde bulunamadı");
+
+  const skuKey = stockNorm(material.sku);
+  const nameKey = stockNorm(material.name);
+  const lots = (await tx.warehouseStockItem.findMany({
+    where: { quantity: { gt: 0 } },
+  }))
+    .filter((lot) => {
+      if (isMamulStockCategory(lot.category)) return false;
+      return stockNorm(lot.sku) === skuKey || stockNorm(lot.name) === nameKey;
+    })
+    .sort(
+      (a, b) =>
+        labLotRank(a.warehouseId) - labLotRank(b.warehouseId) ||
+        a.expiryDate.localeCompare(b.expiryDate)
+    );
+
+  const drafts: LabUsageDraft[] = [];
+  let remaining = quantity;
+  for (const lot of lots) {
+    if (remaining <= 1e-9) break;
+    const take = Math.min(lot.quantity, remaining);
+    drafts.push(await deductWarehouseLot(tx, lot, take));
+    remaining -= take;
+  }
+  if (remaining > 1e-9) {
+    drafts.push({
+      stockItemId: material.id,
+      materialName: material.name,
+      sku: material.sku,
+      lotNo: "katalog",
+      quantity: remaining,
+      unit: material.unit,
+    });
+  }
+  return drafts;
+}
+
+/** Stok Durumu ile aynı liste: miktarı sıfırdan büyük depo kalemleri */
+export async function dbGetLabExperimentMaterials(): Promise<LabPickableMaterial[]> {
+  const lots = await prisma.warehouseStockItem.findMany();
+  return lots
+    .filter((lot) => lot.quantity > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, "tr") || a.lotNo.localeCompare(b.lotNo, "tr"))
+    .map((lot) => ({
+      id: lot.id,
+      source: "lot" as const,
+      name: lot.name,
+      sku: lot.sku,
+      unit: lot.unit,
+      lotNo: lot.lotNo,
+      warehouseId: lot.warehouseId,
+      quantity: lot.quantity,
+    }));
+}
+
 export async function dbCreateLabExperiment(
   input: CreateExperimentInput,
   ctx: AuditCtx
@@ -2476,38 +2598,17 @@ export async function dbCreateLabExperiment(
   const experimentId = `e-${Date.now()}`;
   await prisma.$transaction(async (tx) => {
     for (const [stockItemId, quantity] of stockById) {
-      const item = await tx.warehouseStockItem.findUnique({
-        where: { id: stockItemId },
-      });
-      if (!item) throw new FieldError("Stok kalemi bulunamadı");
-      if (isMamulStockCategory(item.category)) {
-        throw new FieldError("Deney için hammadde stoku seçin");
+      const drafts = await consumeLabMaterial(tx, stockItemId, quantity);
+      for (const draft of drafts) {
+        usages.push({
+          id: `emu-${Date.now()}-${usages.length}`,
+          ...draft,
+          reason: "Başlangıç formülasyonu",
+          addedAt: todayIso(),
+          kind: "initial",
+          step: 1,
+        });
       }
-      if (quantity > item.quantity) {
-        throw new FieldError(
-          `Yetersiz stok: ${item.name} · ${item.quantity} ${item.unit} kaldı`
-        );
-      }
-      const remaining = item.quantity - quantity;
-      await tx.warehouseStockItem.update({
-        where: { id: item.id },
-        data: {
-          quantity: remaining,
-          status: deriveStockStatus(remaining, item.minStock, item.expiryDate),
-        },
-      });
-      usages.push({
-        id: `emu-${Date.now()}-${usages.length}`,
-        stockItemId: item.id,
-        materialName: item.name,
-        sku: item.sku,
-        lotNo: item.lotNo,
-        quantity,
-        unit: item.unit,
-        reason: "Başlangıç formülasyonu",
-        addedAt: todayIso(),
-        kind: "initial",
-      });
     }
 
     await tx.labExperiment.create({
@@ -2561,39 +2662,19 @@ export async function dbAddExperimentMaterial(
   if (!(quantity > 0)) throw new FieldError("Miktar pozitif olmalıdır");
 
   const row = await prisma.$transaction(async (tx) => {
-    const item = await tx.warehouseStockItem.findUnique({
-      where: { id: input.stockItemId.trim() },
-    });
-    if (!item) throw new FieldError("Stok kalemi bulunamadı");
-    if (isMamulStockCategory(item.category)) {
-      throw new FieldError("Hammadde stoku seçin");
-    }
-    if (quantity > item.quantity) {
-      throw new FieldError(
-        `Yetersiz stok: ${item.name} · ${item.quantity} ${item.unit} kaldı`
-      );
-    }
-    const remaining = item.quantity - quantity;
-    await tx.warehouseStockItem.update({
-      where: { id: item.id },
-      data: {
-        quantity: remaining,
-        status: deriveStockStatus(remaining, item.minStock, item.expiryDate),
-      },
-    });
+    const drafts = await consumeLabMaterial(tx, input.stockItemId.trim(), quantity);
     const usages = [...(before.materialUsages ?? [])];
-    usages.push({
-      id: `emu-${Date.now()}`,
-      stockItemId: item.id,
-      materialName: item.name,
-      sku: item.sku,
-      lotNo: item.lotNo,
-      quantity,
-      unit: item.unit,
-      reason,
-      addedAt: todayIso(),
-      kind: "extra",
-    });
+    const step = nextExperimentStep(usages);
+    for (const draft of drafts) {
+      usages.push({
+        id: `emu-${Date.now()}-${usages.length}`,
+        ...draft,
+        reason,
+        addedAt: todayIso(),
+        kind: "extra",
+        step,
+      });
+    }
     return tx.labExperiment.update({
       where: { id },
       data: {
@@ -2618,6 +2699,123 @@ export async function dbAddExperimentMaterial(
   return after;
 }
 
+/** Bir adımda birden fazla ürün: hepsi aynı adım numarasıyla stoktan düşülür. */
+export async function dbAddExperimentStep(
+  id: string,
+  input: {
+    reason: string;
+    materials: { stockItemId: string; quantity: number }[];
+  },
+  ctx: AuditCtx
+): Promise<LabExperiment> {
+  const raw = await prisma.labExperiment.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Deney bulunamadı");
+  const before = toLabExperiment(raw);
+  if (before.status === "approved") {
+    throw new FieldError("Tamamlanan deneye adım eklenemez");
+  }
+  const reason = input.reason.trim();
+  if (!reason) throw new FieldError("Bu adımın gözlemini yazın");
+  const byId = new Map<string, number>();
+  for (const line of input.materials) {
+    if (!(line.quantity > 0)) continue;
+    const stockItemId = line.stockItemId.trim();
+    if (!stockItemId) continue;
+    byId.set(stockItemId, (byId.get(stockItemId) ?? 0) + line.quantity);
+  }
+  if (byId.size === 0) throw new FieldError("En az bir ürün ve miktar girin");
+
+  const row = await prisma.$transaction(async (tx) => {
+    const usages = [...(before.materialUsages ?? [])];
+    const step = nextExperimentStep(usages);
+    for (const [stockItemId, quantity] of byId) {
+      const drafts = await consumeLabMaterial(tx, stockItemId, quantity);
+      for (const draft of drafts) {
+        usages.push({
+          id: `emu-${Date.now()}-${usages.length}`,
+          ...draft,
+          reason,
+          addedAt: todayIso(),
+          kind: "extra",
+          step,
+        });
+      }
+    }
+    return tx.labExperiment.update({
+      where: { id },
+      data: {
+        materialUsages: JSON.stringify(usages),
+        status: before.status === "planning" ? "running" : before.status,
+        progress: Math.max(before.progress, 30),
+      },
+    });
+  });
+
+  const after = toLabExperiment(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabExperiment",
+    entityId: id,
+    summary: `Deney adımı: ${after.code} · ${byId.size} ürün (${reason})`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
+/** Azaltma adımı: girilen miktar bu adımda kullanılır ve stoktan düşülür. Stoğa iade yoktur. */
+export async function dbRemoveExperimentMaterial(
+  id: string,
+  input: { stockItemId: string; quantity: number; reason: string },
+  ctx: AuditCtx
+): Promise<LabExperiment> {
+  const raw = await prisma.labExperiment.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Deney bulunamadı");
+  const before = toLabExperiment(raw);
+  if (before.status === "approved") {
+    throw new FieldError("Tamamlanan deneyden hammadde çıkarılamaz");
+  }
+  const reason = input.reason.trim();
+  if (!reason) throw new FieldError("Azaltma sebebi zorunludur");
+  const quantity = input.quantity;
+  if (!(quantity > 0)) throw new FieldError("Miktar pozitif olmalıdır");
+
+  const row = await prisma.$transaction(async (tx) => {
+    const drafts = await consumeLabMaterial(tx, input.stockItemId.trim(), quantity);
+    const usages = [...(before.materialUsages ?? [])];
+    const step = nextExperimentStep(usages);
+    for (const draft of drafts) {
+      usages.push({
+        id: `emu-${Date.now()}-${usages.length}`,
+        ...draft,
+        reason,
+        addedAt: todayIso(),
+        kind: "return",
+        step,
+      });
+    }
+    return tx.labExperiment.update({
+      where: { id },
+      data: { materialUsages: JSON.stringify(usages) },
+    });
+  });
+
+  const after = toLabExperiment(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabExperiment",
+    entityId: id,
+    summary: `Deney adımı (azaltma): ${after.code} · ${quantity} stoktan düşüldü (${reason})`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
 export async function dbCompleteLabExperiment(
   id: string,
   input: { completionNote?: string },
@@ -2626,62 +2824,19 @@ export async function dbCompleteLabExperiment(
   const raw = await prisma.labExperiment.findUnique({ where: { id } });
   if (!raw) throw new FieldError("Deney bulunamadı");
   const before = toLabExperiment(raw);
-  if (before.status === "approved" && before.recipeId) {
+  if (before.status === "approved") {
     throw new FieldError("Bu deney zaten tamamlandı");
   }
   const usages = before.materialUsages ?? [];
-  if (usages.length === 0) {
-    throw new FieldError("Reçete oluşturmak için hammadde kullanımı yok");
+  if (latestFormulaTotals(usages).length === 0) {
+    throw new FieldError("Tamamlamak için hammadde kullanımı yok");
   }
-
-  const totals = new Map<
-    string,
-    { materialName: string; unit: string; quantity: number }
-  >();
-  for (const u of usages) {
-    const key = `${matchNameKey(u.materialName)}|${u.unit}`;
-    const prev = totals.get(key);
-    if (prev) prev.quantity += u.quantity;
-    else {
-      totals.set(key, {
-        materialName: u.materialName,
-        unit: u.unit,
-        quantity: u.quantity,
-      });
-    }
-  }
-
-  let recipeCode = before.recipeCode?.trim() || "";
-  const existingRecipes = await dbGetAllRecipes();
-  if (
-    !recipeCode ||
-    existingRecipes.some(
-      (r) => (r.code ?? "").toLowerCase() === recipeCode.toLowerCase()
-    )
-  ) {
-    recipeCode = await dbNextRecipeCode();
-  }
-
-  const recipe = await dbCreateRecipe(
-    {
-      code: recipeCode,
-      productName: before.productName || before.title,
-      lines: [...totals.values()].map((t) => ({
-        materialName: t.materialName,
-        unit: t.unit,
-        quantityPerUnit: t.quantity,
-      })),
-    },
-    ctx
-  );
 
   const row = await prisma.labExperiment.update({
     where: { id },
     data: {
       status: "approved",
       progress: 100,
-      recipeId: recipe.id,
-      recipeCode: recipe.code ?? recipeCode,
       completionNote: input.completionNote?.trim() || null,
     },
   });
@@ -2691,7 +2846,85 @@ export async function dbCompleteLabExperiment(
     action: "UPDATE",
     entityType: "LabExperiment",
     entityId: id,
-    summary: `Deney tamamlandı: ${after.code} → reçete ${recipe.code} oluşturuldu`,
+    summary: `Deney tamamlandı: ${after.code}`,
+    before,
+    after,
+    ipAddress: ctx.ip,
+  });
+  return after;
+}
+
+export async function dbSaveExperimentRecipe(
+  id: string,
+  input: { productName: string },
+  ctx: AuditCtx
+): Promise<LabExperiment> {
+  const raw = await prisma.labExperiment.findUnique({ where: { id } });
+  if (!raw) throw new FieldError("Deney bulunamadı");
+  const before = toLabExperiment(raw);
+  if (before.status !== "approved") {
+    throw new FieldError("Reçete kaydı için deneyin tamamlanmış olması gerekir");
+  }
+  const productName = input.productName.trim();
+  if (!productName) throw new FieldError("Reçete adı zorunludur");
+
+  const recipeLines = latestFormulaTotals(before.materialUsages ?? []);
+  if (recipeLines.length === 0) {
+    throw new FieldError("Reçete oluşturmak için hammadde kullanımı yok");
+  }
+
+  const linked = before.recipeId
+    ? await prisma.recipe.findUnique({ where: { id: before.recipeId } })
+    : null;
+
+  const lines = recipeLines.map((t) => ({
+    materialName: t.materialName,
+    unit: t.unit,
+    quantityPerUnit: t.quantity,
+  }));
+
+  let recipe: Recipe;
+  if (linked) {
+    recipe = await dbUpdateRecipe(
+      { id: linked.id, productName, lines },
+      ctx
+    );
+  } else {
+    let recipeCode = before.recipeCode?.trim() || "";
+    const existingRecipes = await dbGetAllRecipes();
+    if (
+      !recipeCode ||
+      existingRecipes.some(
+        (r) => (r.code ?? "").toLowerCase() === recipeCode.toLowerCase()
+      )
+    ) {
+      recipeCode = await dbNextRecipeCode();
+    }
+    recipe = await dbCreateRecipe(
+      {
+        code: recipeCode,
+        productName,
+        lines,
+      },
+      ctx
+    );
+  }
+
+  const row = await prisma.labExperiment.update({
+    where: { id },
+    data: {
+      productName,
+      recipeId: recipe.id,
+      recipeCode: recipe.code ?? before.recipeCode ?? "",
+    },
+  });
+  const after = toLabExperiment(row);
+  await logAudit({
+    actor: ctx.actor,
+    action: "UPDATE",
+    entityType: "LabExperiment",
+    entityId: id,
+    summary: `Deney reçetelere eklendi: ${after.code} → ${recipe.code} · ${productName}`,
     before,
     after,
     ipAddress: ctx.ip,

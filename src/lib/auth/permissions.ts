@@ -348,7 +348,7 @@ const SYSTEM_ADMIN_PAGES = ["/dashboard", "/ledger"];
 /** Yalnızca listelenen sayfaları açabilen roller; diğer sayfalar okuma izni olsa da kapalıdır */
 const ROLE_PAGES: Partial<Record<Role, readonly string[]>> = {
   HR: ["/personnel", "/admin"],
-  PRODUCTION: ["/factory", "/recipes", "/rd-lab"],
+  PRODUCTION: ["/factory", "/recipes", "/rd-lab", "/sample-records"],
   STOCK: [
     "/raw-materials",
     "/products",
@@ -654,6 +654,7 @@ export function pathToResource(pathname: string): Resource | null {
   if (pathname.startsWith("/cash")) return "budget";
   if (pathname.startsWith("/admin")) return "admin";
   if (pathname.startsWith("/rd-lab")) return "lab";
+  if (pathname.startsWith("/sample-records")) return "lab";
   return null;
 }
 
@@ -726,13 +727,7 @@ export function getApiPermission(
   if (pathname.startsWith("/api/production/batches")) {
     return { kind: "require", permission: `factory:${suffix}` };
   }
-  if (pathname.startsWith("/api/lab/experiments")) {
-    return { kind: "require", permission: `lab:${suffix}` };
-  }
-  if (pathname.startsWith("/api/lab/samples")) {
-    return { kind: "require", permission: `lab:${suffix}` };
-  }
-  if (pathname.startsWith("/api/lab/people")) {
+  if (pathname.startsWith("/api/lab/")) {
     return { kind: "require", permission: `lab:${suffix}` };
   }
   if (pathname.startsWith("/api/audit")) {
@@ -809,7 +804,8 @@ export const NAV_ITEMS: {
   { title: "İK", href: "/personnel", resource: "personnel", label: "Personel" },
   { title: "Üretim", href: "/factory", resource: "factory", label: "Fabrika & Üretim" },
   { title: "Üretim", href: "/recipes", resource: "recipes", label: "Reçeteler" },
-  { title: "Üretim", href: "/rd-lab", resource: "lab", label: "Laboratuvar" },
+  { title: "Üretim", href: "/rd-lab", resource: "lab", label: "Ar-Ge Laboratuvarı" },
+  { title: "Üretim", href: "/sample-records", resource: "lab", label: "Numune Kaydı" },
   { title: "Stok", href: "/raw-materials", resource: "raw_materials", label: "Hammadde" },
   { title: "Stok", href: "/products", resource: "products", label: "Mamul Ürün" },
   { title: "Stok", href: "/stock", resource: "stock", label: "Stok Durumu" },

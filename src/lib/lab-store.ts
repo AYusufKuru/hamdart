@@ -91,6 +91,25 @@ export async function getSampleTypes(): Promise<string[]> {
   return [...new Set([...SAMPLE_TYPES, ...fromData])];
 }
 
+export type LabPickableMaterial = {
+  id: string;
+  source: "lot" | "catalog";
+  name: string;
+  sku: string;
+  unit: string;
+  lotNo: string;
+  warehouseId: string;
+  quantity: number;
+};
+
+export async function getLabExperimentMaterials(): Promise<LabPickableMaterial[]> {
+  return apiGet<LabPickableMaterial[]>("/api/lab/materials");
+}
+
+export function labMaterialTitle(item: Pick<LabPickableMaterial, "name" | "sku">) {
+  return item.name.trim() || item.sku;
+}
+
 export type CreateExperimentInput = {
   code?: string;
   productName: string;
@@ -109,12 +128,35 @@ export async function createLabExperiment(
   return apiPost<LabExperiment>("/api/lab/experiments", input);
 }
 
+export async function addExperimentStep(
+  id: string,
+  input: {
+    reason: string;
+    materials: { stockItemId: string; quantity: number }[];
+  }
+): Promise<LabExperiment> {
+  return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
+    action: "add_step",
+    ...input,
+  });
+}
+
 export async function addExperimentMaterial(
   id: string,
   input: { stockItemId: string; quantity: number; reason: string }
 ): Promise<LabExperiment> {
   return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
     action: "add_material",
+    ...input,
+  });
+}
+
+export async function removeExperimentMaterial(
+  id: string,
+  input: { stockItemId: string; quantity: number; reason: string }
+): Promise<LabExperiment> {
+  return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
+    action: "remove_material",
     ...input,
   });
 }
@@ -126,6 +168,16 @@ export async function completeLabExperiment(
   return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
     action: "complete",
     completionNote: input?.completionNote,
+  });
+}
+
+export async function saveExperimentRecipe(
+  id: string,
+  input: { productName: string }
+): Promise<LabExperiment> {
+  return apiPatch<LabExperiment>(`/api/lab/experiments/${id}`, {
+    action: "save_recipe",
+    productName: input.productName,
   });
 }
 

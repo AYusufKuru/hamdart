@@ -9,8 +9,11 @@ import {
 } from "@/lib/server/api-utils";
 import {
   dbAddExperimentMaterial,
+  dbAddExperimentStep,
   dbCompleteLabExperiment,
   dbGetLabExperiment,
+  dbRemoveExperimentMaterial,
+  dbSaveExperimentRecipe,
 } from "@/lib/server/data-service";
 import { experimentPatchSchema } from "@/lib/server/schemas";
 
@@ -44,8 +47,39 @@ export async function PATCH(
       actor: auth.session.name,
       ip: getIpFromRequest(req),
     };
+    if (parsed.data.action === "add_step") {
+      const experiment = await dbAddExperimentStep(
+        id,
+        {
+          reason: parsed.data.reason,
+          materials: parsed.data.materials,
+        },
+        ctx
+      );
+      return jsonOk(experiment);
+    }
     if (parsed.data.action === "add_material") {
       const experiment = await dbAddExperimentMaterial(
+        id,
+        {
+          stockItemId: parsed.data.stockItemId,
+          quantity: parsed.data.quantity,
+          reason: parsed.data.reason,
+        },
+        ctx
+      );
+      return jsonOk(experiment);
+    }
+    if (parsed.data.action === "save_recipe") {
+      const experiment = await dbSaveExperimentRecipe(
+        id,
+        { productName: parsed.data.productName },
+        ctx
+      );
+      return jsonOk(experiment);
+    }
+    if (parsed.data.action === "remove_material") {
+      const experiment = await dbRemoveExperimentMaterial(
         id,
         {
           stockItemId: parsed.data.stockItemId,

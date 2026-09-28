@@ -112,7 +112,10 @@ export interface LabExperimentMaterialUsage {
   unit: string;
   reason: string;
   addedAt: string;
-  kind: "initial" | "extra";
+  /** return: azaltma adımı — miktar bu adımda kullanıldı ve stoktan düşüldü */
+  kind: "initial" | "extra" | "return";
+  /** Deney günlüğündeki adım numarası (1: başlangıç formülasyonu) */
+  step?: number;
 }
 
 export interface LabExperiment {

@@ -476,8 +476,31 @@ export const experimentPatchSchema = z.discriminatedUnion("action", [
     reason: text(MAX_NOTE),
   }),
   z.object({
+    action: z.literal("remove_material"),
+    stockItemId: text(MAX_ID),
+    quantity: finiteNumber({ positive: true }),
+    reason: text(MAX_NOTE),
+  }),
+  z.object({
+    action: z.literal("add_step"),
+    reason: text(MAX_NOTE),
+    materials: z
+      .array(
+        z.object({
+          stockItemId: text(MAX_ID),
+          quantity: finiteNumber({ positive: true }),
+        })
+      )
+      .min(1, "En az bir ürün seçin")
+      .max(MAX_ARRAY),
+  }),
+  z.object({
     action: z.literal("complete"),
     completionNote: optionalText(MAX_NOTE),
+  }),
+  z.object({
+    action: z.literal("save_recipe"),
+    productName: text(),
   }),
 ]);
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -53,11 +54,19 @@ export function SearchableSelect({
 }) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const openFromPointer = useRef(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [dropUp, setDropUp] = useState(false);
+  const [panelBox, setPanelBox] = useState<{
+    left: number;
+    width: number;
+    top: number;
+    maxHeight: number;
+    dropUp: boolean;
+  } | null>(null);
 
   const uniqueOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -96,14 +105,36 @@ export function SearchableSelect({
 
   useLayoutEffect(() => {
     if (!open || !rootRef.current) return;
-    const rect = rootRef.current.getBoundingClientRect();
-    setDropUp(window.innerHeight - rect.bottom < 240 && rect.top > 240);
+    function place() {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      const dropUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const room = dropUp ? spaceAbove : spaceBelow;
+      setPanelBox({
+        left: rect.left,
+        width: rect.width,
+        top: dropUp ? rect.top - 4 : rect.bottom + 4,
+        maxHeight: Math.max(120, Math.min(240, room - 12)),
+        dropUp,
+      });
+    }
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open, filtered.length]);
 
   useEffect(() => {
     if (!open) return;
     function onPointer(e: MouseEvent) {
-      if (rootRef.current?.contains(e.target as Node)) return;
+      const target = e.target;
+      if (target instanceof Node && rootRef.current?.contains(target)) return;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
       close();
     }
     document.addEventListener("mousedown", onPointer);
@@ -162,8 +193,12 @@ export function SearchableSelect({
           aria-autocomplete="list"
           placeholder={open ? searchPlaceholder : placeholder}
           value={open ? query : display}
+          onMouseDown={() => {
+            openFromPointer.current = true;
+          }}
           onFocus={() => {
-            if (disabled) return;
+            if (disabled || !openFromPointer.current) return;
+            openFromPointer.current = false;
             setQuery(allowCustom ? value ?? "" : "");
             setOpen(true);
           }}
@@ -198,15 +233,25 @@ export function SearchableSelect({
           <ChevronDown className="h-4 w-4 opacity-50" />
         </button>
       </div>
-      {open ? (
+      {open && panelBox
+        ? createPortal(
         <div
+          ref={panelRef}
           id={listId}
           role="listbox"
-          data-hamdart-select-panel=""
-          className={cn(
-            "absolute z-50 max-h-60 w-full overflow-y-auto rounded-2xl border bg-white p-1 text-foreground shadow-xl",
-            dropUp ? "bottom-[calc(100%+4px)]" : "top-[calc(100%+4px)]"
-          )}
+          data-hamdart-select-panel={listId}
+          className="pointer-events-auto fixed z-[80] overflow-y-auto rounded-2xl border bg-white p-1 text-foreground shadow-xl"
+          style={{
+            left: panelBox.left,
+            width: panelBox.width,
+            maxHeight: panelBox.maxHeight,
+            top: panelBox.dropUp ? undefined : panelBox.top,
+            bottom: panelBox.dropUp
+              ? window.innerHeight - panelBox.top
+              : undefined,
+            pointerEvents: "auto",
+          }}
+          onMouseDown={(e) => e.preventDefault()}
         >
           {filtered.length === 0 && !showCustom ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
@@ -219,6 +264,11 @@ export function SearchableSelect({
                   role="option"
                   aria-selected={value === customQuery}
                   onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pick(customQuery);
+                  }}
+                  onClick={(e) => {
                     e.preventDefault();
                     pick(customQuery);
                   }}
@@ -238,6 +288,11 @@ export function SearchableSelect({
                     onMouseEnter={() => setActiveIndex(index)}
                     onMouseDown={(e) => {
                       e.preventDefault();
+                      e.stopPropagation();
+                      pick(option.value);
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
                       pick(option.value);
                     }}
                     className={cn(
@@ -252,8 +307,10 @@ export function SearchableSelect({
               })}
             </>
           )}
-        </div>
-      ) : null}
+        </div>,
+        document.body
+        )
+        : null}
     </div>
   );
 }
